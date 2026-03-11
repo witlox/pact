@@ -1,20 +1,21 @@
-# pact
+<p align="center">
+  <img src="logo.png" alt="pact" width="360">
+</p>
 
-**Promise-based configuration management and admin operations for HPC/AI infrastructure**
-
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://github.com/witlox/pact)
+<p align="center">
+  <a href="https://github.com/witlox/pact/actions/workflows/ci.yml"><img src="https://github.com/witlox/pact/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/witlox/pact"><img src="https://codecov.io/gh/witlox/pact/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/witlox/pact/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
+  <a href="https://github.com/witlox/pact"><img src="https://img.shields.io/badge/rust-stable-orange.svg" alt="Rust"></a>
+</p>
 
 ---
 
-pact manages post-boot runtime configuration on large-scale diskless HPC/AI clusters
-and provides the sole admin operations interface to compute nodes — replacing both
-traditional config management tools and SSH.
+Promise-based configuration management and admin operations for HPC/AI infrastructure. pact manages post-boot runtime configuration on large-scale diskless HPC/AI clusters and provides the sole admin operations interface to compute nodes — replacing both traditional config management tools and SSH.
 
-On compute nodes, pact-agent is the init system: it supervises all services, manages
-configuration, and provides authenticated remote access via pact shell.
+On compute nodes, pact-agent is the init system: it supervises all services, manages configuration, and provides authenticated remote access via pact shell.
 
-## Why pact?
+## Design Principles
 
 - **No SSH needed** — pact shell provides authenticated, audited, policy-scoped remote access
 - **pact-agent as init** — boots diskless nodes in <2s, supervises 4-7 services directly
