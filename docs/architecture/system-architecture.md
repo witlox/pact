@@ -110,10 +110,13 @@ The intended lifecycle for manual changes:
 | Expired | Cleaned up | `pact rollback` or superseded by overlay update |
 
 **Promotion path**: when a committed manual change proves correct, the admin
-should codify it via `pact apply <spec.toml>` at the vCluster level. This
-updates the shared overlay and makes the node-level delta redundant.
-`pact diff --committed` shows accumulated node deltas that haven't been
-promoted.
+promotes it to the vCluster overlay:
+1. `pact diff --committed <node>` — review accumulated node deltas
+2. `pact promote <node> --dry-run` — preview the generated overlay TOML
+3. `pact promote <node> > changes.toml` — export, review/edit
+4. `pact apply changes.toml` — apply to the vCluster overlay
+
+This updates the shared overlay and makes the node-level deltas redundant.
 
 **Expiry**: node deltas with a `ttl` field expire automatically. Emergency-mode
 changes default to a TTL matching the emergency window. Changes without TTL
