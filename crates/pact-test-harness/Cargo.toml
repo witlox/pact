@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-pact-common = { path = "../pact-common" }
+pact-common = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }

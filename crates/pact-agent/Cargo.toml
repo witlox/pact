@@ -14,7 +14,7 @@ ebpf = ["dep:aya", "dep:aya-log"]
 systemd = []
 
 [dependencies]
-pact-common = { path = "../pact-common" }
+pact-common = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
@@ -38,7 +38,7 @@ aya = { workspace = true, optional = true }
 aya-log = { workspace = true, optional = true }
 
 [dev-dependencies]
-pact-test-harness = { path = "../pact-test-harness" }
+pact-test-harness = { workspace = true }
 tempfile = { workspace = true }
 tokio-test = { workspace = true }
 proptest = { workspace = true }

@@ -17,6 +17,10 @@ repository = "https://github.com/witlox/pact"
 rust-version = "1.85"
 
 [workspace.dependencies]
+# Internal crates
+pact-common = { path = "crates/pact-common", version = "2026.1.0" }
+pact-test-harness = { path = "crates/pact-test-harness", version = "2026.1.0" }
+
 # Async runtime
 tokio = { version = "1", features = ["full", "process", "signal"] }
 tokio-stream = "0.1"
