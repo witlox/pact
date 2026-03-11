@@ -79,9 +79,9 @@ because it controls the full invocation (no shell interpretation involved).
 
 When pact-agent is unresponsive:
 1. Admin uses OpenCHAMI/Manta to access BMC console (Redfish)
-2. BMC console provides serial console access to the node
-3. On the node, pact shell is available locally (if agent is running but network is down)
-4. If pact-agent is crashed, admin can restart it from BMC console
+2. BMC console provides regular bash (unrestricted, not pact-managed)
+3. Admin diagnoses and restarts pact-agent if needed
+4. Changes made via BMC appear as unattributed drift once agent recovers
 5. If the node is unrecoverable, admin triggers re-image via OpenCHAMI
 
 ## Trade-offs

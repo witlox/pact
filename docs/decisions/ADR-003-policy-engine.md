@@ -45,7 +45,9 @@ CLI → pact-agent (ExecRequest/ShellSessionRequest via gRPC)
 ```
 
 The agent is the entry point for exec/shell (it owns the PTY and process
-execution), but delegates authorization to the policy service.
+execution), but delegates authorization to the policy service via gRPC.
+pact-policy is a library crate linked into the pact-journal binary —
+PolicyService runs in-process with the journal, not as a separate deployment.
 
 ```
 pact-journal node:

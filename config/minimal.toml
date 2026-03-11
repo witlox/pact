@@ -24,7 +24,7 @@ whitelist_mode = "learning"  # "strict" | "learning" | "bypass"
 
 [agent.commit_window]
 base_window_seconds = 900
-sensitivity = 2.0
+drift_sensitivity = 2.0
 emergency_window_seconds = 14400
 
 [agent.blacklist]

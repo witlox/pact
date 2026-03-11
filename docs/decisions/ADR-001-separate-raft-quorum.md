@@ -7,7 +7,8 @@
 pact-journal needs a consensus mechanism for its immutable configuration log.
 Lattice already runs a Raft quorum for node ownership and sensitive audit.
 
-Both systems use the same Raft implementation (openraft) and target the same
+Both systems use the same Raft foundation (raft-hpc-core, which wraps openraft
+with HPC-specific state machine abstractions) and target the same
 management infrastructure nodes (3-5 nodes in the management VLAN).
 
 In the boot sequence, pact comes first: pact-agent is the init system on compute
