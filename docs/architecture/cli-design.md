@@ -19,6 +19,7 @@ authorized, and logged.
 | `pact rollback [seq]` | Roll back to previous state |
 | `pact log [-n N] [--scope S]` | Configuration history |
 | `pact apply <spec.toml>` | Apply declarative config spec |
+| `pact promote <node> [--dry-run]` | Export committed node deltas as overlay TOML |
 | `pact watch [--vcluster X]` | Live event stream |
 | `pact extend [mins]` | Extend commit window |
 | `pact emergency` | Enter/exit emergency mode |
@@ -80,6 +81,52 @@ pact:node042> exit
 $ pact cordon node042
   Cordoned: node042 removed from lattice scheduling (via lattice API)
 ```
+
+## Example: Promoting Node Deltas to Overlay
+
+```bash
+# After debugging, admin added a sysctl and NFS mount on node042.
+# These were committed as node deltas. Check what's accumulated:
+$ pact diff --committed node042
+  kernel: vm.nr_hugepages = 1024  (committed seq:4812, 3 days ago)
+  mounts: /local-scratch type=nfs source=storage03:/scratch  (committed seq:4815, 2 days ago)
+
+# Export as overlay TOML (dry-run to preview)
+$ pact promote node042 --dry-run
+  # Generated overlay fragment for vcluster: ml-training
+  # From 2 committed node deltas on node042
+
+  [vcluster.ml-training.sysctl]
+  "vm.nr_hugepages" = "1024"
+
+  [vcluster.ml-training.mounts]
+  "/local-scratch" = { type = "nfs", source = "storage03:/scratch" }
+
+# Looks right — export to file, review, then apply to the whole vCluster
+$ pact promote node042 > /tmp/hugepages-and-scratch.toml
+$ vi /tmp/hugepages-and-scratch.toml   # review/edit
+$ pact apply /tmp/hugepages-and-scratch.toml
+  Applied to vcluster ml-training (2 changes). Overlay updated.
+  Node deltas on node042 superseded (seq:4812, seq:4815 now redundant).
+
+# Verify: node042 should have no more unpromoted deltas
+$ pact diff --committed node042
+  (no committed node deltas)
+```
+
+The `promote` command maps `StateDelta` fields to overlay TOML sections:
+
+| StateDelta field | Overlay TOML section |
+|-----------------|---------------------|
+| `kernel` | `[vcluster.<name>.sysctl]` |
+| `mounts` | `[vcluster.<name>.mounts]` |
+| `files` | `[vcluster.<name>.files]` |
+| `services` | `[vcluster.<name>.services.<svc>]` |
+| `network` | `[vcluster.<name>.network]` |
+| `packages` | `[vcluster.<name>.packages]` |
+
+Deltas that can't be cleanly mapped (e.g. GPU state changes) are emitted as
+comments with the raw delta for manual handling.
 
 ## Local Pact Shell (on-node)
 
