@@ -1,3 +1,4 @@
+# Note: imports_granularity and group_imports are nightly-only, not usable on stable
 edition = "2024"
 max_width = 100
 use_small_heuristics = "Max"

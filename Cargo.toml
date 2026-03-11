@@ -6,41 +6,89 @@ members = [
     "crates/pact-journal",
     "crates/pact-policy",
     "crates/pact-cli",
+    "crates/pact-test-harness",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "2026.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/witlox/pact"
 rust-version = "1.85"
 
 [workspace.dependencies]
+# Async runtime
 tokio = { version = "1", features = ["full", "process", "signal"] }
+tokio-stream = "0.1"
+
+# gRPC / Protobuf
 tonic = { version = "0.12", features = ["tls"] }
 tonic-build = "0.12"
 prost = "0.13"
 prost-types = "0.13"
-openraft = { version = "0.10", features = ["serde"] }
+
+# Raft consensus
+openraft = { version = "0.10.0-alpha.14", features = ["serde"] }
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-clap = { version = "4", features = ["derive"] }
-aya = "0.13"
-aya-log = "0.2"
-nix = { version = "0.29", features = ["inotify", "net", "mount", "socket", "process", "signal"] }
-rustls = "0.23"
-rcgen = "0.13"
-jsonwebtoken = "9"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-prometheus = "0.13"
-zstd = "0.13"
+
+# Error handling
 thiserror = "2"
 anyhow = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# eBPF
+aya = "0.13"
+aya-log = "0.2"
+
+# Linux system
+nix = { version = "0.29", features = ["inotify", "net", "mount", "socket", "process", "signal"] }
+
+# TLS
+rustls = "0.23"
+rcgen = "0.13"
+
+# JWT / OIDC
+jsonwebtoken = "9"
+
+# Metrics
+prometheus = "0.13"
+
+# HTTP (for REST endpoints, OPA, Sovra integration)
+reqwest = { version = "0.12", features = ["json"] }
+axum = "0.7"
+
+# Compression
+zstd = "0.13"
+flate2 = "1"
+tar = "0.4"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time
 chrono = { version = "0.4", features = ["serde"] }
+
+# Async traits
+async-trait = "0.1"
+
+# User directories
+dirs = "5"
+
+# Testing
 proptest = "1"
-cucumber = "0.21"
+cucumber = "0.22"
+tempfile = "3"
+tokio-test = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -49,3 +97,8 @@ unsafe_code = "deny"
 all = "warn"
 pedantic = "warn"
 nursery = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

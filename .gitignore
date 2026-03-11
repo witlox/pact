@@ -1,8 +1,39 @@
-/target/
-Cargo.lock
-*.swp
-*.swo
+# Rust
+**/target/
+**/*.rs.bk
+
+# Python (future MCP server)
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
 *~
+.directory
+.Trash-*
+
+# Claude
+.claude/
+
+# IDE
 .idea/
 .vscode/
-*.orig
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*

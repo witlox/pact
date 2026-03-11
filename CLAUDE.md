@@ -101,7 +101,7 @@ T+1.6s  Steady state: observer active, shell server listening
 
 Typical services per vCluster type:
 - **ML training**: pact-agent, chronyd, nvidia-persistenced, lattice-node-agent (4)
-- **Regulated medical**: + audit-forwarder, encryption-agent (6)
+- **Regulated sensitive**: + audit-forwarder, encryption-agent (6)
 - **Dev sandbox**: pact-agent, lattice-node-agent (2)
 
 ## OIDC role model

@@ -1,0 +1,6 @@
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+[profile.ci]
+slow-timeout = { period = "120s", terminate-after = 2 }
+fail-fast = false
