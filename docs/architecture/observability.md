@@ -7,6 +7,22 @@ Three channels:
 2. Config + admin events → Journal → Loki → Grafana (event stream)
 3. Agent process health → lattice-node-agent eBPF → existing Prometheus
 
+## Journal Metrics Endpoint
+
+Each pact-journal server exposes a Prometheus metrics endpoint via axum
+(HTTP, default port 9090). Metrics include:
+
+- `pact_raft_leader` (gauge): 1 if this node is the Raft leader
+- `pact_raft_term` (gauge): current Raft term
+- `pact_raft_log_entries` (gauge): total log entries
+- `pact_raft_replication_lag` (gauge): entries behind leader, per follower
+- `pact_journal_entries_total` (counter): total config entries appended
+- `pact_journal_boot_streams_active` (gauge): concurrent boot config streams
+- `pact_journal_boot_stream_duration_seconds` (histogram): boot stream latency
+- `pact_journal_overlay_builds_total` (counter): overlay pre-computation events
+
+Health check endpoint: `GET /health` returns 200 if Raft is healthy.
+
 ## Grafana Dashboards
 
 - Fleet Configuration Health: drift heatmap, commit activity, boot performance

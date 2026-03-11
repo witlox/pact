@@ -1,3 +1,10 @@
-//! `pact-journal` — part of the pact configuration management system.
+//! `pact-journal` — distributed immutable configuration log.
 //!
-//! See CLAUDE.md and docs/architecture/ for design documentation.
+//! Runs its own Raft group (independent from lattice) as the single source of
+//! truth for declared HPC/AI cluster configuration state.
+//!
+//! See `docs/architecture/journal-design.md` for design documentation.
+
+pub mod raft;
+
+pub use raft::{JournalCommand, JournalResponse, JournalState, JournalTypeConfig};

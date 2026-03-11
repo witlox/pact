@@ -233,10 +233,18 @@ pub struct CapabilityReport {
     pub supervisor_status: SupervisorStatus,
 }
 
+/// GPU vendor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GpuVendor {
+    Nvidia,
+    Amd,
+}
+
 /// GPU capability information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuCapability {
     pub index: u32,
+    pub vendor: GpuVendor,
     pub model: String,
     pub memory_bytes: u64,
     pub pci_bus_id: String,
@@ -249,6 +257,49 @@ pub struct SupervisorStatus {
     pub services_declared: u32,
     pub services_running: u32,
     pub services_failed: u32,
+}
+
+/// Policy for a vCluster — controls drift thresholds, commit windows, approvals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VClusterPolicy {
+    pub vcluster_id: VClusterId,
+    pub max_drift_magnitude: f64,
+    pub commit_window_seconds: u32,
+    pub emergency_allowed: bool,
+    pub two_person_approval: bool,
+}
+
+/// Pre-computed boot overlay for a vCluster (compressed config bundle).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootOverlay {
+    pub vcluster_id: VClusterId,
+    pub version: u64,
+    pub data: Vec<u8>,
+    pub checksum: String,
+}
+
+/// Record of an admin operation for the audit log.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminOperation {
+    pub operation_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub actor: Identity,
+    pub operation_type: AdminOperationType,
+    pub scope: Scope,
+    pub detail: String,
+}
+
+/// Type of admin operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AdminOperationType {
+    Exec,
+    ShellSessionStart,
+    ShellSessionEnd,
+    ServiceStart,
+    ServiceStop,
+    ServiceRestart,
+    EmergencyStart,
+    EmergencyEnd,
 }
 
 #[cfg(test)]

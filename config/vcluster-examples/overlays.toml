@@ -39,33 +39,33 @@ enforcement_mode = "enforce"
 auto_converge_categories = ["services", "kernel"]
 require_ack_categories = ["mounts", "network", "gpu"]
 
-[vcluster.medical-compute]
+[vcluster.sensitive-compute]
 base_image = "alps-secure-2026q1"
 supervisor_backend = "pact"
 
-[vcluster.medical-compute.services.chronyd]
+[vcluster.sensitive-compute.services.chronyd]
 binary = "/usr/sbin/chronyd"
 args = ["-d"]
 restart = "always"
 order = 1
 
-[vcluster.medical-compute.services.lattice-node-agent]
+[vcluster.sensitive-compute.services.lattice-node-agent]
 binary = "/usr/bin/lattice-node-agent"
 args = ["--config", "/etc/lattice/agent.toml"]
 restart = "always"
 order = 10
 
-[vcluster.medical-compute.services.audit-forwarder]
+[vcluster.sensitive-compute.services.audit-forwarder]
 binary = "/usr/bin/audit-forwarder"
 args = ["--endpoint", "audit.mgmt:5140"]
 restart = "always"
 order = 5
 
-[vcluster.medical-compute.policy]
+[vcluster.sensitive-compute.policy]
 drift_sensitivity = 5.0
 base_commit_window_seconds = 300
 enforcement_mode = "enforce"
 regulated = true
 two_person_approval = true
 audit_retention_days = 2555
-federation_template = "regulated-medical"
+federation_template = "regulated-sensitive"

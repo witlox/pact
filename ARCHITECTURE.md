@@ -50,10 +50,12 @@ The init system for diskless compute nodes. First process to start after kernel 
 - **Shell Server**: authenticated remote shell access (replaces SSH). OIDC-scoped.
   Whitelisted command set with learning mode. Every command logged.
 - **Exec Endpoint**: single command execution for diagnostics and automation.
-- **State Observer**: eBPF probes, inotify watches, netlink subscriptions.
+- **State Observer**: eBPF probes (system-level, no overlap with lattice's workload-level
+  eBPF), inotify watches, netlink subscriptions.
 - **Drift Evaluator**: actual vs declared state, drift vector, magnitude computation.
 - **Commit Window Manager**: optimistic concurrency, emergency mode.
-- **Capability Reporter**: hardware inventory → lattice scheduler + local manifest.
+- **Capability Reporter**: multi-vendor GPU detection (NVIDIA via NVML, AMD via ROCm SMI),
+  hardware inventory → lattice scheduler + local manifest.
 
 ### pact-journal (Raft quorum, 3-5 nodes)
 
@@ -67,8 +69,8 @@ Separate Raft group from lattice scheduler. Immutable append-only log.
 
 - OIDC/SAML integration (shared identity provider with lattice/OpenCHAMI)
 - RBAC with per-vCluster role scoping
-- OPA/Rego policy engine
-- Sovra federation sync for policy templates
+- OPA/Rego policy engine as sidecar (see [ADR-003](docs/decisions/ADR-003-policy-engine.md))
+- Sovra federation sync for Rego policy templates
 - Two-person approval workflow for regulated vClusters
 
 ### pact CLI

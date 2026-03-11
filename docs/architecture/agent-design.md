@@ -70,11 +70,19 @@ Client → ShellSessionRequest{node_id} → pact-agent
 ### State Observer (`src/observer/`)
 
 Three detection mechanisms:
-- eBPF probes: mount, sethostname, sysctl writes, module load/unload
+- eBPF probes (feature-gated `ebpf`, Linux-only):
+  - System-level: mount, sethostname, sysctl writes, module load/unload
+  - Extended: file permission changes, network namespace operations, cgroup modifications
+  - **No overlap with lattice eBPF**: lattice traces workload-level events (job lifecycle,
+    GPU allocation). pact traces system-level config changes. Probe attachment points
+    are coordinated to avoid conflicts.
 - inotify: config file paths (derived from declared state + watch list)
 - netlink: interface state, address changes, mount events, routing
 
 Observe-only mode for initial deployment (log everything, enforce nothing).
+
+**Cross-platform**: On macOS (development), a `MockObserver` simulates drift events
+for local dev/test. Real observers only compile and run on Linux.
 
 ### Drift Evaluator (`src/drift/`)
 
@@ -88,6 +96,11 @@ filesystems with open handles). Emergency mode: extended window + suspended roll
 
 ### Capability Reporter (`src/capability/`)
 
+Multi-vendor GPU detection behind a `GpuBackend` trait:
+- **NVIDIA**: NVML bindings (feature `nvidia`), fallback: `nvidia-smi` shell-out
+- **AMD**: ROCm SMI bindings (feature `amd`), fallback: `rocm-smi` shell-out
+- Feature-gated: non-GPU nodes skip GPU detection entirely
+
 Reports to lattice scheduler (gRPC) and local tmpfs manifest + unix socket
 (consumed by lattice-node-agent, which pact supervises as a child process).
 
@@ -95,6 +108,16 @@ Reports to lattice scheduler (gRPC) and local tmpfs manifest + unix socket
 
 `pact emergency --reason "..."` → extended window, no rollback, full audit logging.
 Must end with explicit commit or rollback. Stale emergency → alert + scheduling hold.
+
+## Cross-Platform Development
+
+Three-tier strategy for macOS development:
+1. **Feature-gate**: `#[cfg(target_os = "linux")]` for cgroup v2, eBPF, netlink,
+   inotify, PTY allocation. Stubs compile on macOS.
+2. **Mock implementations**: `MockSupervisor`, `MockObserver`, `MockGpuBackend`
+   for local dev/test on macOS. Unit + integration tests run with mocks.
+3. **Devcontainer**: Linux container for integration + acceptance tests (BDD/cucumber).
+   Real supervisor, real observers, real cgroups. CI runs in this environment.
 
 ## Resource Budget
 

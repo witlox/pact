@@ -36,10 +36,17 @@ message SupervisorStatus {
 
 message GpuCapability {
   uint32 index = 1;
-  string model = 2;
-  uint64 memory_bytes = 3;
-  GpuHealth health = 4;
-  string pci_bus_id = 5;
+  GpuVendor vendor = 2;
+  string model = 3;
+  uint64 memory_bytes = 4;
+  GpuHealth health = 5;
+  string pci_bus_id = 6;
+}
+
+enum GpuVendor {
+  GPU_VENDOR_UNSPECIFIED = 0;
+  GPU_VENDOR_NVIDIA = 1;
+  GPU_VENDOR_AMD = 2;
 }
 
 enum GpuHealth {

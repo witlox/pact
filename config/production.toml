@@ -1,4 +1,16 @@
 # pact production configuration
+#
+# Deployment modes for pact-journal Raft quorum (see ADR-001):
+#
+#   Standalone: journal nodes are dedicated (journal-1, journal-2, journal-3)
+#   Co-located: journal runs on same nodes as lattice-server (mgmt-1, mgmt-2, mgmt-3)
+#               Each system has its own Raft group on separate ports.
+#               Pact uses port 9444 (Raft) / 9443 (gRPC).
+#               Lattice uses port 9000 (Raft) / 50051 (gRPC) / 8080 (REST).
+#
+# This example shows standalone. For co-located, change hostnames to match
+# your shared management nodes (e.g., mgmt-1.mgmt, mgmt-2.mgmt, mgmt-3.mgmt)
+# and deploy lattice-server on the same hosts with its own config.
 
 [agent]
 enforcement_mode = "enforce"

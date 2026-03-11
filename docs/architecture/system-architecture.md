@@ -20,6 +20,19 @@ This document covers detailed design and data flows.
 - R13: Process supervision (pact as init, systemd fallback)
 - R14: No SSH (pact shell + pact exec)
 
+## Raft Deployment
+
+pact-journal runs its own Raft group, independent from lattice's quorum.
+Two deployment modes (see [ADR-001](../decisions/ADR-001-separate-raft-quorum.md)):
+
+- **Standalone**: pact-journal on dedicated management nodes (3-5 nodes)
+- **Co-located**: pact-journal and lattice-server on the same management nodes,
+  each with its own Raft group on separate ports
+
+Pact is the incumbent in co-located mode — its quorum is already running when
+lattice starts. Lattice configures its peers to point to the same hostnames.
+No protocol-level coupling; co-location is a deployment decision.
+
 ## Consistency Model
 
 AP in CAP terms. Nodes use cached config during partitions. Conflict resolution
@@ -65,7 +78,7 @@ pact exec / pact shell → command executed on node
 ### Hardware Degradation
 
 ```
-GPU soft-fails → agent detects (NVML/eBPF)
+GPU soft-fails → agent detects (NVML for NVIDIA, ROCm SMI for AMD, or eBPF)
   → CapabilityReport updated → scheduler adjusts eligibility
   → DriftDetected in journal → admin ack if policy requires
 ```
