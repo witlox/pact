@@ -33,6 +33,12 @@ commit, exec, shell, start emergency mode, etc. Two candidates evaluated:
 
 ## Deployment
 
+OPA runs on journal/policy nodes alongside pact-journal, **not on compute nodes**.
+Policy evaluation for admin operations (exec, shell, commit) is performed
+server-side: the CLI sends the request to pact-journal/pact-policy, which
+evaluates the policy via local OPA before forwarding the authorized operation
+to the target pact-agent.
+
 ```
 pact-journal node:
   pact-journal (port 9443/9444)
@@ -41,16 +47,23 @@ pact-journal node:
     - data: pact pushes current state as OPA data
 ```
 
-OPA lifecycle is not managed by pact itself — it runs as a system service
-(or supervised by pact-agent if co-located on a compute node, though this
-is uncommon). Deployment docs provide systemd unit and container examples.
+OPA lifecycle on journal nodes depends on the deployment model:
+- **systemd deployments**: OPA runs as a systemd service alongside pact-journal
+- **pact-managed deployments**: OPA is declared as a supervised service in the
+  management node's service declarations, managed by PactSupervisor like any
+  other service
+- **Container deployments**: OPA runs as a sidecar container
+
+In all cases, OPA is co-located with pact-journal/pact-policy on management
+nodes. Compute nodes do not run OPA — they enforce the authorization decisions
+received from the policy layer.
 
 ## Trade-offs
 
 - (+) Sovra federation works natively — same Rego language
 - (+) Rich ecosystem (testing, debugging, bundle distribution)
 - (+) No Rust bindings to maintain — clean REST boundary
-- (-) Extra process to deploy and monitor
+- (-) Extra process to deploy and monitor on management nodes
 - (-) REST latency vs in-process Cedar evaluation (acceptable — not hot path)
 - (-) Rego learning curve for operators writing custom policies
 

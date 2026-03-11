@@ -130,7 +130,7 @@ pact-service-ai           Machine identity for AI agents (MCP).
 - **Transport**: gRPC via tonic + protobuf via prost
 - **eBPF**: aya crate
 - **Linux**: nix crate (netlink, inotify, cgroups, mount, fork/exec)
-- **Policy**: OPA/Rego as sidecar (see ADR-003)
+- **Policy**: OPA/Rego co-located on journal/policy nodes (see ADR-003)
 - **CLI**: clap
 - **Config format**: TOML
 - **Telemetry**: Prometheus (server-side), Loki (event streaming), Grafana
@@ -219,7 +219,7 @@ just ci                       # all checks (fmt + clippy + deny + test)
 See `docs/decisions/` for full ADRs:
 - ADR-001: Raft quorum deployment modes (standalone or co-located with lattice)
 - ADR-002: Blacklist-first drift detection with observe-only bootstrap
-- ADR-003: Policy engine — OPA/Rego as sidecar (accepted)
+- ADR-003: Policy engine — OPA/Rego on journal nodes (accepted)
 - ADR-004: Emergency mode preserves audit trail
 - ADR-005: No agent-level Prometheus metrics
 - ADR-006: Pact as init with systemd fallback

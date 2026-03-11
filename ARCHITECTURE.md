@@ -69,7 +69,7 @@ Separate Raft group from lattice scheduler. Immutable append-only log.
 
 - OIDC/SAML integration (shared identity provider with lattice/OpenCHAMI)
 - RBAC with per-vCluster role scoping
-- OPA/Rego policy engine as sidecar (see [ADR-003](docs/decisions/ADR-003-policy-engine.md))
+- OPA/Rego policy engine co-located on journal nodes (see [ADR-003](docs/decisions/ADR-003-policy-engine.md))
 - Sovra federation sync for Rego policy templates
 - Two-person approval workflow for regulated vClusters
 
