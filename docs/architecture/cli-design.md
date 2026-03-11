@@ -14,6 +14,7 @@ authorized, and logged.
 |---------|-------------|
 | `pact status [--vcluster X]` | Node/vCluster state, drift, capabilities |
 | `pact diff [node]` | Declared vs actual state |
+| `pact diff --committed [node]` | Show committed node deltas not yet in overlay |
 | `pact commit -m "msg"` | Commit drift (prompted: local/cluster-wide) |
 | `pact rollback [seq]` | Roll back to previous state |
 | `pact log [-n N] [--scope S]` | Configuration history |

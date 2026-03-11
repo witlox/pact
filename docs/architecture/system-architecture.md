@@ -80,6 +80,45 @@ pact exec / pact shell → command executed on node
   → journal records everything
 ```
 
+### Commit Lifecycle and Reboot Persistence
+
+Manual changes (via exec/shell) that are committed become **node-level state
+deltas** in the journal. The journal maintains two layers of declared state:
+
+```
+vCluster overlay (shared)     e.g. "all ml-training nodes mount /scratch"
+  + node deltas (per-node)    e.g. "node042 has extra sysctl from debugging"
+  = effective declared state  (what the agent applies at boot)
+```
+
+On reboot, the agent streams both layers from the journal. Committed node
+deltas are reapplied automatically — manual changes survive reboots as long
+as they remain in the journal's node state.
+
+**However, accumulating ad-hoc node deltas is not desirable long-term.** They
+represent drift that was accepted rather than codified. Over time, nodes with
+many committed deltas diverge from their vCluster peers, making fleet-wide
+reasoning harder.
+
+The intended lifecycle for manual changes:
+
+| Stage | State | Action |
+|-------|-------|--------|
+| Detected | Drift | Observer flags divergence from declared state |
+| Committed | Node delta | Admin commits change, recorded in journal |
+| Promoted | vCluster overlay | `pact apply` updates the overlay to include the change |
+| Expired | Cleaned up | `pact rollback` or superseded by overlay update |
+
+**Promotion path**: when a committed manual change proves correct, the admin
+should codify it via `pact apply <spec.toml>` at the vCluster level. This
+updates the shared overlay and makes the node-level delta redundant.
+`pact diff --committed` shows accumulated node deltas that haven't been
+promoted.
+
+**Expiry**: node deltas with a `ttl` field expire automatically. Emergency-mode
+changes default to a TTL matching the emergency window. Changes without TTL
+persist until explicitly rolled back or superseded.
+
 ### Hardware Degradation
 
 ```
