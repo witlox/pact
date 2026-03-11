@@ -1,0 +1,95 @@
+syntax = "proto3";
+package pact.capability;
+
+import "google/protobuf/timestamp.proto";
+import "pact/config.proto";
+
+message CapabilityReport {
+  string node_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  repeated GpuCapability gpus = 3;
+  MemoryCapability memory = 4;
+  NetworkCapability network = 5;
+  StorageCapability storage = 6;
+  SoftwareCapability software = 7;
+  ConfigState config_state = 8;
+  optional pact.config.DriftVector drift_summary = 9;
+  optional EmergencyInfo emergency = 10;
+  SupervisorStatus supervisor = 11;
+}
+
+enum ConfigState {
+  CONFIG_STATE_UNSPECIFIED = 0;
+  CONFIG_STATE_COMMITTED = 1;
+  CONFIG_STATE_DRIFTED = 2;
+  CONFIG_STATE_CONVERGING = 3;
+  CONFIG_STATE_EMERGENCY = 4;
+  CONFIG_STATE_OBSERVE_ONLY = 5;
+}
+
+message SupervisorStatus {
+  string backend = 1;  // "pact" | "systemd"
+  uint32 services_declared = 2;
+  uint32 services_running = 3;
+  uint32 services_failed = 4;
+}
+
+message GpuCapability {
+  uint32 index = 1;
+  string model = 2;
+  uint64 memory_bytes = 3;
+  GpuHealth health = 4;
+  string pci_bus_id = 5;
+}
+
+enum GpuHealth {
+  GPU_HEALTH_UNSPECIFIED = 0;
+  GPU_HEALTH_HEALTHY = 1;
+  GPU_HEALTH_DEGRADED = 2;
+  GPU_HEALTH_FAILED = 3;
+}
+
+message MemoryCapability {
+  uint64 total_bytes = 1;
+  uint64 available_bytes = 2;
+  uint32 numa_nodes = 3;
+}
+
+message NetworkCapability {
+  string fabric_type = 1;
+  uint64 bandwidth_bps = 2;
+  double latency_us = 3;
+}
+
+message StorageCapability {
+  uint64 tmpfs_bytes = 1;
+  repeated MountPoint mounts = 2;
+}
+
+message MountPoint {
+  string path = 1;
+  string fs_type = 2;
+  string source = 3;
+  bool available = 4;
+}
+
+message SoftwareCapability {
+  repeated string loaded_modules = 1;
+  optional string uenv_image = 2;
+  repeated ServiceStatus services = 3;
+}
+
+message ServiceStatus {
+  string name = 1;
+  string state = 2;
+  uint32 pid = 3;
+  uint64 uptime_seconds = 4;
+  uint32 restart_count = 5;
+}
+
+message EmergencyInfo {
+  string reason = 1;
+  string admin_identity = 2;
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}

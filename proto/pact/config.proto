@@ -1,0 +1,139 @@
+syntax = "proto3";
+package pact.config;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+message ConfigEntry {
+  uint64 sequence = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  EntryType entry_type = 3;
+  Scope scope = 4;
+  Identity author = 5;
+  optional uint64 parent = 6;
+  StateDelta state_delta = 7;
+  string policy_ref = 8;
+  optional google.protobuf.Duration ttl = 9;
+  optional string emergency_reason = 10;
+}
+
+enum EntryType {
+  ENTRY_TYPE_UNSPECIFIED = 0;
+  ENTRY_TYPE_COMMIT = 1;
+  ENTRY_TYPE_ROLLBACK = 2;
+  ENTRY_TYPE_AUTO_CONVERGE = 3;
+  ENTRY_TYPE_DRIFT_DETECTED = 4;
+  ENTRY_TYPE_CAPABILITY_CHANGE = 5;
+  ENTRY_TYPE_POLICY_UPDATE = 6;
+  ENTRY_TYPE_BOOT_CONFIG = 7;
+  ENTRY_TYPE_EMERGENCY_START = 8;
+  ENTRY_TYPE_EMERGENCY_END = 9;
+  ENTRY_TYPE_EXEC_LOG = 10;
+  ENTRY_TYPE_SHELL_SESSION = 11;
+  ENTRY_TYPE_SERVICE_LIFECYCLE = 12;
+}
+
+message Scope {
+  oneof scope {
+    string node_id = 1;
+    string vcluster_id = 2;
+    bool global = 3;
+  }
+}
+
+message Identity {
+  string principal = 1;
+  string principal_type = 2;  // "admin" | "agent" | "service"
+  string role = 3;
+}
+
+message StateDelta {
+  repeated MountDelta mounts = 1;
+  repeated FileDelta files = 2;
+  repeated NetworkDelta network = 3;
+  repeated ServiceDelta services = 4;
+  repeated KernelDelta kernel = 5;
+  repeated PackageDelta packages = 6;
+  repeated GpuDelta gpu = 7;
+}
+
+message MountDelta {
+  string path = 1;
+  DeltaAction action = 2;
+  optional MountSpec declared = 3;
+  optional MountSpec actual = 4;
+}
+
+message MountSpec {
+  string fs_type = 1;
+  string source = 2;
+  string options = 3;
+  bool read_only = 4;
+}
+
+message FileDelta {
+  string path = 1;
+  DeltaAction action = 2;
+  optional string content_hash = 3;
+  optional uint32 mode = 4;
+  optional string owner = 5;
+}
+
+message NetworkDelta {
+  string interface = 1;
+  DeltaAction action = 2;
+  optional string detail = 3;
+}
+
+message ServiceDelta {
+  string name = 1;
+  DeltaAction action = 2;
+  optional string declared_state = 3;
+  optional string actual_state = 4;
+}
+
+message KernelDelta {
+  string key = 1;
+  DeltaAction action = 2;
+  optional string declared_value = 3;
+  optional string actual_value = 4;
+}
+
+message PackageDelta {
+  string name = 1;
+  DeltaAction action = 2;
+  optional string version = 3;
+}
+
+message GpuDelta {
+  uint32 gpu_index = 1;
+  DeltaAction action = 2;
+  optional string detail = 3;
+}
+
+enum DeltaAction {
+  DELTA_ACTION_UNSPECIFIED = 0;
+  DELTA_ACTION_ADD = 1;
+  DELTA_ACTION_REMOVE = 2;
+  DELTA_ACTION_MODIFY = 3;
+}
+
+message DriftVector {
+  repeated MountDelta mounts = 1;
+  repeated FileDelta files = 2;
+  repeated NetworkDelta network = 3;
+  repeated ServiceDelta services = 4;
+  repeated KernelDelta kernel = 5;
+  repeated PackageDelta packages = 6;
+  repeated GpuDelta gpu = 7;
+}
+
+message DriftWeights {
+  double mounts = 1;
+  double files = 2;
+  double network = 3;
+  double services = 4;
+  double kernel = 5;
+  double packages = 6;
+  double gpu = 7;
+}

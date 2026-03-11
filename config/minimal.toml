@@ -1,0 +1,42 @@
+# pact minimal configuration — single-node development
+
+[agent]
+node_id = "dev-node-001"
+vcluster = "dev-sandbox"
+enforcement_mode = "observe"
+
+[agent.supervisor]
+backend = "pact"  # "pact" (default) | "systemd"
+
+[agent.journal]
+endpoints = ["localhost:9443"]
+tls_enabled = false
+
+[agent.observer]
+ebpf_enabled = false
+inotify_enabled = true
+netlink_enabled = true
+
+[agent.shell]
+enabled = true
+listen = "0.0.0.0:9445"
+whitelist_mode = "learning"  # "strict" | "learning" | "bypass"
+
+[agent.commit_window]
+base_window_seconds = 900
+sensitivity = 2.0
+emergency_window_seconds = 14400
+
+[agent.blacklist]
+patterns = ["/tmp/**", "/var/log/**", "/proc/**", "/sys/**", "/dev/**", "/run/user/**"]
+
+[journal]
+listen_addr = "0.0.0.0:9443"
+data_dir = "/var/lib/pact/journal"
+
+[policy]
+enabled = false
+
+[telemetry]
+log_level = "debug"
+log_format = "text"

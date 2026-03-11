@@ -1,0 +1,8 @@
+{
+  "dashboard": {
+    "title": "pact — Fleet Health",
+    "description": "Configuration drift, admin ops, boot performance, process supervision",
+    "tags": ["pact", "hpc", "configuration"],
+    "_comment": "Template. Import and configure Prometheus + Loki datasources."
+  }
+}

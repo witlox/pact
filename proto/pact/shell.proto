@@ -1,0 +1,74 @@
+syntax = "proto3";
+package pact.shell;
+
+import "google/protobuf/timestamp.proto";
+
+// Remote execution and shell service on pact-agent.
+service ShellService {
+  // Execute a single command (unary response with streaming output).
+  rpc Exec(ExecRequest) returns (stream ExecOutput);
+
+  // Interactive shell session (bidirectional streaming).
+  rpc Shell(stream ShellInput) returns (stream ShellOutput);
+
+  // List whitelisted commands for this node's vCluster.
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+}
+
+message ExecRequest {
+  string command = 1;
+  repeated string args = 2;
+  // OIDC token in gRPC metadata (not in message body)
+}
+
+message ExecOutput {
+  oneof output {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    int32 exit_code = 3;
+    string error = 4;  // authorization failure, whitelist rejection, etc.
+  }
+}
+
+message ShellInput {
+  oneof input {
+    ShellOpen open = 1;      // start session
+    bytes stdin = 2;          // keyboard input
+    ShellResize resize = 3;   // terminal resize
+    ShellClose close = 4;     // end session
+  }
+}
+
+message ShellOpen {
+  uint32 rows = 1;
+  uint32 cols = 2;
+  string term = 3;  // TERM environment variable
+}
+
+message ShellResize {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+
+message ShellClose {}
+
+message ShellOutput {
+  oneof output {
+    bytes stdout = 1;
+    string session_id = 2;   // returned on session start
+    string error = 3;
+    int32 exit_code = 4;     // on session end
+  }
+}
+
+message ListCommandsRequest {}
+
+message ListCommandsResponse {
+  repeated CommandEntry commands = 1;
+}
+
+message CommandEntry {
+  string command = 1;
+  bool state_changing = 2;
+  string description = 3;
+}

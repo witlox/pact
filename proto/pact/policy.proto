@@ -1,0 +1,74 @@
+syntax = "proto3";
+package pact.policy;
+
+import "google/protobuf/timestamp.proto";
+import "pact/config.proto";
+
+service PolicyService {
+  rpc Evaluate(PolicyEvalRequest) returns (PolicyEvalResponse);
+  rpc GetEffectivePolicy(GetPolicyRequest) returns (VClusterPolicy);
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);
+}
+
+message PolicyEvalRequest {
+  pact.config.Identity author = 1;
+  pact.config.Scope scope = 2;
+  string action = 3;  // "commit", "exec", "shell", "service", "emergency", ...
+  optional pact.config.StateDelta proposed_change = 4;
+  optional string command = 5;  // for exec/shell authorization
+}
+
+message PolicyEvalResponse {
+  bool authorized = 1;
+  string policy_ref = 2;
+  optional string denial_reason = 3;
+  optional ApprovalRequired approval = 4;
+}
+
+message ApprovalRequired {
+  string approval_type = 1;
+  string pending_approval_id = 2;
+}
+
+message GetPolicyRequest {
+  string vcluster_id = 1;
+}
+
+message VClusterPolicy {
+  string vcluster_id = 1;
+  string policy_id = 2;
+  google.protobuf.Timestamp updated_at = 3;
+  double drift_sensitivity = 4;
+  uint32 base_commit_window_seconds = 5;
+  uint32 emergency_window_seconds = 6;
+  repeated string auto_converge_categories = 7;
+  repeated string require_ack_categories = 8;
+  string enforcement_mode = 9;
+  repeated RoleBinding role_bindings = 10;
+  bool regulated = 11;
+  bool two_person_approval = 12;
+  uint32 audit_retention_days = 13;
+  optional string federation_template = 14;
+  string supervisor_backend = 15;
+  repeated string exec_whitelist = 16;
+  repeated string shell_whitelist = 17;
+}
+
+message RoleBinding {
+  string role = 1;
+  repeated string principals = 2;
+  repeated string allowed_actions = 3;
+}
+
+message UpdatePolicyRequest {
+  string vcluster_id = 1;
+  VClusterPolicy policy = 2;
+  pact.config.Identity author = 3;
+  string message = 4;
+}
+
+message UpdatePolicyResponse {
+  bool success = 1;
+  string policy_ref = 2;
+  optional string error = 3;
+}

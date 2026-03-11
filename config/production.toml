@@ -1,0 +1,72 @@
+# pact production configuration
+
+[agent]
+enforcement_mode = "enforce"
+
+[agent.supervisor]
+backend = "pact"
+
+[agent.journal]
+endpoints = ["journal-1.mgmt:9443", "journal-2.mgmt:9443", "journal-3.mgmt:9443"]
+tls_enabled = true
+tls_cert = "/etc/pact/agent.crt"
+tls_key = "/etc/pact/agent.key"
+tls_ca = "/etc/pact/ca.crt"
+
+[agent.observer]
+ebpf_enabled = true
+inotify_enabled = true
+netlink_enabled = true
+
+[agent.shell]
+enabled = true
+listen = "0.0.0.0:9445"
+whitelist_mode = "strict"
+
+[agent.commit_window]
+base_window_seconds = 900
+sensitivity = 2.0
+emergency_window_seconds = 14400
+
+[agent.capability]
+manifest_path = "/run/pact/capability.json"
+socket_path = "/run/pact/capability.sock"
+gpu_poll_interval_seconds = 30
+
+[agent.blacklist]
+patterns = ["/tmp/**", "/var/log/**", "/proc/**", "/sys/**", "/dev/**",
+            "/run/user/**", "/run/pact/**", "/run/lattice/**"]
+
+[journal]
+listen_addr = "0.0.0.0:9443"
+data_dir = "/var/lib/pact/journal"
+
+[journal.raft]
+members = ["1:journal-1.mgmt:9444", "2:journal-2.mgmt:9444", "3:journal-3.mgmt:9444"]
+snapshot_interval = 10000
+
+[journal.streaming]
+max_concurrent_boot_streams = 15000
+
+[policy]
+enabled = true
+
+[policy.iam]
+oidc_issuer = "https://auth.example.org/realms/hpc"
+oidc_audience = "pact"
+
+[policy.engine]
+type = "opa"
+opa_endpoint = "http://localhost:8181/v1/data/pact"
+
+[policy.federation]
+sovra_endpoint = "https://sovra.mgmt:8443"
+sync_interval_seconds = 300
+
+[telemetry]
+log_level = "info"
+log_format = "json"
+prometheus_enabled = true
+prometheus_listen = "0.0.0.0:9090"
+loki_enabled = true
+loki_endpoint = "http://loki.mgmt:3100/loki/api/v1/push"

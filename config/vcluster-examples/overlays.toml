@@ -1,0 +1,71 @@
+# Example vCluster overlays for pact
+
+[vcluster.ml-training]
+base_image = "alps-ml-2026q1"
+supervisor_backend = "pact"
+
+[vcluster.ml-training.mounts]
+"/scratch" = { type = "nfs", source = "storage01:/ml-scratch" }
+"/datasets" = { type = "nfs", source = "storage02:/shared-datasets", read_only = true }
+
+[vcluster.ml-training.sysctl]
+"vm.overcommit_memory" = "1"
+"net.core.rmem_max" = "16777216"
+
+[vcluster.ml-training.services.chronyd]
+binary = "/usr/sbin/chronyd"
+args = ["-d"]
+restart = "always"
+order = 1
+
+[vcluster.ml-training.services.nvidia-persistenced]
+binary = "/usr/bin/nvidia-persistenced"
+args = ["--no-persistence-mode", "--verbose"]
+restart = "always"
+order = 2
+
+[vcluster.ml-training.services.lattice-node-agent]
+binary = "/usr/bin/lattice-node-agent"
+args = ["--config", "/etc/lattice/agent.toml"]
+restart = "always"
+depends_on = ["chronyd"]
+health_check = { type = "http", url = "http://localhost:9100/health", interval_seconds = 30 }
+order = 10
+
+[vcluster.ml-training.policy]
+drift_sensitivity = 2.0
+base_commit_window_seconds = 900
+enforcement_mode = "enforce"
+auto_converge_categories = ["services", "kernel"]
+require_ack_categories = ["mounts", "network", "gpu"]
+
+[vcluster.medical-compute]
+base_image = "alps-secure-2026q1"
+supervisor_backend = "pact"
+
+[vcluster.medical-compute.services.chronyd]
+binary = "/usr/sbin/chronyd"
+args = ["-d"]
+restart = "always"
+order = 1
+
+[vcluster.medical-compute.services.lattice-node-agent]
+binary = "/usr/bin/lattice-node-agent"
+args = ["--config", "/etc/lattice/agent.toml"]
+restart = "always"
+order = 10
+
+[vcluster.medical-compute.services.audit-forwarder]
+binary = "/usr/bin/audit-forwarder"
+args = ["--endpoint", "audit.mgmt:5140"]
+restart = "always"
+order = 5
+
+[vcluster.medical-compute.policy]
+drift_sensitivity = 5.0
+base_commit_window_seconds = 300
+enforcement_mode = "enforce"
+regulated = true
+two_person_approval = true
+audit_retention_days = 2555
+federation_template = "regulated-medical"
