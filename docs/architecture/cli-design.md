@@ -15,7 +15,7 @@ authorized, and logged.
 | `pact status [--vcluster X]` | Node/vCluster state, drift, capabilities |
 | `pact diff [node]` | Declared vs actual state |
 | `pact diff --committed [node]` | Show committed node deltas not yet in overlay |
-| `pact commit -m "msg"` | Commit drift (prompted: local/cluster-wide) |
+| `pact commit -m "msg"` | Commit drift on current node (node-level delta) |
 | `pact rollback [seq]` | Roll back to previous state |
 | `pact log [-n N] [--scope S]` | Configuration history |
 | `pact apply <spec.toml>` | Apply declarative config spec |
@@ -128,19 +128,70 @@ The `promote` command maps `StateDelta` fields to overlay TOML sections:
 Deltas that can't be cleanly mapped (e.g. GPU state changes) are emitted as
 comments with the raw delta for manual handling.
 
-## Local Pact Shell (on-node)
+## Two-Person Approval (Regulated vClusters)
 
-When accessed via BMC console, the node drops into a pact shell (not bash).
-Same authentication (local agent cert), same whitelist, same logging.
+For vClusters with `two_person_approval = true`, state-changing operations
+require a second admin to approve before execution.
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `pact approve list` | Show pending approval requests |
+| `pact approve <id>` | Approve a pending request |
+| `pact approve deny <id> -m "reason"` | Deny a pending request |
+
+### Flow
+
+```bash
+# Admin A: commit a change on a regulated vCluster
+$ pact commit -m "add hugepages for training"
+  Approval required (two-person policy on vcluster: sensitive-compute)
+  Pending approval: ap-7f3a (expires in 30 min)
+  Waiting for approval... (Ctrl-C to background)
+
+# Admin B (separately): sees pending approvals
+$ pact approve list
+  ap-7f3a  sensitive-compute  "add hugepages for training"  by admin-a@org  12 min ago
+
+$ pact approve ap-7f3a
+  Approved. Commit applied on sensitive-compute.
+```
+
+### Mechanism
+
+1. Admin A's operation triggers `PolicyService.Evaluate()` → OPA returns
+   `ApprovalRequired { approval_type: "two_person", pending_approval_id: "ap-7f3a" }`
+2. The request is stored in the journal as a pending operation (new entry type)
+3. Admin B queries pending approvals via journal, approves via `PolicyService`
+4. The journal stores the approval and executes the original operation
+5. If no approval within the timeout (default 30 min, configurable per vCluster),
+   the request expires and the change is rolled back
+
+### Notifications
+
+Pending approvals are emitted as Loki events with structured labels. Grafana
+alert rules can route these to Slack, PagerDuty, or email based on vCluster
+and severity.
+
+## BMC Console Access (on-node)
+
+BMC console provides regular bash — not restricted bash, not pact shell.
+This is the out-of-band fallback for when pact-agent is unresponsive or when
+the admin needs unrestricted access (e.g. to debug pact-agent itself).
+
+BMC access is controlled by BMC credentials (IPMI/Redfish), not by pact RBAC.
+Changes made via BMC are detected by the drift observer when pact-agent is
+running, and appear as unattributed drift (no OIDC identity).
 
 ```
-[BMC console connects]
-pact:node042 (local)> pact status
+[BMC console connects — regular bash]
+root@node042:~# pact status
   Node: node042  State: COMMITTED  Supervisor: 5 services running
-pact:node042 (local)> pact service status lattice-node-agent
-  lattice-node-agent: active (running, PID 4521, uptime 3h22m)
-pact:node042 (local)> nvidia-smi
-  [executes, logged locally, synced to journal when connectivity restored]
+root@node042:~# systemctl status pact-agent
+  [check agent health]
+root@node042:~# nvidia-smi
+  [unrestricted access, drift detected if state changes]
 ```
 
 ## Exit Codes

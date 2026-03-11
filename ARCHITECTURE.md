@@ -65,11 +65,15 @@ Separate Raft group from lattice scheduler. Immutable append-only log.
 - Event stream to Loki for Grafana dashboards
 - Read replicas for 100k+ boot storms
 
-### pact-policy
+### pact-policy (library crate, linked into pact-journal)
+
+Policy is a library crate (`crates/pact-policy/`) compiled into the pact-journal
+binary. PolicyService gRPC handlers run in the same process as the journal —
+no separate deployment, no extra network hop from journal to policy.
 
 - OIDC/SAML integration (shared identity provider with lattice/OpenCHAMI)
 - RBAC with per-vCluster role scoping
-- OPA/Rego policy engine co-located on journal nodes (see [ADR-003](docs/decisions/ADR-003-policy-engine.md))
+- OPA/Rego engine: pact-policy calls OPA via localhost REST (see [ADR-003](docs/decisions/ADR-003-policy-engine.md))
 - Sovra federation sync for Rego policy templates
 - Two-person approval workflow for regulated vClusters
 

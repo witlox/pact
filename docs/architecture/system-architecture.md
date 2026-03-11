@@ -50,12 +50,17 @@ locally and replayed to the journal when connectivity is restored.
 window_seconds = base_window / (1 + drift_magnitude * sensitivity)
 ```
 
+Examples with default `base_window=900s`, `drift_sensitivity=2.0`:
+
 | Drift | Example | Window | Rationale |
 |-------|---------|--------|-----------|
-| Tiny (0.05) | Single sysctl | ~13 min | Low risk |
-| Small (0.15) | Config file edit | ~10 min | Routine |
-| Moderate (0.3) | Mount + service | ~6 min | Needs attention |
-| Large (0.8) | Multiple categories | ~3 min | Significant deviation |
+| Tiny (0.05) | Single sysctl | ~14 min | Low risk |
+| Small (0.15) | Config file edit | ~12 min | Routine |
+| Moderate (0.3) | Mount + service | ~9 min | Needs attention |
+| Large (0.8) | Multiple categories | ~6 min | Significant deviation |
+
+Higher `drift_sensitivity` (e.g. 5.0 for regulated vClusters) compresses
+windows more aggressively: the same large drift gets ~3 min instead of ~6.
 
 Emergency mode: `pact emergency --reason "..."` extends to 4h, suspends rollback.
 
@@ -76,7 +81,8 @@ PXE → SquashFS → pact-agent (PID 1)
 pact exec / pact shell → command executed on node
   → state observer detects change → drift evaluator
   → commit window opens (proportional to drift)
-  → admin commits (local/cluster-wide) or window expires (rollback)
+  → admin commits (node delta) or window expires (rollback)
+  → to codify fleet-wide: pact promote → pact apply (updates overlay)
   → journal records everything
 ```
 

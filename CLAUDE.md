@@ -36,8 +36,8 @@ Five components:
    detection, commit windows, capability reporting, pact shell server, exec endpoint
 2. **pact-journal** (Raft quorum, 3-5 nodes) — immutable config log, streaming boot
    config delivery, telemetry source
-3. **pact-policy** (co-located or separate) — IAM/OIDC, RBAC, OPA policy evaluation,
-   Sovra federation sync
+3. **pact-policy** (library crate, linked into pact-journal) — IAM/OIDC, RBAC,
+   OPA policy evaluation, Sovra federation sync
 4. **pact CLI** (admin workstation) — remote: commit, rollback, diff, status, exec,
    shell. local (on-node): same commands in pact shell mode
 5. **pact MCP server** (optional) — AI agent tool-use interface
@@ -126,7 +126,7 @@ pact-service-ai           Machine identity for AI agents (MCP).
 ## Technology stack
 
 - **Language**: Rust (consistent with lattice)
-- **Raft**: openraft (same as lattice-quorum)
+- **Raft**: raft-hpc-core (wraps openraft with HPC state machine abstractions)
 - **Transport**: gRPC via tonic + protobuf via prost
 - **eBPF**: aya crate
 - **Linux**: nix crate (netlink, inotify, cgroups, mount, fork/exec)

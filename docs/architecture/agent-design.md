@@ -133,6 +133,20 @@ gpu). Magnitude = weighted Euclidean norm with per-vCluster dimension weights.
 Optimistic concurrency. Active consumer check before rollback (don't unmount
 filesystems with open handles). Emergency mode: extended window + suspended rollback.
 
+### Config Subscription (`src/subscription/`)
+
+After boot, the agent subscribes to `BootConfigService.SubscribeConfigUpdates()`
+on the journal for live updates. This stream delivers:
+- vCluster overlay changes (e.g. `pact apply` updates the overlay)
+- Node-specific delta changes (e.g. promoted changes from `pact promote`)
+- Policy updates (refreshes cached `VClusterPolicy` for authorization)
+- Blacklist changes (updates drift detection exclusions)
+
+This means overlay and policy changes propagate to running nodes **without
+reboot**. The agent applies overlay changes through the same path as boot-time
+config application. If the subscription stream is interrupted, the agent
+reconnects with `from_sequence` to resume from the last received update.
+
 ### Capability Reporter (`src/capability/`)
 
 Multi-vendor GPU detection behind a `GpuBackend` trait:

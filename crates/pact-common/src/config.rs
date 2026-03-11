@@ -132,7 +132,7 @@ pub struct CommitWindowConfig {
     #[serde(default = "default_base_window")]
     pub base_window_seconds: u32,
     #[serde(default = "default_sensitivity")]
-    pub sensitivity: f64,
+    pub drift_sensitivity: f64,
     #[serde(default = "default_emergency_window")]
     pub emergency_window_seconds: u32,
 }
@@ -347,7 +347,7 @@ mod tests {
     fn commit_window_defaults() {
         let config = CommitWindowConfig::default();
         assert_eq!(config.base_window_seconds, 900);
-        assert!((config.sensitivity - 2.0).abs() < f64::EPSILON);
+        assert!((config.drift_sensitivity - 2.0).abs() < f64::EPSILON);
         assert_eq!(config.emergency_window_seconds, 14400);
     }
 
