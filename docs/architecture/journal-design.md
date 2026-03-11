@@ -92,6 +92,11 @@ Two-phase protocol:
 - Phase 1: vCluster base overlay (pre-computed, compressed ~100-200 KB, served from any replica)
 - Phase 2: node-specific delta (<1 KB)
 
+Phase 2 includes **both** pre-declared per-node config **and** any previously
+committed manual changes stored in `node_states`. This means admin changes
+committed via `pact commit` survive reboots — they are reapplied from the
+journal alongside the vCluster overlay.
+
 Read replicas (non-voting Raft learners) for 100k+ boot storms. Boot config reads
 do not go through Raft consensus — they read from the local state machine snapshot.
 This is why boot storms do not block the Raft group.
