@@ -19,15 +19,9 @@ pub enum JournalCommand {
     /// Update a node's config state (committed, drifted, emergency, etc.)
     UpdateNodeState { node_id: NodeId, state: ConfigState },
     /// Set or update a vCluster policy.
-    SetPolicy {
-        vcluster_id: VClusterId,
-        policy: VClusterPolicy,
-    },
+    SetPolicy { vcluster_id: VClusterId, policy: VClusterPolicy },
     /// Store a pre-computed boot overlay for a vCluster.
-    SetOverlay {
-        vcluster_id: VClusterId,
-        overlay: BootOverlay,
-    },
+    SetOverlay { vcluster_id: VClusterId, overlay: BootOverlay },
     /// Record an admin operation (exec log, shell session).
     RecordOperation(AdminOperation),
 }

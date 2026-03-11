@@ -7,11 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use openraft::impls::BasicNode;
 use openraft::Raft;
-use raft_hpc_core::{
-    FileLogStore, GrpcNetworkFactory, HpcStateMachine, RaftTransportServer,
-};
+use openraft::impls::BasicNode;
+use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, RaftTransportServer};
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
@@ -52,9 +50,7 @@ fn parse_peers(peers: &[String]) -> BTreeMap<u64, BasicNode> {
         let (id_str, addr) = peer
             .split_once('=')
             .unwrap_or_else(|| panic!("Invalid peer format '{peer}', expected 'id=addr'"));
-        let id: u64 = id_str
-            .parse()
-            .unwrap_or_else(|_| panic!("Invalid peer id '{id_str}'"));
+        let id: u64 = id_str.parse().unwrap_or_else(|_| panic!("Invalid peer id '{id_str}'"));
         members.insert(id, BasicNode::new(addr.to_string()));
     }
     members
@@ -94,9 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Data directories
     std::fs::create_dir_all(&args.data_dir)?;
-    let snapshot_dir = args
-        .snapshot_dir
-        .unwrap_or_else(|| args.data_dir.join("snapshots"));
+    let snapshot_dir = args.snapshot_dir.unwrap_or_else(|| args.data_dir.join("snapshots"));
 
     // Create Raft components using raft-hpc-core
     let state = Arc::new(RwLock::new(JournalState::default()));
@@ -127,9 +121,7 @@ async fn main() -> anyhow::Result<()> {
 
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     tonic::transport::Server::builder()
-        .add_service(
-            raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(server),
-        )
+        .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(server))
         .serve_with_incoming(incoming)
         .await
         .inspect_err(|e| error!("gRPC server error: {e}"))?;

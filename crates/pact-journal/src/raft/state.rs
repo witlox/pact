@@ -45,17 +45,11 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                 self.node_states.insert(node_id, state);
                 JournalResponse::Ok
             }
-            JournalCommand::SetPolicy {
-                vcluster_id,
-                policy,
-            } => {
+            JournalCommand::SetPolicy { vcluster_id, policy } => {
                 self.policies.insert(vcluster_id, policy);
                 JournalResponse::Ok
             }
-            JournalCommand::SetOverlay {
-                vcluster_id,
-                overlay,
-            } => {
+            JournalCommand::SetOverlay { vcluster_id, overlay } => {
                 self.overlays.insert(vcluster_id, overlay);
                 JournalResponse::Ok
             }
@@ -74,9 +68,7 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use pact_common::types::{
-        AdminOperationType, EntryType, Identity, PrincipalType, Scope,
-    };
+    use pact_common::types::{AdminOperationType, EntryType, Identity, PrincipalType, Scope};
 
     use super::*;
 
@@ -124,20 +116,14 @@ mod tests {
             node_id: "node-1".into(),
             state: ConfigState::Committed,
         });
-        assert_eq!(
-            state.node_states.get("node-1"),
-            Some(&ConfigState::Committed)
-        );
+        assert_eq!(state.node_states.get("node-1"), Some(&ConfigState::Committed));
 
         // Update again
         state.apply(JournalCommand::UpdateNodeState {
             node_id: "node-1".into(),
             state: ConfigState::Drifted,
         });
-        assert_eq!(
-            state.node_states.get("node-1"),
-            Some(&ConfigState::Drifted)
-        );
+        assert_eq!(state.node_states.get("node-1"), Some(&ConfigState::Drifted));
     }
 
     #[test]
@@ -150,10 +136,7 @@ mod tests {
             emergency_allowed: true,
             two_person_approval: false,
         };
-        state.apply(JournalCommand::SetPolicy {
-            vcluster_id: "ml-train".into(),
-            policy,
-        });
+        state.apply(JournalCommand::SetPolicy { vcluster_id: "ml-train".into(), policy });
         assert!(state.policies.contains_key("ml-train"));
     }
 
@@ -166,10 +149,7 @@ mod tests {
             data: vec![1, 2, 3],
             checksum: "abc123".into(),
         };
-        state.apply(JournalCommand::SetOverlay {
-            vcluster_id: "dev".into(),
-            overlay,
-        });
+        state.apply(JournalCommand::SetOverlay { vcluster_id: "dev".into(), overlay });
         assert!(state.overlays.contains_key("dev"));
         assert_eq!(state.overlays["dev"].version, 1);
     }
