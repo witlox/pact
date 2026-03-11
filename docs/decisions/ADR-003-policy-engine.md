@@ -34,10 +34,18 @@ commit, exec, shell, start emergency mode, etc. Two candidates evaluated:
 ## Deployment
 
 OPA runs on journal/policy nodes alongside pact-journal, **not on compute nodes**.
-Policy evaluation for admin operations (exec, shell, commit) is performed
-server-side: the CLI sends the request to pact-journal/pact-policy, which
-evaluates the policy via local OPA before forwarding the authorized operation
-to the target pact-agent.
+
+Policy evaluation flow for admin operations:
+```
+CLI → pact-agent (ExecRequest/ShellSessionRequest via gRPC)
+  → agent calls PolicyService.Evaluate() on pact-policy node
+  → pact-policy calls OPA via localhost REST
+  → OPA evaluates Rego rules → decision returned to agent
+  → agent enforces decision (proceed or deny)
+```
+
+The agent is the entry point for exec/shell (it owns the PTY and process
+execution), but delegates authorization to the policy service.
 
 ```
 pact-journal node:
@@ -57,6 +65,32 @@ OPA lifecycle on journal nodes depends on the deployment model:
 In all cases, OPA is co-located with pact-journal/pact-policy on management
 nodes. Compute nodes do not run OPA — they enforce the authorization decisions
 received from the policy layer.
+
+## Policy Caching and Partition Resilience
+
+pact-agent receives `VClusterPolicy` as part of the boot config overlay (Phase 1).
+This cached policy contains the data needed for local authorization decisions:
+- `role_bindings`: OIDC role → allowed actions mapping
+- `exec_whitelist` / `shell_whitelist`: allowed commands
+- `regulated`, `two_person_approval`: enforcement flags
+
+**Normal operation**: agent calls `PolicyService.Evaluate()` on the policy node
+for full OPA/Rego evaluation (complex rules, cross-vCluster checks, approval
+workflows).
+
+**Degraded operation** (policy service unreachable): agent falls back to cached
+`VClusterPolicy` for basic RBAC decisions:
+- Whitelist checks: allowed (command in cached whitelist + role has action)
+- Two-person approval: denied (cannot verify without policy service)
+- Complex Rego rules: denied (cannot evaluate without OPA)
+- Platform admin override: allowed (role cached, but logged as degraded)
+
+This follows the same AP consistency model as config: nodes keep operating with
+cached state during partitions. The agent logs all degraded-mode authorization
+decisions and replays them to the journal when connectivity is restored.
+
+Policy cache is refreshed on each successful `PolicyService.Evaluate()` call
+and on explicit policy update events streamed from the journal.
 
 ## Trade-offs
 

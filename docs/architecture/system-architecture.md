@@ -35,9 +35,14 @@ No protocol-level coupling; co-location is a deployment decision.
 
 ## Consistency Model
 
-AP in CAP terms. Nodes use cached config during partitions. Conflict resolution
-by timestamp ordering with admin-committed > auto-converge. A node that can't
-reach the config server keeps running its workload.
+AP in CAP terms. Nodes use cached config and cached policy during partitions.
+Conflict resolution by timestamp ordering with admin-committed > auto-converge.
+A node that can't reach the config server keeps running its workload.
+
+During partitions, pact-agent falls back to cached `VClusterPolicy` for
+authorization (role bindings and whitelists only — complex OPA rules and
+two-person approval require connectivity). Degraded-mode decisions are logged
+locally and replayed to the journal when connectivity is restored.
 
 ## Commit Window Formula
 

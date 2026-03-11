@@ -37,7 +37,9 @@ Replaces SSH. Listens on a gRPC endpoint (mTLS authenticated).
 ```
 Client → ExecRequest{node_id, command, args} → pact-agent
   → authenticate (OIDC token verification)
-  → authorize (RBAC: caller's role allows exec on this vCluster?)
+  → authorize: call PolicyService.Evaluate() on policy node (full OPA/Rego)
+      if policy service unreachable: fall back to cached VClusterPolicy
+      (role_bindings + whitelist only; two-person approval denied)
   → whitelist check (command in allowed set?)
   → classify (read-only or state-changing?)
   → if state-changing: go through commit window model
@@ -49,7 +51,8 @@ Client → ExecRequest{node_id, command, args} → pact-agent
 **pact shell** (interactive session):
 ```
 Client → ShellSessionRequest{node_id} → pact-agent
-  → authenticate + authorize (shell requires higher privilege than exec)
+  → authenticate + authorize (same policy call as exec; shell requires
+    higher privilege — if policy service unreachable, cached RBAC check)
   → open bidirectional gRPC stream
   → allocate PTY on node
   → each command: whitelist check → classify → execute → log
