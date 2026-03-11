@@ -48,27 +48,63 @@ Client → ExecRequest{node_id, command, args} → pact-agent
   → log command + output to journal
 ```
 
-**pact shell** (interactive session):
+For exec, pact-agent controls the full command — it receives a command + args,
+validates against the whitelist, and fork/execs directly. No shell interpretation.
+
+**pact shell** (interactive session — restricted bash):
+
+pact shell does **not** reimplement a shell. It spawns a restricted bash session
+inside a controlled environment. Reimplementing line editing, pipes, redirects,
+globbing, quoting, job control, and signal handling would be both enormous and
+a security liability (command parsing bugs = bypasses).
+
 ```
 Client → ShellSessionRequest{node_id} → pact-agent
   → authenticate + authorize (same policy call as exec; shell requires
     higher privilege — if policy service unreachable, cached RBAC check)
   → open bidirectional gRPC stream
-  → allocate PTY on node
-  → each command: whitelist check → classify → execute → log
-  → state-changing commands trigger commit windows
-  → session recorded in journal (commands + timestamps, not full output)
-  → session ends: cleanup PTY, log session summary
+  → allocate PTY with restricted bash environment:
+      - PATH restricted to whitelisted command directories
+      - readonly PATH, ENV, BASH_ENV, SHELL (prevent escape)
+      - custom PROMPT_COMMAND logs each command to pact audit
+      - rbash or bash --restricted as base
+      - mount namespace: hide sensitive paths if configured
+      - cgroup: session-level resource limits
+  → session start/end logged to journal
+  → session ends: cleanup PTY, cgroup, log session summary
 ```
 
-**Whitelist with learning mode**:
-- Default whitelist: nvidia-smi, dmesg, lspci, ip, ss, cat, less, head, tail,
-  grep, journalctl, mount (read), df, free, top, ps, lsmod, sysctl (read),
-  uname, hostname, date, uptime, lscpu, lsmem, lsblk, findmnt, ethtool
-- State-changing commands: mount (write), umount, sysctl -w, modprobe, rmmod,
-  ip addr/route (write), service management (via pact service)
-- Learning mode: non-whitelisted commands allowed but generate alert + suggestion
-- Platform admins: whitelist bypass (but still logged)
+**Restriction layers** (defense in depth, not command parsing):
+
+1. **PATH restriction**: only whitelisted binaries are reachable. The agent
+   builds a restricted PATH from the vCluster's `shell_whitelist`, symlinking
+   allowed commands into a session-specific directory (`/run/pact/shell/<sid>/bin/`).
+   Bash in restricted mode (`rbash`) prevents changing PATH or running commands
+   by absolute path.
+
+2. **PROMPT_COMMAND audit**: bash's PROMPT_COMMAND hook runs before each prompt,
+   logging the previous command (`$(history 1)`) to pact's audit pipeline.
+   This captures what was actually executed, not what pact *thinks* was executed.
+
+3. **Mount namespace** (optional): hide `/root`, `/home`, SSH keys, and other
+   sensitive paths from the shell session.
+
+4. **Seccomp/cgroup**: session-level resource limits and optional syscall filtering.
+
+5. **State change detection**: the existing drift observer (eBPF + inotify +
+   netlink) detects changes made during the session. These trigger commit
+   windows as normal — the shell doesn't need to pre-classify commands.
+
+**What pact exec does vs pact shell**:
+- **pact exec**: pact controls the full command lifecycle (whitelist, classify,
+  fork/exec). No shell involved. Suitable for automation and diagnostics.
+- **pact shell**: bash controls command execution. pact controls the environment
+  (PATH, namespace, cgroup) and observes changes after the fact. Suitable for
+  interactive debugging.
+
+**Learning mode**: when a user tries to run a command not in PATH, bash returns
+"command not found". The agent detects this (via audit log or PROMPT_COMMAND
+exit code) and suggests adding the command to the vCluster whitelist.
 
 ### State Observer (`src/observer/`)
 

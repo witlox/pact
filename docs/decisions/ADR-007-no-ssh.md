@@ -32,29 +32,48 @@ pact exec node042 -- cat /etc/resolv.conf
 ```
 pact shell node042
 ```
-- Opens an interactive shell session on the node
+- Opens a **restricted bash** session on the node (not a custom shell)
 - Authenticated + authorized (higher privilege than exec — separate permission)
-- Every command logged to journal with caller identity
-- State-changing commands trigger commit windows (same model as before)
-- Read-only commands execute immediately with logging only
-- Session recorded for audit trail
+- Restriction via environment control, not command parsing:
+  - `rbash` (restricted bash): prevents changing PATH, running `/absolute/paths`,
+    redirecting output to files
+  - PATH limited to whitelisted commands via session-specific directory
+  - `PROMPT_COMMAND` hook logs each executed command to pact audit
+  - Optional mount namespace hides sensitive paths
+  - Session-level cgroup for resource limits
+- State changes detected by the existing drift observer (eBPF + inotify + netlink)
+  and trigger commit windows — the shell doesn't pre-classify commands
+- Session start/end recorded in journal
+
+### Why restricted bash, not a custom shell
+Implementing a shell that interprets pipes, redirects, globbing, quoting,
+subshells, environment variables, job control, and signal handling is
+reimplementing bash — poorly. And parsing commands before execution to
+classify them is a security problem: `$(evil)`, backticks, `eval`, and
+argument injection make pre-execution parsing unreliable.
+
+Instead, pact controls what bash **can reach** (PATH, namespace, cgroup) and
+**observes what happened** (PROMPT_COMMAND audit, drift detection). Bash handles
+interactive shell semantics — it's been doing that for 35 years.
 
 ### Whitelist model
+- Implemented as PATH restriction: only whitelisted binaries are symlinked
+  into the session's bin directory
 - Default whitelist: common diagnostics (nvidia-smi, dmesg, lspci, ip, ss, cat,
   journalctl, mount, df, free, top, ps, lsmod, sysctl -a, etc.)
-- Learning mode: any command is allowed but non-whitelisted commands generate
-  alerts and suggestions to add them
+- Learning mode: "command not found" errors are captured by the agent, which
+  suggests adding the command to the vCluster whitelist
 - vCluster-scoped: regulated vClusters may have tighter whitelists
-- Platform admins can execute any command (whitelist bypass)
+- Platform admins: broader PATH (but still logged via PROMPT_COMMAND)
 
 ### State-changing command detection
-The agent classifies commands as read-only or state-changing:
-- **Read-only**: commands that only read system state (nvidia-smi, dmesg, cat, ps, ...)
-- **State-changing**: commands that modify state (mount, umount, systemctl, sysctl -w,
-  ip addr add, modprobe, ...)
+The agent does **not** classify commands before execution in shell mode.
+Instead, the existing drift observer (eBPF probes, inotify, netlink) detects
+actual state changes and triggers commit windows. This is the same mechanism
+used for any other source of drift — the shell session is not special.
 
-State-changing commands go through the commit window model. Read-only commands
-execute immediately.
+For pact exec (single commands), the agent does classify commands upfront
+because it controls the full invocation (no shell interpretation involved).
 
 ## Fallback
 
@@ -71,11 +90,14 @@ When pact-agent is unresponsive:
 - Whitelist maintenance is ongoing operational work (mitigated by learning mode)
 - Slightly higher latency than direct SSH for some operations
 - Requires trust in pact-agent reliability (mitigated by BMC fallback)
+- rbash restrictions can be bypassed by some binaries (e.g. vi, python, less
+  with `!cmd`) — whitelisted commands must be audited for shell escape vectors
 
 ## Security Benefits
 
 - All remote access is authenticated (OIDC) and authorized (RBAC)
 - Every command is logged with authenticated identity
 - State changes are tracked and require commitment
-- No root shell escape — pact enforces policy even for platform admins
+- No unrestricted root shell — pact controls the environment via PATH, rbash,
+  and optional mount namespace
 - Attack surface reduced: no sshd, no SSH key management, no SSH vulnerabilities
