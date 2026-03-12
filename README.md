@@ -73,16 +73,19 @@ Kernel → SquashFS root → pact-agent (PID 1)
 
 Total: <2 seconds from pact-agent start to node ready.
 
-## Documentation
+## Contributing with Claude Code
 
-- [System Architecture](docs/architecture/system-architecture.md)
-- [Agent Design](docs/architecture/agent-design.md) (supervisor + shell + observer)
-- [Journal Design](docs/architecture/journal-design.md)
-- [CLI & Shell Design](docs/architecture/cli-design.md)
-- [Observability](docs/architecture/observability.md)
-- [Agentic API (MCP)](docs/architecture/agentic-api.md)
-- [Federation Model](docs/architecture/federation.md)
-- [Architecture Decision Records](docs/decisions/)
+This project includes structured [Claude Code](https://claude.com/claude-code) profiles for different development phases: analyst, architect, adversary, contract-gen, implementer, and integrator. Each profile constrains Claude to a specific role in the workflow.
+
+```bash
+# Activate a profile (writes to .claude/CLAUDE.md, which is gitignored)
+./switch-profile.sh architect
+
+# Implementer profile with feature scope
+./switch-profile.sh implementer "user-authentication"
+```
+
+The root `CLAUDE.md` provides project context and is always loaded alongside the active profile. See [`.claude/WORKFLOW.md`](.claude/WORKFLOW.md) for the full workflow documentation.
 
 ## License
 

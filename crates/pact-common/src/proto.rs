@@ -26,3 +26,8 @@ pub mod policy {
 pub mod stream {
     tonic::include_proto!("pact.stream");
 }
+
+#[allow(clippy::all, clippy::pedantic, clippy::nursery)]
+pub mod journal {
+    tonic::include_proto!("pact.journal");
+}

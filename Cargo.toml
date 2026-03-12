@@ -7,6 +7,7 @@ members = [
     "crates/pact-policy",
     "crates/pact-cli",
     "crates/pact-test-harness",
+    "crates/pact-acceptance",
 ]
 
 [workspace.package]

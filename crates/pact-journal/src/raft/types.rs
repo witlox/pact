@@ -24,6 +24,8 @@ pub enum JournalCommand {
     SetOverlay { vcluster_id: VClusterId, overlay: BootOverlay },
     /// Record an admin operation (exec log, shell session).
     RecordOperation(AdminOperation),
+    /// Assign a node to a vCluster.
+    AssignNode { node_id: NodeId, vcluster_id: VClusterId },
 }
 
 impl fmt::Display for JournalCommand {
@@ -36,6 +38,9 @@ impl fmt::Display for JournalCommand {
             Self::SetPolicy { vcluster_id, .. } => write!(f, "SetPolicy({vcluster_id})"),
             Self::SetOverlay { vcluster_id, .. } => write!(f, "SetOverlay({vcluster_id})"),
             Self::RecordOperation(op) => write!(f, "RecordOperation({})", op.operation_id),
+            Self::AssignNode { node_id, vcluster_id } => {
+                write!(f, "AssignNode({node_id} → {vcluster_id})")
+            }
         }
     }
 }
@@ -93,10 +98,11 @@ mod tests {
             vcluster_id: "ml-train".into(),
             policy: VClusterPolicy {
                 vcluster_id: "ml-train".into(),
-                max_drift_magnitude: 5.0,
-                commit_window_seconds: 900,
+                drift_sensitivity: 5.0,
+                base_commit_window_seconds: 900,
                 emergency_allowed: true,
                 two_person_approval: false,
+                ..VClusterPolicy::default()
             },
         };
         let json = serde_json::to_string(&cmd).unwrap();

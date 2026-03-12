@@ -1,0 +1,51 @@
+syntax = "proto3";
+package pact.journal;
+
+import "pact/config.proto";
+
+service ConfigService {
+  rpc AppendEntry(AppendEntryRequest) returns (AppendEntryResponse);
+  rpc GetEntry(GetEntryRequest) returns (pact.config.ConfigEntry);
+  rpc GetNodeState(GetNodeStateRequest) returns (NodeStateResponse);
+  rpc ListEntries(ListEntriesRequest) returns (stream pact.config.ConfigEntry);
+  rpc GetOverlay(GetOverlayRequest) returns (OverlayResponse);
+}
+
+message AppendEntryRequest {
+  pact.config.ConfigEntry entry = 1;
+}
+
+message AppendEntryResponse {
+  uint64 sequence = 1;
+}
+
+message GetEntryRequest {
+  uint64 sequence = 1;
+}
+
+message GetNodeStateRequest {
+  string node_id = 1;
+}
+
+message NodeStateResponse {
+  string node_id = 1;
+  string config_state = 2;
+}
+
+message ListEntriesRequest {
+  pact.config.Scope scope = 1;
+  optional uint64 from_sequence = 2;
+  optional uint64 to_sequence = 3;
+  optional uint32 limit = 4;
+}
+
+message GetOverlayRequest {
+  string vcluster_id = 1;
+}
+
+message OverlayResponse {
+  string vcluster_id = 1;
+  uint64 version = 2;
+  bytes data = 3;
+  string checksum = 4;
+}

@@ -21,15 +21,19 @@ fmt-check:
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Run tests (skips tests marked #[ignore])
+# Run tests (skips tests marked #[ignore], excludes acceptance)
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace
+        cargo nextest run --workspace --exclude pact-acceptance
     else
-        cargo test --workspace
+        cargo test --workspace --exclude pact-acceptance
     fi
+
+# Run BDD acceptance tests (cucumber, custom harness)
+test-accept:
+    cargo test -p pact-acceptance
 
 # Run the full test suite including slow tests
 test-all:

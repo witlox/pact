@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "pact/capability.proto",
             "pact/policy.proto",
             "pact/stream.proto",
+            "pact/journal.proto",
         ],
         &[proto_root],
     )?;

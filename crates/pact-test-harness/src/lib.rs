@@ -4,3 +4,8 @@
 
 pub mod fixtures;
 pub mod mocks;
+
+/// Re-export builders for convenience.
+pub mod builders {
+    pub use crate::fixtures::builders::*;
+}

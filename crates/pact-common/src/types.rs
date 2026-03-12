@@ -42,6 +42,7 @@ pub enum EntryType {
     ExecLog,
     ShellSession,
     ServiceLifecycle,
+    PendingApproval,
 }
 
 /// Scope of a configuration entry.
@@ -228,9 +229,73 @@ pub struct CapabilityReport {
     pub timestamp: DateTime<Utc>,
     pub report_id: Uuid,
     pub gpus: Vec<GpuCapability>,
-    pub memory_bytes: u64,
+    pub memory: MemoryCapability,
+    pub network: Option<NetworkCapability>,
+    pub storage: StorageCapability,
+    pub software: SoftwareCapability,
     pub config_state: ConfigState,
+    pub drift_summary: Option<DriftVector>,
+    pub emergency: Option<EmergencyInfo>,
     pub supervisor_status: SupervisorStatus,
+}
+
+/// Memory capability information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCapability {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub numa_nodes: u32,
+}
+
+/// Network fabric capability information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkCapability {
+    pub fabric_type: String,
+    pub bandwidth_bps: u64,
+    pub latency_us: f64,
+}
+
+/// Storage capability information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageCapability {
+    pub tmpfs_bytes: u64,
+    pub mounts: Vec<MountPointInfo>,
+}
+
+/// Information about a mount point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountPointInfo {
+    pub path: String,
+    pub fs_type: String,
+    pub source: String,
+    pub available: bool,
+}
+
+/// Software capability information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoftwareCapability {
+    pub loaded_modules: Vec<String>,
+    pub uenv_image: Option<String>,
+    pub services: Vec<ServiceStatusInfo>,
+}
+
+/// Status information for a running service.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceStatusInfo {
+    pub name: String,
+    pub state: ServiceState,
+    pub pid: u32,
+    pub uptime_seconds: u64,
+    pub restart_count: u32,
+}
+
+/// Information about active emergency mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmergencyInfo {
+    pub reason: String,
+    pub admin_identity: Identity,
+    pub started_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 /// GPU vendor.
@@ -240,6 +305,14 @@ pub enum GpuVendor {
     Amd,
 }
 
+/// GPU health status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GpuHealth {
+    Healthy,
+    Degraded,
+    Failed,
+}
+
 /// GPU capability information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuCapability {
@@ -247,6 +320,7 @@ pub struct GpuCapability {
     pub vendor: GpuVendor,
     pub model: String,
     pub memory_bytes: u64,
+    pub health: GpuHealth,
     pub pci_bus_id: String,
 }
 
@@ -259,14 +333,112 @@ pub struct SupervisorStatus {
     pub services_failed: u32,
 }
 
+/// Role binding: maps a role to principals and allowed actions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleBinding {
+    pub role: String,
+    pub principals: Vec<String>,
+    pub allowed_actions: Vec<String>,
+}
+
 /// Policy for a vCluster — controls drift thresholds, commit windows, approvals.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VClusterPolicy {
     pub vcluster_id: VClusterId,
-    pub max_drift_magnitude: f64,
-    pub commit_window_seconds: u32,
-    pub emergency_allowed: bool,
+    /// Unique identifier for this policy version.
+    #[serde(default)]
+    pub policy_id: String,
+    /// When this policy was last updated.
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+    /// Maximum drift magnitude before action is required.
+    pub drift_sensitivity: f64,
+    /// Base commit window in seconds.
+    pub base_commit_window_seconds: u32,
+    /// Emergency window in seconds (default 14400 = 4 hours).
+    #[serde(default = "default_emergency_window_seconds")]
+    pub emergency_window_seconds: u32,
+    /// Categories that auto-converge without acknowledgment.
+    #[serde(default)]
+    pub auto_converge_categories: Vec<String>,
+    /// Categories that require explicit acknowledgment.
+    #[serde(default)]
+    pub require_ack_categories: Vec<String>,
+    /// Enforcement mode: "observe", "warn", "enforce".
+    #[serde(default = "default_enforcement_mode")]
+    pub enforcement_mode: String,
+    /// Role bindings for this vCluster.
+    #[serde(default)]
+    pub role_bindings: Vec<RoleBinding>,
+    /// Whether this vCluster handles regulated/sensitive workloads.
+    #[serde(default)]
+    pub regulated: bool,
+    /// Whether two-person approval is required for state changes.
+    #[serde(default)]
     pub two_person_approval: bool,
+    /// Whether emergency mode is allowed.
+    #[serde(default = "default_true_flag")]
+    pub emergency_allowed: bool,
+    /// Audit log retention in days (default 2555 = ~7 years).
+    #[serde(default = "default_audit_retention_days")]
+    pub audit_retention_days: u32,
+    /// Federation policy template name (optional).
+    #[serde(default)]
+    pub federation_template: Option<String>,
+    /// Supervisor backend: "pact" or "systemd".
+    #[serde(default = "default_supervisor_backend_str")]
+    pub supervisor_backend: String,
+    /// Allowed commands for exec.
+    #[serde(default)]
+    pub exec_whitelist: Vec<String>,
+    /// Allowed commands for shell.
+    #[serde(default)]
+    pub shell_whitelist: Vec<String>,
+}
+
+const fn default_emergency_window_seconds() -> u32 {
+    14400
+}
+
+fn default_enforcement_mode() -> String {
+    "observe".to_string()
+}
+
+const fn default_true_flag() -> bool {
+    true
+}
+
+const fn default_audit_retention_days() -> u32 {
+    2555
+}
+
+fn default_supervisor_backend_str() -> String {
+    "pact".to_string()
+}
+
+impl Default for VClusterPolicy {
+    fn default() -> Self {
+        Self {
+            vcluster_id: String::new(),
+            policy_id: String::new(),
+            updated_at: None,
+            drift_sensitivity: 2.0,
+            base_commit_window_seconds: 900,
+            emergency_window_seconds: 14400,
+            auto_converge_categories: Vec::new(),
+            require_ack_categories: Vec::new(),
+            enforcement_mode: "observe".to_string(),
+            role_bindings: Vec::new(),
+            regulated: false,
+            two_person_approval: false,
+            emergency_allowed: true,
+            audit_retention_days: 2555,
+            federation_template: None,
+            supervisor_backend: "pact".to_string(),
+            exec_whitelist: Vec::new(),
+            shell_whitelist: Vec::new(),
+        }
+    }
 }
 
 /// Pre-computed boot overlay for a vCluster (compressed config bundle).
@@ -300,6 +472,30 @@ pub enum AdminOperationType {
     ServiceRestart,
     EmergencyStart,
     EmergencyEnd,
+    ApprovalDecision,
+}
+
+/// Status of a pending approval request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApprovalStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Expired,
+}
+
+/// A pending two-person approval request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingApproval {
+    pub approval_id: String,
+    pub original_request: String,
+    pub action: String,
+    pub scope: Scope,
+    pub requester: Identity,
+    pub approver: Option<Identity>,
+    pub status: ApprovalStatus,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[cfg(test)]
@@ -361,5 +557,121 @@ mod tests {
         assert_eq!(decl.name, "chronyd");
         assert_eq!(decl.restart, RestartPolicy::Always);
         assert_eq!(decl.order, 1);
+    }
+
+    #[test]
+    fn vcluster_policy_default_is_permissive() {
+        let policy = VClusterPolicy::default();
+        assert!((policy.drift_sensitivity - 2.0).abs() < f64::EPSILON);
+        assert_eq!(policy.base_commit_window_seconds, 900);
+        assert_eq!(policy.emergency_window_seconds, 14400);
+        assert_eq!(policy.enforcement_mode, "observe");
+        assert!(policy.emergency_allowed);
+        assert!(!policy.two_person_approval);
+        assert!(!policy.regulated);
+        assert_eq!(policy.audit_retention_days, 2555);
+        assert_eq!(policy.supervisor_backend, "pact");
+    }
+
+    #[test]
+    fn role_binding_serde_roundtrip() {
+        let binding = RoleBinding {
+            role: "pact-ops-ml".into(),
+            principals: vec!["alice@example.com".into()],
+            allowed_actions: vec!["commit".into(), "exec".into()],
+        };
+        let json = serde_json::to_string(&binding).unwrap();
+        let decoded: RoleBinding = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.role, "pact-ops-ml");
+        assert_eq!(decoded.principals.len(), 1);
+        assert_eq!(decoded.allowed_actions.len(), 2);
+    }
+
+    #[test]
+    fn pending_approval_serde_roundtrip() {
+        let approval = PendingApproval {
+            approval_id: "apr-001".into(),
+            original_request: "commit config".into(),
+            action: "commit".into(),
+            scope: Scope::VCluster("ml-train".into()),
+            requester: Identity {
+                principal: "alice@example.com".into(),
+                principal_type: PrincipalType::Human,
+                role: "pact-ops-ml".into(),
+            },
+            approver: None,
+            status: ApprovalStatus::Pending,
+            created_at: Utc::now(),
+            expires_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&approval).unwrap();
+        let decoded: PendingApproval = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.approval_id, "apr-001");
+        assert_eq!(decoded.status, ApprovalStatus::Pending);
+    }
+
+    #[test]
+    fn gpu_health_serde_roundtrip() {
+        let health = GpuHealth::Degraded;
+        let json = serde_json::to_string(&health).unwrap();
+        let decoded: GpuHealth = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, GpuHealth::Degraded);
+    }
+
+    #[test]
+    fn capability_report_with_all_fields() {
+        let report = CapabilityReport {
+            node_id: "node-001".into(),
+            timestamp: Utc::now(),
+            report_id: Uuid::new_v4(),
+            gpus: vec![GpuCapability {
+                index: 0,
+                vendor: GpuVendor::Nvidia,
+                model: "H100".into(),
+                memory_bytes: 80_000_000_000,
+                health: GpuHealth::Healthy,
+                pci_bus_id: "0000:3b:00.0".into(),
+            }],
+            memory: MemoryCapability {
+                total_bytes: 549_755_813_888,
+                available_bytes: 500_000_000_000,
+                numa_nodes: 2,
+            },
+            network: Some(NetworkCapability {
+                fabric_type: "slingshot".into(),
+                bandwidth_bps: 200_000_000_000,
+                latency_us: 1.5,
+            }),
+            storage: StorageCapability {
+                tmpfs_bytes: 1_073_741_824,
+                mounts: vec![MountPointInfo {
+                    path: "/scratch".into(),
+                    fs_type: "lustre".into(),
+                    source: "mds01:/scratch".into(),
+                    available: true,
+                }],
+            },
+            software: SoftwareCapability {
+                loaded_modules: vec!["cuda/12.0".into()],
+                uenv_image: Some("ml-base:latest".into()),
+                services: vec![],
+            },
+            config_state: ConfigState::Committed,
+            drift_summary: None,
+            emergency: None,
+            supervisor_status: SupervisorStatus {
+                backend: SupervisorBackend::Pact,
+                services_declared: 3,
+                services_running: 3,
+                services_failed: 0,
+            },
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let decoded: CapabilityReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.node_id, "node-001");
+        assert_eq!(decoded.gpus.len(), 1);
+        assert_eq!(decoded.gpus[0].health, GpuHealth::Healthy);
+        assert!(decoded.network.is_some());
+        assert_eq!(decoded.memory.numa_nodes, 2);
     }
 }

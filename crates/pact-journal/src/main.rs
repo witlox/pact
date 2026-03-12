@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use openraft::Raft;
 use openraft::impls::BasicNode;
+use openraft::Raft;
 use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, RaftTransportServer};
 use tokio::sync::RwLock;
 use tracing::{error, info};

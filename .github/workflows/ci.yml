@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths-ignore:
       - "docs/**"
+      - "specs/**"
       - "*.md"
       - "config/**"
   pull_request:
     branches: [main]
     paths-ignore:
       - "docs/**"
+      - "specs/**"
       - "*.md"
       - "config/**"
 

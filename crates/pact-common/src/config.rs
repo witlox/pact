@@ -151,7 +151,7 @@ impl Default for CommitWindowConfig {
     fn default() -> Self {
         Self {
             base_window_seconds: default_base_window(),
-            sensitivity: default_sensitivity(),
+            drift_sensitivity: default_sensitivity(),
             emergency_window_seconds: default_emergency_window(),
         }
     }

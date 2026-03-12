@@ -1,6 +1,6 @@
 //! Journal state machine — the application state managed by Raft.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use pact_common::types::{
     AdminOperation, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId, VClusterId,
@@ -17,8 +17,8 @@ use super::types::{JournalCommand, JournalResponse, JournalTypeConfig};
 /// go through Raft consensus via `JournalCommand`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct JournalState {
-    /// All config entries, indexed by sequence number.
-    pub entries: HashMap<EntrySeq, ConfigEntry>,
+    /// All config entries, indexed by sequence number (`BTreeMap` for ordered iteration).
+    pub entries: BTreeMap<EntrySeq, ConfigEntry>,
     /// Next sequence number to assign.
     pub next_sequence: EntrySeq,
     /// Per-node current config state.
@@ -29,6 +29,8 @@ pub struct JournalState {
     pub overlays: HashMap<VClusterId, BootOverlay>,
     /// Admin operation audit log.
     pub audit_log: Vec<AdminOperation>,
+    /// Node-to-vCluster assignment mapping.
+    pub node_assignments: HashMap<NodeId, VClusterId>,
 }
 
 impl StateMachineState<JournalTypeConfig> for JournalState {
@@ -55,6 +57,10 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
             }
             JournalCommand::RecordOperation(op) => {
                 self.audit_log.push(op);
+                JournalResponse::Ok
+            }
+            JournalCommand::AssignNode { node_id, vcluster_id } => {
+                self.node_assignments.insert(node_id, vcluster_id);
                 JournalResponse::Ok
             }
         }
@@ -131,10 +137,11 @@ mod tests {
         let mut state = JournalState::default();
         let policy = VClusterPolicy {
             vcluster_id: "ml-train".into(),
-            max_drift_magnitude: 5.0,
-            commit_window_seconds: 900,
+            drift_sensitivity: 5.0,
+            base_commit_window_seconds: 900,
             emergency_allowed: true,
             two_person_approval: false,
+            ..VClusterPolicy::default()
         };
         state.apply(JournalCommand::SetPolicy { vcluster_id: "ml-train".into(), policy });
         assert!(state.policies.contains_key("ml-train"));
@@ -184,5 +191,34 @@ mod tests {
         assert_eq!(decoded.entries.len(), 1);
         assert_eq!(decoded.node_states.len(), 1);
         assert_eq!(decoded.next_sequence, 1);
+    }
+
+    #[test]
+    fn entries_btreemap_ordered_iteration() {
+        let mut state = JournalState::default();
+        // Insert entries out of order by appending multiple
+        for _ in 0..5 {
+            state.apply(JournalCommand::AppendEntry(test_entry(EntryType::Commit)));
+        }
+        // BTreeMap should iterate in key order
+        let seqs: Vec<u64> = state.entries.keys().copied().collect();
+        assert_eq!(seqs, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn assign_node() {
+        let mut state = JournalState::default();
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-1".into(),
+            vcluster_id: "ml-train".into(),
+        });
+        assert_eq!(state.node_assignments.get("node-1"), Some(&"ml-train".to_string()));
+
+        // Reassign
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-1".into(),
+            vcluster_id: "dev-sandbox".into(),
+        });
+        assert_eq!(state.node_assignments.get("node-1"), Some(&"dev-sandbox".to_string()));
     }
 }
