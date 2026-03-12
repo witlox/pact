@@ -1,0 +1,121 @@
+# Enforcement Map
+
+Maps every invariant to its enforcement point in the codebase — where validation happens, what rejects violations, and how violations are detected.
+
+---
+
+## Journal Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| J1 | Monotonic sequence, no gaps | `JournalState::apply(AppendEntry)` | `next_sequence` incremented atomically in state machine | Cannot violate — Raft serializes all writes |
+| J2 | Immutability after commit | `JournalState` API | No `update_entry` or `delete_entry` method exists. BTreeMap is append-only via `apply()` | Structurally impossible |
+| J3 | Authenticated authorship | `JournalState::apply(AppendEntry)` | Validates `author.principal` and `author.role` non-empty | `JournalResponse::ValidationError` |
+| J4 | Acyclic parent chain | `JournalState::apply(AppendEntry)` | Validates `parent.is_none() \|\| parent < next_sequence` | `JournalResponse::ValidationError` |
+| J5 | Overlay checksum | `JournalState::apply(SetOverlay)` | Validates `checksum == hash(data)` | `JournalResponse::ValidationError` |
+| J6 | Single policy per vCluster | `JournalState::apply(SetPolicy)` | HashMap insert replaces existing entry | Structural — HashMap<VClusterId, _> allows only one |
+| J7 | Raft consensus for writes | `JournalServer` gRPC handlers | All write RPCs call `raft.client_write()`. No direct state mutation path. | Structural — no bypass exists |
+| J8 | Reads from local state | `JournalServer` gRPC handlers | Read RPCs access `JournalState` directly, not via Raft | By design — read methods don't call raft |
+| J9 | No duplicate concurrent commits | Raft log serialization | Raft guarantees exactly-once linearizable application | Raft protocol guarantee |
+
+---
+
+## Agent Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| A1 | At most one commit window | `CommitWindowManager::open()` | `active_window: Option<CommitWindow>` — if Some, extend instead of opening new | Extend existing window |
+| A2 | At most one emergency session | `EmergencySession` manager | `active_session: Option<EmergencySession>` — reject if Some | `PactError::EmergencyActive` |
+| A3 | Commit window formula | `CommitWindow::compute_duration()` | `window = base / (1 + magnitude * sensitivity)` — always > 0 since all inputs non-negative | Math guarantee (denominator always >= 1) |
+| A4 | Auto-rollback on expiry | `CommitWindowManager::tick()` | Timer checks `is_expired(now)`. If expired AND not emergency → rollback | Automatic rollback + journal entry |
+| A5 | Active consumer check | `CommitWindowManager::rollback()` | Checks active consumers before reverting | Rollback blocked, alert admin |
+| A6 | Service dependency ordering | `ServiceManager::start()` | Services sorted by `order` field. Shutdown in reverse. | Start failure if dependency not ready |
+| A7 | Resource budget | Runtime monitoring | Agent RSS < 50MB, CPU < 0.5% steady / < 2% during drift | Operational monitoring (Grafana alert) |
+| A8 | Boot time target | Boot sequence timing | Overlay streaming + apply pipeline optimized for < 2s | Operational monitoring |
+| A9 | Cached config during partition | `ConfigCache` | On journal connection loss, agent operates from cache. Pending entries queued for replay. | Degraded mode with cached data |
+| A10 | Emergency doesn't expand whitelist | `EmergencySession` + `ShellService` | Emergency mode flag only affects commit window expiry, not whitelist evaluation | Whitelist check ignores emergency state |
+
+---
+
+## Drift Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| D1 | Blacklist exclusion | `DriftEvaluator::evaluate()` | Pattern match against `BlacklistConfig` before processing | Event silently dropped |
+| D2 | Seven dimensions | `DriftDimension` enum | Enum has exactly 7 variants: Mounts, Files, Network, Services, Kernel, Packages, Gpu | Compile-time — no other variant possible |
+| D3 | Non-negative magnitudes | `DriftVector` + `DriftEvaluator::magnitude()` | All dimension values >= 0 (derived from event counts/deltas). Euclidean norm is non-negative. | Math guarantee |
+| D4 | Weight influence | `DriftEvaluator::magnitude()` | `DriftWeights` applied in magnitude calculation. Zero weight = dimension ignored. | Configuration — validated at load time |
+| D5 | Observe-only mode | `CommitWindowManager` | Checks `VClusterPolicy.enforcement_mode`. If "observe", logs drift but does not call `open()` | Drift logged to journal without window |
+
+---
+
+## Policy Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| P1 | Every operation authenticated | gRPC interceptor (all services) | Extract Bearer token from metadata. Call `TokenValidator::validate()`. Reject if missing/invalid. | `tonic::Status::UNAUTHENTICATED` |
+| P2 | Every operation authorized | `PolicyEngine::evaluate()` | Called after authentication. Checks RBAC + OPA. | `PolicyDecision::Deny` → `PERMISSION_DENIED` |
+| P3 | Role scoping | `RbacEngine::evaluate()` | Role name contains vCluster ID. RBAC checks scope match. | `RbacDecision::Deny` if scope mismatch |
+| P4 | Two-person approval | `PolicyEngine::evaluate()` | If `VClusterPolicy.two_person_approval == true` AND state-changing → `RequireApproval`. Approver != requester checked on approve. | `PolicyDecision::RequireApproval` |
+| P5 | Approval timeout | `PendingApproval.expires_at` | Checked when approval is submitted. Expired approvals rejected. | `ApprovalStatus::Expired` |
+| P6 | Platform admin always authorized | `RbacEngine::evaluate()` | Early return `Allow` for `pact-platform-admin` role. Still logged (O3). | Allow (but log) |
+| P7 | Degraded mode restrictions | `PolicyCache::evaluate_degraded()` | Separate code path when PolicyService unreachable. Fail-closed for two-person and OPA rules. | Deny complex operations, allow cached whitelist |
+| P8 | AI agent emergency restriction | `PolicyEngine::evaluate()` | Check `identity.role == "pact-service-ai"` AND `action == "emergency"` → Deny | `PolicyDecision::Deny` |
+
+---
+
+## Shell & Exec Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| S1 | Whitelist enforcement | `ShellService::exec()` / shell PATH | Exec: command checked against `VClusterPolicy.exec_whitelist`. Shell: PATH restricted to whitelisted dirs (ADR-007). | Exec: `PERMISSION_DENIED`. Shell: "command not found" |
+| S2 | Platform admin whitelist bypass | `ShellService::exec()` | If role == `pact-platform-admin`, skip whitelist check. Command still logged. | Allow + log |
+| S3 | Restricted bash | Shell session setup | Shell spawned as `rbash` with restricted PATH, no redirects, no absolute paths | Bash restriction enforcement |
+| S4 | Session audit | `ShellService::exec()` and shell `PROMPT_COMMAND` | Every command → `AdminOperation` entry in journal | Automatic via PROMPT_COMMAND hook |
+| S5 | State-changing commands trigger window | Agent drift observer | Shell does NOT pre-classify (S6). Observer detects actual filesystem/config changes post-execution. | DriftEvent → CommitWindow (normal drift flow) |
+| S6 | No pre-classification | `ShellService` design | Shell passes commands directly to bash. No command parsing or classification. Drift detection handles state changes. | By design — observer detects, not shell |
+
+---
+
+## Observability Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| O1 | No per-agent Prometheus | Agent design | No metrics HTTP endpoint in agent. Telemetry flows through journal only (ADR-005). | Structural — no endpoint to scrape |
+| O2 | Journal metrics port 9091 | `TelemetryServer` (axum) | Hardcoded bind to `:9091`. Avoids Prometheus default 9090 conflict. | Config validation at startup |
+| O3 | Audit trail continuity | `JournalState.audit_log` | Append-only Vec. No delete/truncate method. Emergency/degraded modes still append. | Structural — no removal path |
+
+---
+
+## Federation Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| F1 | Config state is site-local | `FederationSync` trait | Sync only pulls Rego templates from Sovra. No method to push config/drift/audit data. | Structural — no export API |
+| F2 | Policy templates federated | `FederationSync::sync()` | Pulls Rego templates on interval (default 300s). Stores locally for OPA. | Templates cached and used locally |
+| F3 | Graceful federation failure | `FederationSync::sync()` error handling | On Sovra unreachable, continue with cached templates. Log warning. No functionality lost. | Degraded: cached templates |
+
+---
+
+## Raft Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| R1 | Independent Raft groups | Deployment architecture | Separate openraft instances, separate state machines, separate WAL directories | Configuration — validated at startup |
+| R2 | Pact is incumbent | Boot sequence | pact-journal starts before lattice in co-located mode (system service ordering) | Deployment constraint |
+| R3 | Quorum ports | Configuration | Pact: Raft 9444, gRPC 9443. Lattice: Raft 9000, gRPC 50051. | Config validation at startup |
+
+---
+
+## Enforcement Categories
+
+Summary of how invariants are enforced:
+
+| Category | Count | Invariants | Description |
+|----------|-------|------------|-------------|
+| **Structural** | 10 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6 | Impossible to violate by design (no API exists to break them) |
+| **Validation** | 7 | J3, J4, J5, A3, D3, P5, O2 | Checked at input boundary, rejected with error |
+| **Runtime logic** | 16 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5 | Active enforcement in business logic |
+| **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
+| **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
+| **Degraded fallback** | 4 | P7, F2, F3, A9 | Special behavior when components unavailable |

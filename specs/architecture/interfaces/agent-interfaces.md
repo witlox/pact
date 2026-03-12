@@ -1,0 +1,142 @@
+# Agent Interfaces
+
+Trait interfaces for agent subsystems and gRPC service interfaces.
+
+---
+
+## ServiceManager Trait
+
+```rust
+/// Process supervision interface. Two implementations:
+/// - PactSupervisor (default): direct fork/exec, cgroup v2
+/// - SystemdBackend (feature "systemd"): D-Bus delegation
+/// Source: ADR-006, process_supervisor.feature
+#[async_trait]
+pub trait ServiceManager: Send + Sync {
+    /// Start a service. Respects dependency ordering (invariant A6).
+    async fn start(&self, service: &ServiceDecl) -> Result<(), PactError>;
+    /// Stop a running service. Sends SIGTERM → grace period → SIGKILL.
+    async fn stop(&self, service: &ServiceDecl) -> Result<(), PactError>;
+    /// Restart a service (stop + start).
+    async fn restart(&self, service: &ServiceDecl) -> Result<(), PactError>;
+    /// Get current service state.
+    async fn status(&self, service: &ServiceDecl) -> Result<ServiceInstance, PactError>;
+    /// Run health check (process, HTTP, or TCP).
+    async fn health(&self, service: &ServiceDecl) -> Result<bool, PactError>;
+}
+```
+
+**Contract:**
+- `start` logs ServiceLifecycle entry to journal (process_supervisor.feature: scenario 16)
+- `stop` uses reverse dependency order for ordered shutdown (scenario 12)
+- Restart policy enforced automatically (scenarios 7-10)
+- ServiceInstance tracks pid, uptime, restart_count
+
+## GpuBackend Trait
+
+```rust
+/// GPU hardware detection. Feature-gated per vendor.
+/// - NvidiaBackend (feature "nvidia"): NVML + nvidia-smi fallback
+/// - AmdBackend (feature "amd"): ROCm SMI + rocm-smi fallback
+/// - MockGpuBackend: for macOS dev/test
+/// Source: capability_reporting.feature
+#[async_trait]
+pub trait GpuBackend: Send + Sync {
+    /// Detect all GPUs and return capability info.
+    async fn detect(&self) -> Result<Vec<GpuCapability>, PactError>;
+}
+```
+
+## StateObserver Trait
+
+```rust
+/// System state observation. Multiple implementations compose together.
+/// - EbpfObserver (feature "ebpf"): system-level tracepoints
+/// - InotifyObserver: config file path watches
+/// - NetlinkObserver: interface/address/mount changes
+/// - MockObserver: for macOS dev/test
+/// Source: drift_detection.feature, ADR-002
+#[async_trait]
+pub trait StateObserver: Send + Sync {
+    /// Start observing. Emits DriftEvents through the channel.
+    async fn start(&self, tx: mpsc::Sender<DriftEvent>) -> Result<(), PactError>;
+    /// Stop observing.
+    async fn stop(&self) -> Result<(), PactError>;
+}
+```
+
+**Contract:**
+- Events for blacklisted paths are filtered before emission (invariant D1)
+- Observe-only mode: events emitted but no commit windows opened (D5)
+- Multiple observers run concurrently, all feed same drift evaluator
+
+## DriftEvaluator Interface
+
+```rust
+/// Compares actual vs declared state, computes DriftVector.
+/// Source: drift_detection.feature, invariants D1-D5
+pub struct DriftEvaluator {
+    pub blacklist: BlacklistConfig,
+    pub weights: DriftWeights,
+}
+
+impl DriftEvaluator {
+    /// Process a drift event. Returns updated DriftVector if not blacklisted.
+    pub fn evaluate(&self, event: &DriftEvent) -> Option<DriftVector>;
+    /// Compute total magnitude from vector.
+    /// Formula: weighted Euclidean norm (invariant D3: non-negative).
+    pub fn magnitude(&self, vector: &DriftVector) -> f64;
+}
+```
+
+## CommitWindowManager Interface
+
+```rust
+/// Manages the commit window lifecycle.
+/// Source: commit_window.feature, invariants A1, A3, A4, A5
+pub struct CommitWindowManager {
+    pub active_window: Option<CommitWindow>,
+    pub config: CommitWindowConfig,
+}
+
+impl CommitWindowManager {
+    /// Open a commit window based on drift magnitude.
+    /// Invariant A1: at most one active window.
+    pub fn open(&mut self, drift: &DriftVector, magnitude: f64) -> &CommitWindow;
+    /// Commit: close window, record in journal.
+    pub async fn commit(&mut self, journal: &dyn JournalClient) -> Result<(), PactError>;
+    /// Rollback: close window, check active consumers (A5), revert state.
+    pub async fn rollback(&mut self, journal: &dyn JournalClient) -> Result<(), PactError>;
+    /// Check expiry, trigger auto-rollback if expired (A4).
+    /// Exception: emergency mode suspends auto-rollback.
+    pub async fn tick(&mut self, now: DateTime<Utc>, journal: &dyn JournalClient) -> Result<(), PactError>;
+}
+```
+
+## ShellService (shell.proto)
+
+```rust
+#[tonic::async_trait]
+impl ShellService for AgentServer {
+    /// Execute single command. Whitelisted, fork/exec'd directly.
+    /// Auth: OIDC token in metadata (P1). Whitelist check (S1).
+    /// State-changing commands trigger commit window (S5).
+    /// All commands logged to journal (S4).
+    type ExecStream: Stream<Item = Result<ExecOutput, Status>>;
+    async fn exec(&self, request: ExecRequest)
+        -> Result<Response<Self::ExecStream>, Status>;
+
+    /// Interactive shell session. Restricted bash (S3).
+    /// Auth: requires higher privilege than exec (shell_session.feature: scenario 4).
+    /// Bidirectional stream: ShellInput/ShellOutput.
+    /// Session recorded in journal (S4).
+    async fn shell(&self, request: Request<Streaming<ShellInput>>)
+        -> Result<Response<Self::ShellStream>, Status>;
+}
+```
+
+**Contract:**
+- Whitelist enforced via PATH restriction, not command parsing (ADR-007)
+- Platform admin can bypass whitelist (S2), still logged
+- Shell does NOT pre-classify commands — drift observer detects changes (S6)
+- Learning mode captures command-not-found events

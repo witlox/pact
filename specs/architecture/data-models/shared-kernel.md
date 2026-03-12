@@ -1,0 +1,314 @@
+# Shared Kernel Data Models (pact-common)
+
+All types shared across crate boundaries. These are the canonical domain types.
+
+**Design note:** Where Rust types and proto types diverge, this document describes the **target** Rust types. Proto alignment issues from the architect review are resolved here.
+
+---
+
+## Identity & Authorization
+
+```rust
+pub type NodeId = String;
+pub type VClusterId = String;
+pub type EntrySeq = u64;
+
+pub struct Identity {
+    pub principal: String,          // email or service account
+    pub principal_type: PrincipalType,
+    pub role: String,               // OIDC role claim
+}
+// Invariant J3: principal and role must be non-empty
+
+pub enum PrincipalType { Human, Agent, Service }
+// Proto alignment: proto comment says "admin" — fix to "human"
+
+pub struct RoleBinding {
+    pub role: String,
+    pub principals: Vec<String>,
+    pub allowed_actions: Vec<String>,
+}
+```
+
+## Configuration State
+
+```rust
+pub enum ConfigState {
+    ObserveOnly,    // Initial deployment mode (ADR-002)
+    Committed,      // Declared = actual
+    Drifted,        // Declared ≠ actual, commit window open
+    Converging,     // Auto-converge in progress
+    Emergency,      // Extended window, no auto-rollback (ADR-004)
+}
+
+pub enum EntryType {
+    Commit, Rollback, AutoConverge, DriftDetected,
+    CapabilityChange, PolicyUpdate, BootConfig,
+    EmergencyStart, EmergencyEnd,
+    ExecLog, ShellSession, ServiceLifecycle,
+    PendingApproval,  // Two-person approval workflow
+}
+// Proto fix needed: add ENTRY_TYPE_PENDING_APPROVAL to config.proto
+
+pub enum Scope {
+    Global,
+    VCluster(VClusterId),
+    Node(NodeId),
+}
+
+pub struct ConfigEntry {
+    pub sequence: EntrySeq,
+    pub timestamp: DateTime<Utc>,
+    pub entry_type: EntryType,
+    pub scope: Scope,
+    pub author: Identity,           // Invariant J3: non-empty
+    pub parent: Option<EntrySeq>,   // Invariant J4: parent < sequence
+    pub state_delta: Option<StateDelta>,
+    pub policy_ref: Option<String>,
+    pub ttl_seconds: Option<u32>,   // Proto fix: align proto to u32 (not Duration)
+    pub emergency_reason: Option<String>,
+}
+```
+
+## State Deltas & Drift
+
+```rust
+pub struct StateDelta {
+    pub mounts: Vec<DeltaItem>,
+    pub files: Vec<DeltaItem>,
+    pub network: Vec<DeltaItem>,
+    pub services: Vec<DeltaItem>,
+    pub kernel: Vec<DeltaItem>,
+    pub packages: Vec<DeltaItem>,
+    pub gpu: Vec<DeltaItem>,
+}
+
+pub struct DeltaItem {
+    pub action: DeltaAction,
+    pub key: String,
+    pub value: Option<String>,
+    pub previous: Option<String>,
+}
+
+pub enum DeltaAction { Add, Remove, Modify }
+
+/// Drift magnitude per dimension — used for commit window formula.
+/// This is the Rust-native computation type (f64 magnitudes).
+pub struct DriftVector {
+    pub mounts: f64,
+    pub files: f64,
+    pub network: f64,
+    pub services: f64,
+    pub kernel: f64,
+    pub packages: f64,
+    pub gpu: f64,
+}
+// Note: Proto DriftVector uses repeated Delta* messages (detailed deltas).
+// Resolution: Rust DriftVector stays as f64 magnitudes for computation.
+// Proto DriftVector stays as detailed deltas for wire format.
+// Conversion: DriftVector::from_delta(&StateDelta) computes magnitudes.
+// Agent computes DriftVector locally; proto carries StateDelta for detail.
+
+pub struct DriftWeights {
+    pub mounts: f64,  // default 1.0
+    pub files: f64,   // default 1.0
+    pub network: f64, // default 1.0
+    pub services: f64,// default 1.0
+    pub kernel: f64,  // default 2.0
+    pub packages: f64,// default 1.0
+    pub gpu: f64,     // default 2.0
+}
+```
+
+## VCluster Policy (17 fields, matching policy.proto)
+
+```rust
+pub struct VClusterPolicy {
+    pub vcluster_id: VClusterId,
+    pub policy_id: String,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub drift_sensitivity: f64,              // default 2.0
+    pub base_commit_window_seconds: u32,     // default 900
+    pub emergency_window_seconds: u32,       // default 14400
+    pub auto_converge_categories: Vec<String>,
+    pub require_ack_categories: Vec<String>,
+    pub enforcement_mode: String,            // "observe" | "warn" | "enforce"
+    pub role_bindings: Vec<RoleBinding>,
+    pub regulated: bool,
+    pub two_person_approval: bool,
+    pub emergency_allowed: bool,             // default true
+    pub audit_retention_days: u32,           // default 2555
+    pub federation_template: Option<String>,
+    pub supervisor_backend: String,          // "pact" | "systemd"
+    pub exec_whitelist: Vec<String>,
+    pub shell_whitelist: Vec<String>,
+}
+// Default impl: permissive observe-only (ADR-002 bootstrap)
+```
+
+## Boot Overlay
+
+```rust
+pub struct BootOverlay {
+    pub vcluster_id: VClusterId,
+    pub version: u64,
+    pub data: Vec<u8>,              // zstd compressed
+    pub checksum: String,           // Invariant J5: matches hash of data
+}
+```
+
+## Service Declaration & State
+
+```rust
+pub enum ServiceState {
+    Starting, Running, Stopping, Stopped, Failed, Restarting,
+}
+
+pub struct ServiceDecl {
+    pub name: String,
+    pub binary: String,
+    pub args: Vec<String>,
+    pub restart: RestartPolicy,
+    pub restart_delay_seconds: u32,
+    pub depends_on: Vec<String>,
+    pub order: u32,
+    pub cgroup_memory_max: Option<String>,
+    pub health_check: Option<HealthCheck>,
+}
+
+pub enum RestartPolicy { Always, OnFailure, Never }
+
+pub struct HealthCheck {
+    pub check_type: HealthCheckType,
+    pub interval_seconds: u32,
+}
+
+pub enum HealthCheckType {
+    Process,
+    Http { url: String },
+    Tcp { port: u16 },
+}
+
+pub enum SupervisorBackend { Pact, Systemd }
+```
+
+## Capability Reporting
+
+```rust
+pub struct CapabilityReport {
+    pub node_id: NodeId,
+    pub timestamp: DateTime<Utc>,
+    pub report_id: Uuid,
+    pub gpus: Vec<GpuCapability>,
+    pub memory: MemoryCapability,
+    pub network: Option<NetworkCapability>,
+    pub storage: StorageCapability,
+    pub software: SoftwareCapability,
+    pub config_state: ConfigState,
+    pub drift_summary: Option<DriftVector>,
+    pub emergency: Option<EmergencyInfo>,
+    pub supervisor_status: SupervisorStatus,
+}
+
+pub enum GpuVendor { Nvidia, Amd }
+pub enum GpuHealth { Healthy, Degraded, Failed }
+
+pub struct GpuCapability {
+    pub index: u32,
+    pub vendor: GpuVendor,
+    pub model: String,
+    pub memory_bytes: u64,
+    pub health: GpuHealth,
+    pub pci_bus_id: String,
+}
+
+pub struct MemoryCapability {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub numa_nodes: u32,
+}
+
+pub struct NetworkCapability {
+    pub fabric_type: String,
+    pub bandwidth_bps: u64,
+    pub latency_us: f64,
+}
+
+pub struct StorageCapability {
+    pub tmpfs_bytes: u64,
+    pub mounts: Vec<MountPointInfo>,
+}
+
+pub struct MountPointInfo {
+    pub path: String,
+    pub fs_type: String,
+    pub source: String,
+    pub available: bool,
+}
+
+pub struct SoftwareCapability {
+    pub loaded_modules: Vec<String>,
+    pub uenv_image: Option<String>,
+    pub services: Vec<ServiceStatusInfo>,
+}
+
+pub struct ServiceStatusInfo {
+    pub name: String,
+    pub state: ServiceState,
+    pub pid: u32,
+    pub uptime_seconds: u64,
+    pub restart_count: u32,
+}
+
+pub struct EmergencyInfo {
+    pub reason: String,
+    pub admin_identity: Identity,  // Proto fix: change proto from string to Identity message
+    pub started_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+pub struct SupervisorStatus {
+    pub backend: SupervisorBackend,
+    pub services_declared: u32,
+    pub services_running: u32,
+    pub services_failed: u32,
+}
+```
+
+## Admin Operations & Audit
+
+```rust
+pub struct AdminOperation {
+    pub operation_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub actor: Identity,
+    pub operation_type: AdminOperationType,
+    pub scope: Scope,
+    pub detail: String,
+}
+
+pub enum AdminOperationType {
+    Exec, ShellSessionStart, ShellSessionEnd,
+    ServiceStart, ServiceStop, ServiceRestart,
+    EmergencyStart, EmergencyEnd,
+    ApprovalDecision,
+}
+// Proto fix needed: define AdminOperationType enum in proto
+
+pub enum ApprovalStatus { Pending, Approved, Rejected, Expired }
+
+pub struct PendingApproval {
+    pub approval_id: String,
+    pub original_request: String,
+    pub action: String,
+    pub scope: Scope,
+    pub requester: Identity,
+    pub approver: Option<Identity>,
+    pub status: ApprovalStatus,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+// Stored as ConfigEntry(EntryType::PendingApproval) in journal.
+// The PendingApproval struct is the state_delta payload.
+// Approval/rejection creates a new ConfigEntry referencing the original via parent.
+```
