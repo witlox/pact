@@ -1864,6 +1864,7 @@ dependencies = [
  "aya-log",
  "chrono",
  "clap",
+ "jsonwebtoken",
  "nix",
  "pact-common",
  "pact-test-harness",
