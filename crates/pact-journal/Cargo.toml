@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 pact-common = { workspace = true }
-pact-policy = { path = "../pact-policy" }
+pact-policy = { path = "../pact-policy", version = "2026.1.0" }
 raft-hpc-core = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
