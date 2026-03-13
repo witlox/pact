@@ -27,7 +27,8 @@ use tracing::info;
 use pact_common::types::Identity;
 
 use crate::shell::auth::{
-    extract_bearer_token, has_ops_role, is_platform_admin, validate_token, AuthConfig, AuthError,
+    extract_bearer_token, has_ops_role, has_viewer_role, is_platform_admin, validate_token,
+    AuthConfig, AuthError,
 };
 use crate::shell::exec::{execute_command, ExecConfig, ExecResult};
 use crate::shell::session::SessionManager;
@@ -110,15 +111,20 @@ impl ShellServer {
             )));
         }
 
-        // Check role
+        let state_changing = whitelist.is_state_changing(command);
+
+        // Check role — viewers can exec read-only commands only
         if !has_ops_role(identity, &self.vcluster_id) {
+            if has_viewer_role(identity, &self.vcluster_id) && !state_changing {
+                return Ok(false);
+            }
             return Err(AuthError::InsufficientPrivileges(format!(
                 "requires pact-ops-{} or pact-platform-admin role",
                 self.vcluster_id
             )));
         }
 
-        Ok(whitelist.is_state_changing(command))
+        Ok(state_changing)
     }
 
     /// Execute a single command (the full pipeline).
@@ -316,6 +322,32 @@ mod tests {
         };
 
         let result = server.authorize_exec(&identity, "ps").await;
+        assert!(matches!(result, Err(AuthError::InsufficientPrivileges(_))));
+    }
+
+    #[tokio::test]
+    async fn viewer_can_exec_read_only() {
+        let server = test_server();
+        let viewer = Identity {
+            principal: "viewer@example.com".into(),
+            principal_type: pact_common::types::PrincipalType::Human,
+            role: "pact-viewer-ml-training".into(),
+        };
+
+        let state_changing = server.authorize_exec(&viewer, "ps").await.unwrap();
+        assert!(!state_changing);
+    }
+
+    #[tokio::test]
+    async fn viewer_denied_state_changing() {
+        let server = test_server();
+        let viewer = Identity {
+            principal: "viewer@example.com".into(),
+            principal_type: pact_common::types::PrincipalType::Human,
+            role: "pact-viewer-ml-training".into(),
+        };
+
+        let result = server.authorize_exec(&viewer, "systemctl").await;
         assert!(matches!(result, Err(AuthError::InsufficientPrivileges(_))));
     }
 
