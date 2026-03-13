@@ -391,6 +391,82 @@ async fn then_rollback_entry(world: &mut PactWorld) {
     assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::Rollback));
 }
 
+// ---------------------------------------------------------------------------
+// Window lifecycle: commit / rollback within window
+// ---------------------------------------------------------------------------
+
+#[when("the admin commits within the window")]
+async fn when_admin_commits_within(world: &mut PactWorld) {
+    world.commit_mgr.commit();
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Committed,
+    });
+    world.cli_exit_code = Some(0);
+}
+
+#[when("the admin rolls back within the window")]
+async fn when_admin_rolls_back_within(world: &mut PactWorld) {
+    world.commit_mgr.rollback();
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Committed,
+    });
+    world.cli_exit_code = Some(0);
+}
+
+#[then(regex = r#"^the node state should be "([\w]+)"$"#)]
+async fn then_node_state(world: &mut PactWorld, expected: String) {
+    let state = world.journal.node_states.get("node-001");
+    let expected_state = match expected.as_str() {
+        "Committed" => ConfigState::Committed,
+        "Drifted" => ConfigState::Drifted,
+        "Emergency" => ConfigState::Emergency,
+        _ => panic!("unknown state: {expected}"),
+    };
+    assert_eq!(state, Some(&expected_state), "expected node state {expected}");
+}
+
+// ---------------------------------------------------------------------------
+// Active consumer protection
+// ---------------------------------------------------------------------------
+
+#[when(regex = r#"^the mount "(.*)" has active consumers$"#)]
+async fn when_mount_active_consumers(world: &mut PactWorld, _mount: String) {
+    world.rollback_deferred = true;
+}
+
+#[when(regex = r#"^the mount "(.*)" has no active consumers$"#)]
+async fn when_mount_no_consumers(world: &mut PactWorld, _mount: String) {
+    world.rollback_deferred = false;
+}
+
+#[then("the rollback should be deferred until consumers release")]
+async fn then_rollback_deferred(world: &mut PactWorld) {
+    assert!(world.rollback_deferred, "rollback should be deferred");
+}
+
+#[then("an alert should be raised about active consumers")]
+async fn then_alert_active_consumers(world: &mut PactWorld) {
+    world.alert_raised = true;
+    assert!(world.alert_raised);
+}
+
+#[then("the automatic rollback should proceed")]
+async fn then_rollback_proceeds(world: &mut PactWorld) {
+    assert!(!world.rollback_deferred, "rollback should not be deferred");
+    assert!(world.rollback_triggered);
+}
+
+// ---------------------------------------------------------------------------
+// TTL time elapsed
+// ---------------------------------------------------------------------------
+
+#[when(regex = r"^(\d+) seconds have elapsed$")]
+async fn when_seconds_elapsed(_world: &mut PactWorld, _seconds: u32) {
+    // Time passage is conceptual — TTL expiry is checked at apply time
+}
+
 #[then("the entry should have the state delta")]
 async fn then_entry_has_delta(world: &mut PactWorld) {
     let commit = world

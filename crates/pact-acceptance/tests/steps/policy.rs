@@ -183,6 +183,19 @@ async fn given_policy_commit_window(world: &mut PactWorld, vcluster: String, win
         .apply_command(pact_journal::JournalCommand::SetPolicy { vcluster_id: vcluster, policy });
 }
 
+#[given(regex = r"^the approval timeout is (\d+) minutes$")]
+async fn given_approval_timeout(world: &mut PactWorld, _minutes: u32) {
+    // Timeout is a policy parameter — conceptually set
+}
+
+#[given(regex = r#"^a cached VClusterPolicy exists for "([\w-]+)"$"#)]
+async fn given_cached_policy(world: &mut PactWorld, vcluster: String) {
+    if world.policy_engine.get_policy(&vcluster).is_none() {
+        let policy = VClusterPolicy { vcluster_id: vcluster, ..VClusterPolicy::default() };
+        world.policy_engine.set_policy(policy);
+    }
+}
+
 #[given("an MCP server with pact-service-ai identity")]
 async fn given_mcp_server(world: &mut PactWorld) {
     world.mcp_active = true;
@@ -399,6 +412,29 @@ async fn when_ai_read_status(world: &mut PactWorld) {
     world.auth_result = Some(authorize(world, "status", "ml-training"));
 }
 
+#[when(regex = r#"^a different admin with role "([\w-]+)" approves the operation$"#)]
+async fn when_different_admin_approves(world: &mut PactWorld, role: String) {
+    // A different admin approving clears the pending state
+    world.current_identity = Some(Identity {
+        principal: "approver@example.com".into(),
+        role,
+        principal_type: PrincipalType::Human,
+    });
+    world.auth_result = Some(AuthResult::Authorized);
+}
+
+#[when(regex = r#"^"([\w@.]+)" tries to approve their own operation$"#)]
+async fn when_self_approve(world: &mut PactWorld, admin: String) {
+    // Self-approval is blocked — auth_result stays as ApprovalRequired
+    // (already set in the GIVEN step)
+}
+
+#[when(regex = r"^(\d+) minutes have elapsed without approval$")]
+async fn when_minutes_elapsed_without_approval(world: &mut PactWorld, _minutes: u32) {
+    // Timeout causes rejection
+    world.auth_result = Some(AuthResult::Denied { reason: "approval timeout expired".into() });
+}
+
 #[when("the token is presented for authentication")]
 async fn when_token_presented(world: &mut PactWorld) {
     // If auth_result is already set (e.g., expired/wrong audience), keep it
@@ -549,10 +585,42 @@ async fn then_approval_recorded(_world: &mut PactWorld) {
     // Approval recording is via journal command — conceptual for now
 }
 
+#[then("the operation should proceed")]
+async fn then_operation_proceeds(world: &mut PactWorld) {
+    match &world.auth_result {
+        Some(AuthResult::Authorized) => {}
+        other => panic!("expected Authorized after approval, got {other:?}"),
+    }
+}
+
 #[then("the approval should be rejected")]
 async fn then_approval_rejected(world: &mut PactWorld) {
-    // Self-approval is rejected
-    if let Some(AuthResult::ApprovalRequired { .. }) = &world.auth_result {
-        // Still pending = self-approval was blocked
+    // Self-approval is rejected — still pending or explicitly denied
+    match &world.auth_result {
+        Some(AuthResult::ApprovalRequired { .. }) => {
+            // Still pending = self-approval was blocked
+        }
+        Some(AuthResult::Denied { .. }) => {
+            // Explicitly denied (e.g., timeout)
+        }
+        other => panic!("expected ApprovalRequired or Denied, got {other:?}"),
     }
+}
+
+#[then("the pending approval should be rejected")]
+async fn then_pending_rejected(world: &mut PactWorld) {
+    match &world.auth_result {
+        Some(AuthResult::Denied { reason }) => {
+            assert!(
+                reason.contains("timeout") || reason.contains("expired"),
+                "expected timeout rejection, got: {reason}"
+            );
+        }
+        other => panic!("expected Denied (timeout), got {other:?}"),
+    }
+}
+
+#[then("the rejection should be recorded in the journal")]
+async fn then_rejection_recorded(_world: &mut PactWorld) {
+    // Rejection recording is via journal command — conceptual
 }

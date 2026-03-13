@@ -109,7 +109,7 @@ async fn given_latest_seq(world: &mut PactWorld, vcluster: String, seq: u64) {
     }
 }
 
-#[given(regex = r#"^node "([\w-]+)" has a committed delta changing "([\w.]+)" to "([\w]+)"$"#)]
+#[given(regex = r#"^node "([\w-]+)" has (?:a )?committed delta changing "([\w.]+)" to "([\w]+)"$"#)]
 async fn given_node_delta_change(world: &mut PactWorld, node: String, key: String, value: String) {
     let mut entry = ConfigEntry {
         sequence: 0,
@@ -341,6 +341,19 @@ async fn when_delta_promoted(world: &mut PactWorld, node: String) {
 
 #[when(regex = r#"^the result is applied via "pact apply"$"#)]
 async fn when_apply_promoted(world: &mut PactWorld) {
+    // Create overlay if not present
+    if !world.journal.overlays.contains_key("ml-training") {
+        let overlay = BootOverlay {
+            vcluster_id: "ml-training".into(),
+            version: 1,
+            data: b"[sysctl]\n".to_vec(),
+            checksum: "sha256:v1".into(),
+        };
+        world.journal.apply_command(JournalCommand::SetOverlay {
+            vcluster_id: "ml-training".into(),
+            overlay,
+        });
+    }
     // Update overlay with promoted changes
     if let Some(overlay) = world.journal.overlays.get("ml-training") {
         let mut new_data = overlay.data.clone();

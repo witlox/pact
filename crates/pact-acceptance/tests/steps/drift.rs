@@ -275,6 +275,11 @@ async fn then_drift_entry(world: &mut PactWorld) {
     assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected));
 }
 
+#[then("no rollback should be triggered")]
+async fn then_no_rollback(world: &mut PactWorld) {
+    assert!(!world.rollback_triggered, "rollback should not be triggered in observe mode");
+}
+
 #[then("the total drift magnitude should be greater than a single dimension at 0.5")]
 async fn then_drift_compound(world: &mut PactWorld) {
     let compound = world.drift_vector_override.magnitude(&world.drift_weights);

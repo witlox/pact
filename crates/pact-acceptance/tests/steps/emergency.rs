@@ -162,6 +162,91 @@ async fn when_emergency_expires(world: &mut PactWorld) {
     world.alert_raised = true;
 }
 
+#[when(regex = r#"^admin "([\w@.]+)" commits the changes$"#)]
+async fn when_admin_commits_changes(world: &mut PactWorld, admin: String) {
+    world.commit_mgr.commit();
+    let actor = Identity {
+        principal: admin.clone(),
+        principal_type: PrincipalType::Human,
+        role: "pact-ops-ml-training".into(),
+    };
+    world.emergency_mgr.end(&actor, false).ok();
+
+    // Record commit entry
+    let entry = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::Commit,
+        scope: Scope::Node("node-001".into()),
+        author: Identity {
+            principal: admin,
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml-training".into(),
+        },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: None,
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+}
+
+#[when(regex = r#"^admin "([\w@.]+)" rolls back the changes$"#)]
+async fn when_admin_rolls_back_changes(world: &mut PactWorld, admin: String) {
+    world.commit_mgr.rollback();
+    let actor = Identity {
+        principal: admin.clone(),
+        principal_type: PrincipalType::Human,
+        role: "pact-ops-ml-training".into(),
+    };
+    world.emergency_mgr.end(&actor, false).ok();
+
+    // Record rollback entry
+    let entry = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::Rollback,
+        scope: Scope::Node("node-001".into()),
+        author: Identity {
+            principal: admin,
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml-training".into(),
+        },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: None,
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+}
+
+#[when(regex = r#"^admin "([\w@.]+)" with role "([\w-]+)" force-ends the emergency$"#)]
+async fn when_admin_force_ends(world: &mut PactWorld, admin: String, role: String) {
+    let actor = Identity {
+        principal: admin.clone(),
+        principal_type: PrincipalType::Human,
+        role: role.clone(),
+    };
+    world.emergency_mgr.end(&actor, true).ok();
+
+    // Record EmergencyEnd entry attributed to the force-ending admin
+    let entry = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::EmergencyEnd,
+        scope: Scope::Node("node-001".into()),
+        author: Identity { principal: admin, principal_type: PrincipalType::Human, role },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: Some("force-ended stale emergency".into()),
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+}
+
 #[when(
     regex = r#"^admin "([\w@.]+)" tries to enter emergency mode on a node in vCluster "([\w-]+)"$"#
 )]
@@ -196,6 +281,24 @@ async fn when_viewer_emergency(world: &mut PactWorld, viewer: String, role: Stri
 // ---------------------------------------------------------------------------
 // Emergency THEN steps
 // ---------------------------------------------------------------------------
+
+#[then("the exec operation should be recorded in the audit log")]
+async fn then_exec_in_audit(world: &mut PactWorld) {
+    // Check journal entries for ExecLog
+    let has_exec = world.journal.entries.values().any(|e| e.entry_type == EntryType::ExecLog);
+    assert!(has_exec, "audit log should contain an ExecLog entry");
+}
+
+#[then("the audit entry should reference the emergency session")]
+async fn then_audit_references_emergency(world: &mut PactWorld) {
+    let exec_entry = world
+        .journal
+        .entries
+        .values()
+        .find(|e| e.entry_type == EntryType::ExecLog)
+        .expect("no ExecLog entry");
+    assert!(exec_entry.emergency_reason.is_some(), "exec entry should reference emergency session");
+}
 
 #[then("the shell whitelist should remain unchanged")]
 async fn then_whitelist_unchanged(world: &mut PactWorld) {
