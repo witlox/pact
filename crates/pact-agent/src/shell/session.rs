@@ -468,7 +468,49 @@ mod tests {
     }
 
     #[test]
-    fn setup_session_bin_dir_stub_succeeds() {
+    fn cleanup_stale_removes_old_closing_sessions() {
+        let mut mgr = SessionManager::new(10);
+
+        // Create and activate, then close
+        let s1 = mgr
+            .create_session(test_user(), "n1".into(), "vc".into(), 24, 80, "xterm".into())
+            .unwrap();
+        let sid1 = s1.session_id.clone();
+        mgr.get_mut(&sid1).unwrap().activate();
+        mgr.get_mut(&sid1).unwrap().close();
+
+        // Create another that stays active
+        let s2 = mgr
+            .create_session(test_user(), "n1".into(), "vc".into(), 24, 80, "xterm".into())
+            .unwrap();
+        let sid2 = s2.session_id.clone();
+        mgr.get_mut(&sid2).unwrap().activate();
+
+        assert_eq!(mgr.count(), 2);
+
+        // Cleanup with very large max_age — nothing should be removed
+        // (sessions are just created, so their age is ~0 seconds)
+        let stale = mgr.cleanup_stale(999_999);
+        assert!(stale.is_empty());
+        assert_eq!(mgr.count(), 2);
+
+        // Manually backdate the closing session's started_at so it appears stale
+        mgr.get_mut(&sid1).unwrap().started_at =
+            chrono::Utc::now() - chrono::Duration::seconds(120);
+
+        // Cleanup with max_age=60 — session started 120s ago should be removed
+        let stale = mgr.cleanup_stale(60);
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0], sid1);
+        assert_eq!(mgr.count(), 1);
+
+        // Active session still there
+        assert!(mgr.get(&sid2).is_some());
+        assert_eq!(mgr.get(&sid2).unwrap().state, SessionState::Active);
+    }
+
+    #[test]
+    fn env_vars_prevent_bash_escape_vectors() {
         let session = ShellSession::new(
             test_user(),
             "node-001".into(),
@@ -477,11 +519,23 @@ mod tests {
             80,
             "xterm-256color".into(),
         );
-        let commands = std::collections::HashSet::new();
-        // On macOS this is a no-op stub, on Linux it would try to create dirs
-        let result = setup_session_bin_dir(&session, &commands);
-        // Should succeed on macOS (stub), may fail on Linux if /run/pact doesn't exist
-        #[cfg(not(target_os = "linux"))]
-        assert!(result.is_ok());
+
+        let env = session.env_vars();
+        let env_map: std::collections::HashMap<_, _> = env.into_iter().collect();
+
+        // rbash restriction: SHELL must be rbash
+        assert_eq!(env_map["SHELL"], "/bin/rbash");
+        // Prevent startup file injection
+        assert!(
+            env_map["BASH_ENV"].is_empty(),
+            "BASH_ENV must be empty to prevent startup injection"
+        );
+        assert!(env_map["ENV"].is_empty(), "ENV must be empty to prevent startup injection");
+        // PATH must NOT contain standard system dirs (only session bin dir)
+        assert!(!env_map["PATH"].contains("/usr/bin"));
+        assert!(!env_map["PATH"].contains("/usr/sbin"));
+        assert!(env_map["PATH"].starts_with("/run/pact/shell/"));
+        // HOME must not be a real user home
+        assert_eq!(env_map["HOME"], "/tmp");
     }
 }
