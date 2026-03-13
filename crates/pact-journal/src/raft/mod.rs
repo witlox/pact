@@ -5,7 +5,7 @@
 //! `TypeConfig` declaration.
 
 mod state;
-mod types;
+pub mod types;
 
-pub use state::JournalState;
+pub use state::{ConflictEntry, HomogeneityWarning, JournalState};
 pub use types::{JournalCommand, JournalResponse, JournalTypeConfig};

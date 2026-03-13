@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use pact_common::types::{
-    AdminOperation, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId, VClusterId,
+    AdminOperation, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId, Scope, VClusterId,
     VClusterPolicy,
 };
 use raft_hpc_core::StateMachineState;
@@ -33,10 +33,142 @@ pub struct JournalState {
     pub node_assignments: HashMap<NodeId, VClusterId>,
 }
 
+/// A conflict between a local entry and journal state on the same config key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictEntry {
+    pub key: String,
+    pub local_value: String,
+    pub journal_value: String,
+}
+
+/// A node with per-node deltas that deviate from the vCluster overlay.
+#[derive(Debug, Clone)]
+pub struct HomogeneityWarning {
+    pub node_id: NodeId,
+    pub delta_keys: Vec<String>,
+}
+
+impl JournalState {
+    /// Detect conflicts between local entries and current journal state (CR2).
+    ///
+    /// For each local entry, compare its state_delta keys against the current
+    /// entries for the same vCluster. Returns conflicting keys with both values.
+    pub fn detect_conflicts(
+        &self,
+        _node_id: &str,
+        local_entries: &[ConfigEntry],
+    ) -> Vec<ConflictEntry> {
+        let mut conflicts = Vec::new();
+        for local in local_entries {
+            if let Some(ref delta) = local.state_delta {
+                // Check kernel deltas against existing entries with overlapping keys
+                for local_item in &delta.kernel {
+                    // Find the most recent journal entry with same key
+                    for existing in self.entries.values().rev() {
+                        if let Some(ref existing_delta) = existing.state_delta {
+                            for existing_item in &existing_delta.kernel {
+                                if existing_item.key == local_item.key
+                                    && existing_item.value != local_item.value
+                                {
+                                    conflicts.push(ConflictEntry {
+                                        key: local_item.key.clone(),
+                                        local_value: local_item.value.clone().unwrap_or_default(),
+                                        journal_value: existing_item
+                                            .value
+                                            .clone()
+                                            .unwrap_or_default(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        conflicts
+    }
+
+    /// Check vCluster homogeneity — find nodes with per-node deltas (ND3).
+    ///
+    /// Returns nodes that have committed entries scoped to them specifically
+    /// (not the vCluster overlay), indicating divergence from homogeneity.
+    pub fn check_homogeneity(&self, vcluster_id: &str) -> Vec<HomogeneityWarning> {
+        // Find all nodes assigned to this vCluster
+        let nodes: Vec<&str> = self
+            .node_assignments
+            .iter()
+            .filter(|(_, vc)| vc.as_str() == vcluster_id)
+            .map(|(n, _)| n.as_str())
+            .collect();
+
+        let mut warnings = Vec::new();
+        for node_id in &nodes {
+            // Find node-scoped entries (per-node deltas)
+            let delta_keys: Vec<String> = self
+                .entries
+                .values()
+                .filter(|e| matches!(&e.scope, Scope::Node(n) if n == node_id))
+                .filter(|e| e.state_delta.is_some())
+                .flat_map(|e| {
+                    let delta = e.state_delta.as_ref().unwrap();
+                    delta.kernel.iter().map(|d| d.key.clone()).collect::<Vec<_>>()
+                })
+                .collect();
+
+            if !delta_keys.is_empty() {
+                warnings.push(HomogeneityWarning { node_id: (*node_id).to_string(), delta_keys });
+            }
+        }
+        warnings
+    }
+}
+
+/// Minimum TTL: 15 minutes (ND1).
+const TTL_MIN_SECONDS: u32 = 900;
+/// Maximum TTL: 10 days (ND2).
+const TTL_MAX_SECONDS: u32 = 864_000;
+
 impl StateMachineState<JournalTypeConfig> for JournalState {
     fn apply(&mut self, cmd: JournalCommand) -> JournalResponse {
         match cmd {
             JournalCommand::AppendEntry(mut entry) => {
+                // J3: authenticated authorship — reject empty principal or role.
+                if entry.author.principal.is_empty() {
+                    return JournalResponse::ValidationError {
+                        reason: "author principal required".into(),
+                    };
+                }
+                if entry.author.role.is_empty() {
+                    return JournalResponse::ValidationError {
+                        reason: "author role required".into(),
+                    };
+                }
+
+                // J4: acyclic parent chain — parent must precede this entry.
+                if let Some(parent) = entry.parent {
+                    if parent >= self.next_sequence {
+                        return JournalResponse::ValidationError {
+                            reason: "parent must precede entry".into(),
+                        };
+                    }
+                }
+
+                // ND1/ND2: TTL bounds — if set, must be within [15 min, 10 days].
+                if let Some(ttl) = entry.ttl_seconds {
+                    if ttl > 0 && ttl < TTL_MIN_SECONDS {
+                        return JournalResponse::ValidationError {
+                            reason: format!(
+                                "TTL must be >= {TTL_MIN_SECONDS} seconds (15 minutes)"
+                            ),
+                        };
+                    }
+                    if ttl > TTL_MAX_SECONDS {
+                        return JournalResponse::ValidationError {
+                            reason: format!("TTL must be <= {TTL_MAX_SECONDS} seconds (10 days)"),
+                        };
+                    }
+                }
+
                 let seq = self.next_sequence;
                 entry.sequence = seq;
                 self.next_sequence += 1;
@@ -74,7 +206,10 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use pact_common::types::{AdminOperationType, EntryType, Identity, PrincipalType, Scope};
+    use pact_common::types::{
+        AdminOperationType, DeltaAction, DeltaItem, EntryType, Identity, PrincipalType, Scope,
+        StateDelta,
+    };
 
     use super::*;
 
@@ -204,6 +339,241 @@ mod tests {
         let seqs: Vec<u64> = state.entries.keys().copied().collect();
         assert_eq!(seqs, vec![0, 1, 2, 3, 4]);
     }
+
+    // --- J3: Author validation ---
+
+    #[test]
+    fn reject_empty_principal() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.author.principal = String::new();
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason == "author principal required")
+        );
+        assert_eq!(state.entries.len(), 0);
+    }
+
+    #[test]
+    fn reject_empty_role() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.author.role = String::new();
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason == "author role required")
+        );
+        assert_eq!(state.entries.len(), 0);
+    }
+
+    // --- J4: Acyclic parent chain ---
+
+    #[test]
+    fn reject_future_parent() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.parent = Some(999); // no entry at seq 999
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason == "parent must precede entry")
+        );
+    }
+
+    #[test]
+    fn accept_valid_parent() {
+        let mut state = JournalState::default();
+        // First entry at seq 0
+        state.apply(JournalCommand::AppendEntry(test_entry(EntryType::Commit)));
+        // Second entry referencing seq 0 as parent
+        let mut entry = test_entry(EntryType::Rollback);
+        entry.parent = Some(0);
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(matches!(resp, JournalResponse::EntryAppended { sequence: 1 }));
+    }
+
+    // --- ND1/ND2: TTL bounds ---
+
+    #[test]
+    fn reject_ttl_below_minimum() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.ttl_seconds = Some(300); // 5 minutes — below 15 min minimum
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason.contains("15 minutes"))
+        );
+        assert_eq!(state.entries.len(), 0);
+    }
+
+    #[test]
+    fn reject_ttl_above_maximum() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.ttl_seconds = Some(1_000_000); // ~11.6 days — above 10 day maximum
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason.contains("10 days"))
+        );
+        assert_eq!(state.entries.len(), 0);
+    }
+
+    #[test]
+    fn accept_ttl_at_minimum() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.ttl_seconds = Some(900); // exactly 15 minutes
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(matches!(resp, JournalResponse::EntryAppended { sequence: 0 }));
+    }
+
+    #[test]
+    fn accept_ttl_at_maximum() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.ttl_seconds = Some(864_000); // exactly 10 days
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(matches!(resp, JournalResponse::EntryAppended { sequence: 0 }));
+    }
+
+    #[test]
+    fn accept_no_ttl() {
+        let mut state = JournalState::default();
+        let mut entry = test_entry(EntryType::Commit);
+        entry.ttl_seconds = None; // no TTL — persists indefinitely
+        let resp = state.apply(JournalCommand::AppendEntry(entry));
+        assert!(matches!(resp, JournalResponse::EntryAppended { sequence: 0 }));
+    }
+
+    // --- Conflict detection (CR2) ---
+
+    #[test]
+    fn detect_kernel_conflict() {
+        let mut state = JournalState::default();
+        // Journal has an entry with kernel.shmmax = 64GB
+        let mut journal_entry = test_entry(EntryType::Commit);
+        journal_entry.state_delta = Some(StateDelta {
+            kernel: vec![DeltaItem {
+                action: DeltaAction::Modify,
+                key: "kernel.shmmax".into(),
+                value: Some("68719476736".into()),
+                previous: None,
+            }],
+            ..StateDelta::default()
+        });
+        state.apply(JournalCommand::AppendEntry(journal_entry));
+
+        // Local entry has kernel.shmmax = 32GB (conflict)
+        let local_entry = ConfigEntry {
+            state_delta: Some(StateDelta {
+                kernel: vec![DeltaItem {
+                    action: DeltaAction::Modify,
+                    key: "kernel.shmmax".into(),
+                    value: Some("34359738368".into()),
+                    previous: None,
+                }],
+                ..StateDelta::default()
+            }),
+            ..test_entry(EntryType::Commit)
+        };
+
+        let conflicts = state.detect_conflicts("node-001", &[local_entry]);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].key, "kernel.shmmax");
+        assert_eq!(conflicts[0].local_value, "34359738368");
+        assert_eq!(conflicts[0].journal_value, "68719476736");
+    }
+
+    #[test]
+    fn no_conflict_when_values_match() {
+        let mut state = JournalState::default();
+        let mut journal_entry = test_entry(EntryType::Commit);
+        journal_entry.state_delta = Some(StateDelta {
+            kernel: vec![DeltaItem {
+                action: DeltaAction::Modify,
+                key: "kernel.shmmax".into(),
+                value: Some("68719476736".into()),
+                previous: None,
+            }],
+            ..StateDelta::default()
+        });
+        state.apply(JournalCommand::AppendEntry(journal_entry));
+
+        // Local entry has same value — no conflict
+        let local_entry = ConfigEntry {
+            state_delta: Some(StateDelta {
+                kernel: vec![DeltaItem {
+                    action: DeltaAction::Modify,
+                    key: "kernel.shmmax".into(),
+                    value: Some("68719476736".into()),
+                    previous: None,
+                }],
+                ..StateDelta::default()
+            }),
+            ..test_entry(EntryType::Commit)
+        };
+
+        let conflicts = state.detect_conflicts("node-001", &[local_entry]);
+        assert!(conflicts.is_empty());
+    }
+
+    // --- Homogeneity check (ND3) ---
+
+    #[test]
+    fn detect_heterogeneous_nodes() {
+        let mut state = JournalState::default();
+
+        // Assign two nodes to same vCluster
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-001".into(),
+            vcluster_id: "ml-training".into(),
+        });
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-002".into(),
+            vcluster_id: "ml-training".into(),
+        });
+
+        // node-001 has a per-node delta
+        let mut entry = test_entry(EntryType::Commit);
+        entry.scope = Scope::Node("node-001".into());
+        entry.state_delta = Some(StateDelta {
+            kernel: vec![DeltaItem {
+                action: DeltaAction::Modify,
+                key: "vm.swappiness".into(),
+                value: Some("10".into()),
+                previous: Some("60".into()),
+            }],
+            ..StateDelta::default()
+        });
+        state.apply(JournalCommand::AppendEntry(entry));
+
+        let warnings = state.check_homogeneity("ml-training");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].node_id, "node-001");
+        assert_eq!(warnings[0].delta_keys, vec!["vm.swappiness"]);
+    }
+
+    #[test]
+    fn no_warning_for_homogeneous_cluster() {
+        let mut state = JournalState::default();
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-001".into(),
+            vcluster_id: "ml-training".into(),
+        });
+        state.apply(JournalCommand::AssignNode {
+            node_id: "node-002".into(),
+            vcluster_id: "ml-training".into(),
+        });
+
+        // Only vCluster-scoped entries, no per-node deltas
+        let mut entry = test_entry(EntryType::Commit);
+        entry.scope = Scope::VCluster("ml-training".into());
+        state.apply(JournalCommand::AppendEntry(entry));
+
+        let warnings = state.check_homogeneity("ml-training");
+        assert!(warnings.is_empty());
+    }
+
+    // --- Existing tests ---
 
     #[test]
     fn assign_node() {

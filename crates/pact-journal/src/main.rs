@@ -13,6 +13,13 @@ use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, RaftTrans
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
+use pact_common::proto::journal::config_service_server::ConfigServiceServer;
+use pact_common::proto::policy::policy_service_server::PolicyServiceServer;
+use pact_common::proto::stream::boot_config_service_server::BootConfigServiceServer;
+use pact_journal::boot_service::BootConfigServiceImpl;
+use pact_journal::policy_service::PolicyServiceImpl;
+use pact_journal::service::ConfigServiceImpl;
+use pact_journal::telemetry::{telemetry_router, JournalMetrics, TelemetryState};
 use pact_journal::{JournalState, JournalTypeConfig};
 
 /// pact-journal: distributed immutable configuration log.
@@ -38,6 +45,10 @@ struct Args {
     /// Raft snapshot directory (defaults to `data_dir/snapshots`).
     #[arg(long, env = "PACT_JOURNAL_SNAPSHOT_DIR")]
     snapshot_dir: Option<PathBuf>,
+
+    /// Listen address for metrics/health HTTP (e.g. "0.0.0.0:9091").
+    #[arg(long, default_value = "0.0.0.0:9091", env = "PACT_JOURNAL_METRICS_LISTEN")]
+    metrics_listen: String,
 
     /// Bootstrap a new cluster (only on first start of node 1).
     #[arg(long, default_value_t = false)]
@@ -113,15 +124,37 @@ async fn main() -> anyhow::Result<()> {
         raft.initialize(members).await?;
     }
 
-    // Start gRPC transport server
-    let server = RaftTransportServer::new(raft.clone());
+    // Start telemetry HTTP server (metrics + health)
+    let telemetry_state = TelemetryState {
+        raft: raft.clone(),
+        journal: Arc::clone(&state),
+        metrics: JournalMetrics::default(),
+    };
+    let metrics_listener = tokio::net::TcpListener::bind(&args.metrics_listen).await?;
+    let metrics_addr = metrics_listener.local_addr()?;
+    info!(%metrics_addr, "Telemetry server listening");
+    tokio::spawn(async move {
+        axum::serve(metrics_listener, telemetry_router(telemetry_state))
+            .await
+            .inspect_err(|e| error!("Telemetry server error: {e}"))
+            .ok();
+    });
+
+    // Start gRPC transport server with application services
+    let raft_server = RaftTransportServer::new(raft.clone());
+    let config_service = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state));
+    let policy_service = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
+    let boot_service = BootConfigServiceImpl::new(Arc::clone(&state));
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     let addr = listener.local_addr()?;
     info!(%addr, "gRPC server listening");
 
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     tonic::transport::Server::builder()
-        .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(server))
+        .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(raft_server))
+        .add_service(ConfigServiceServer::new(config_service))
+        .add_service(PolicyServiceServer::new(policy_service))
+        .add_service(BootConfigServiceServer::new(boot_service))
         .serve_with_incoming(incoming)
         .await
         .inspect_err(|e| error!("gRPC server error: {e}"))?;

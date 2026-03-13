@@ -85,7 +85,7 @@ pub struct ConfigEntry {
 }
 
 /// State delta representing changes in a config entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StateDelta {
     pub mounts: Vec<DeltaItem>,
     pub files: Vec<DeltaItem>,
@@ -114,7 +114,7 @@ pub enum DeltaAction {
 }
 
 /// Drift vector with magnitude per category.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DriftVector {
     pub mounts: f64,
     pub files: f64,

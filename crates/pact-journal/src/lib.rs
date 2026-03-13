@@ -5,6 +5,13 @@
 //!
 //! See `docs/architecture/journal-design.md` for design documentation.
 
+pub mod boot_service;
+pub mod policy_service;
 pub mod raft;
+pub mod service;
+pub mod telemetry;
 
-pub use raft::{JournalCommand, JournalResponse, JournalState, JournalTypeConfig};
+pub use raft::{
+    ConflictEntry, HomogeneityWarning, JournalCommand, JournalResponse, JournalState,
+    JournalTypeConfig,
+};

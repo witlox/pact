@@ -76,3 +76,42 @@ Feature: Overlay Management
     And the result is applied via "pact apply"
     Then the overlay for "ml-training" should include "vm.swappiness=10"
     And the node delta should no longer be needed for this setting
+
+  # --- Promote conflict acknowledgment (CR4) ---
+
+  Scenario: Promote detects conflicts with other nodes' local changes
+    Given node "node-001" has committed delta changing "vm.swappiness" to "10"
+    And node "node-002" has a local change on "vm.swappiness" set to "30"
+    When the admin runs "pact promote node-001"
+    Then the promote should pause with a conflict report
+    And the conflict should show node "node-002" has local value "30" vs promoted value "10"
+    And the admin must acknowledge the conflict before proceeding
+
+  Scenario: Promote proceeds after admin accepts overwrite
+    Given a promote conflict on "vm.swappiness" between promoted value "10" and node-002 local value "30"
+    When the admin accepts overwrite for node "node-002"
+    Then the overlay should include "vm.swappiness=10"
+    And node "node-002" local value should be superseded
+    And the overwritten local value should be logged for audit
+
+  Scenario: Promote proceeds after admin keeps local
+    Given a promote conflict on "vm.swappiness" between promoted value "10" and node-002 local value "30"
+    When the admin keeps the local value for node "node-002"
+    Then the overlay should include "vm.swappiness=10"
+    And node "node-002" should retain a per-node delta of "vm.swappiness=30"
+
+  # --- vCluster homogeneity warning (ND3) ---
+
+  Scenario: Heterogeneous nodes within vCluster trigger warning
+    Given vCluster "ml-training" has 4 nodes
+    And node "node-001" has a per-node delta on "vm.swappiness"
+    And nodes "node-002", "node-003", "node-004" are converged to the overlay
+    When the user runs "pact status --vcluster ml-training"
+    Then the output should warn that node "node-001" diverges from vCluster homogeneity
+    And the warning should recommend promoting or reverting the delta
+
+  Scenario: Expired per-node delta triggers warning
+    Given node "node-001" has a per-node delta with TTL that has expired
+    When the user runs "pact status --vcluster ml-training"
+    Then the output should warn that node "node-001" has an expired delta
+    And the warning should recommend cleanup

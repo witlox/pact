@@ -103,16 +103,43 @@ Pinned alpha version. Loose `^0.10` caused breakage in lattice. Version pinned e
 
 ---
 
-## Open Questions (Unknown Status)
+## Resolved Questions
 
-### A-Q1: Cross-vCluster atomic operations [Unknown]
-Can platform-admin apply config to multiple vClusters atomically? Current design is single-vCluster per operation.
+### A-Q1: Cross-vCluster atomic operations [Accepted — Not Required]
+Cross-vCluster atomicity is not supported. Each vCluster is an independent consistency domain. Platform-admin issues separate commits per vCluster; partial failures are handled operationally. Adding cross-vCluster transactions would require coordinating multiple Raft entries, adding significant complexity for a rare operation.
 
-### A-Q2: Partition conflict replay mechanism [Unknown]
-How exactly are conflicting changes replayed after partition heals? Deduplication and conflict detection need specification.
+### A-Q2: Partition conflict replay mechanism [Accepted — Correctness-First with Availability Fallback]
+During network partition, agents may accumulate local state changes (admin reconfigurations via pact shell, emergency mode activations, drift from manual intervention). On partition reconnect:
 
-### A-Q3: Node delta TTL bounds [Unknown]
-Should there be min/max bounds on TTL? Preventing TTL=1s or TTL=10y is not currently specified.
+1. **Agent feeds back local changes first** — unpromoted local drift is reported to the journal before accepting the journal's current state.
+2. **Conflict detection** — if local changes conflict with journal state (same config keys changed on both sides), the agent pauses and flags a merge conflict for admin resolution. It does NOT silently overwrite.
+3. **Grace period fallback** — if no admin resolves the conflict within a configurable grace period (default: commit window duration), the system falls back to journal-wins (availability fallback). The overwritten local changes are logged for audit.
+4. **Admin notification** — if an admin's changes are overwritten (either by grace period timeout or by a concurrent promote), they are notified if they have an active CLI session.
+5. **Promote workflow integration** — when promoting node-level changes to vCluster overlay, if the target nodes have local changes recorded in the journal, the promoting admin must explicitly acknowledge each conflicting key: accept (keep local) or overwrite (apply promoted value).
 
-### A-Q4: Snapshot retention during replication [Unknown]
-What if a new snapshot is created while a follower is catching up from a previous snapshot? May need snapshot pinning.
+Key assumptions:
+- vCluster nodes are homogeneous (see A-H1). Per-node deltas are temporary exceptions.
+- Agents do not write config entries to the journal autonomously — only admins (via CLI/shell) create config mutations.
+- "Last write wins" is the tiebreaker when timestamps differ and no admin is online to resolve.
+
+### A-Q3: Node delta TTL bounds [Accepted — Bounded]
+Node deltas have enforced TTL bounds: minimum 15 minutes, maximum 10 days. Rationale:
+- **15 min minimum**: short enough for debugging sessions, long enough to not expire mid-task.
+- **10 day maximum**: carries over weekends with margin, forces periodic review, prevents forgotten deltas from accumulating.
+TTL outside these bounds is rejected at commit time with an error explaining the valid range.
+
+### A-Q4: Snapshot retention during replication [Accepted — Application Responsibility]
+openraft does NOT handle snapshot retention internally during replication. The framework delegates snapshot storage entirely to the application via `RaftSnapshotBuilder` and `RaftStorage` traits. If a new snapshot is created while an old one is being transferred to a follower, the application must ensure the old snapshot remains accessible.
+
+Mitigation for pact: journal state is small (config entries, policies, overlays) — use in-memory snapshots (`Cursor<Vec<u8>>`) rather than file-based snapshots. This avoids the garbage collection problem entirely since each snapshot is an independent allocation held by the replication task until transfer completes. If file-based snapshots are needed later (e.g., for very large deployments), use Unix file descriptor semantics: keep the fd open during transfer so the file survives unlink.
+
+---
+
+## Homogeneity Assumption
+
+### A-H1: vCluster node homogeneity [Accepted]
+All nodes within a vCluster converge to the same overlay configuration. Per-node deltas are temporary exceptions (bounded by TTL, see A-Q3) that should be either promoted to the vCluster overlay or reverted. The system:
+- **Warns** when per-node deltas exist beyond their TTL or when nodes within a vCluster have divergent configurations.
+- **Reports** heterogeneity in status/diff output so operators can see which nodes deviate.
+- **Does not enforce** homogeneity automatically — it flags the condition for admin decision.
+Rationale: HPC vClusters assume uniform node configuration for scheduling correctness. Heterogeneous nodes can cause job failures if the scheduler assumes capability uniformity.

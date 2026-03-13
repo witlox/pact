@@ -107,15 +107,38 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Conflict Resolution Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| CR1 | Local changes fed back first | `Agent::on_reconnect()` | Agent sends pending local entries via `ConfigService.AppendEntry` before re-subscribing to config stream | Structural — reconnect protocol enforces order |
+| CR2 | Merge conflict pauses convergence | `Agent::on_reconnect()` + `JournalState::detect_conflicts()` | Journal returns conflict manifest when local entries conflict with current state on same keys. Agent pauses convergence for conflicting keys. | Agent enters `ConflictPending` state for affected keys |
+| CR3 | Grace period fallback | `ConflictManager::tick()` | Timer started when conflict detected. If expired without admin resolution → journal-wins. Overwritten values logged. | Auto-resolve + audit log entry |
+| CR4 | Promote requires conflict ack | `CLI::promote()` + `JournalState::check_promote_conflicts()` | Before applying promote, journal checks all target nodes for local changes on overlapping keys. Returns conflict manifest if any. CLI blocks until admin resolves. | Promote blocked until conflicts resolved |
+| CR5 | Admin notification on overwrite | `CLI::session_notify()` | Active CLI sessions receive notification via gRPC stream when their uncommitted/local changes are overwritten by promote or grace period timeout | Notification delivered (best-effort) |
+| CR6 | No cross-vCluster atomicity | `ConfigService.AppendEntry` | Each entry scoped to single vCluster via `Scope`. No multi-vCluster transaction API exists. | Structural — no API for atomic cross-vCluster ops |
+
+---
+
+## Node Delta Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| ND1 | TTL minimum 15 min | `JournalState::apply(AppendEntry)` | Validate `ttl.unwrap_or(0) == 0 \|\| ttl >= 900` | `JournalResponse::ValidationError { reason: "TTL must be >= 900 seconds (15 minutes)" }` |
+| ND2 | TTL maximum 10 days | `JournalState::apply(AppendEntry)` | Validate `ttl.unwrap_or(0) == 0 \|\| ttl <= 864000` | `JournalResponse::ValidationError { reason: "TTL must be <= 864000 seconds (10 days)" }` |
+| ND3 | vCluster homogeneity warning | `CLI::status()` + `JournalState::check_homogeneity()` | When querying status, journal checks for per-node deltas that deviate from vCluster overlay. Reports divergent nodes. | Warning in CLI output (not a hard error) |
+
+---
+
 ## Enforcement Categories
 
 Summary of how invariants are enforced:
 
 | Category | Count | Invariants | Description |
 |----------|-------|------------|-------------|
-| **Structural** | 10 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6 | Impossible to violate by design (no API exists to break them) |
-| **Validation** | 7 | J3, J4, J5, A3, D3, P5, O2 | Checked at input boundary, rejected with error |
-| **Runtime logic** | 16 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5 | Active enforcement in business logic |
+| **Structural** | 13 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3 | Impossible to violate by design (no API exists to break them) |
+| **Validation** | 9 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2 | Checked at input boundary, rejected with error |
+| **Runtime logic** | 20 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5 | Active enforcement in business logic |
 | **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
 | **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
-| **Degraded fallback** | 4 | P7, F2, F3, A9 | Special behavior when components unavailable |
+| **Degraded fallback** | 5 | P7, F2, F3, A9, CR3 | Special behavior when components unavailable |

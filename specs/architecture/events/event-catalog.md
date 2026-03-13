@@ -23,6 +23,10 @@ Recorded as `ConfigEntry` in the immutable Raft log. Each has `EntryType`, `Scop
 | ShellSession | Agent (ShellService.shell) | Journal (audit), Loki | Shell session start/end | Node |
 | ServiceLifecycle | Agent (ServiceManager) | Journal, CLI (pact status) | Service start/stop/restart/crash | Node |
 | PendingApproval | PolicyService | Journal, CLI (pact approve) | Two-person approval requested (P4) | vCluster |
+| MergeConflictDetected | Agent (on reconnect) | Journal, CLI (active sessions), Loki | Local changes conflict with journal state on same keys (CR2) | Node |
+| MergeConflictResolved | Agent/CLI | Journal, Loki | Admin resolves merge conflict — accept local or journal (CR2) | Node |
+| GracePeriodOverwrite | Agent (ConflictManager) | Journal, CLI (active sessions), Loki | Grace period expired, journal-wins applied (CR3) | Node |
+| PromoteConflictDetected | CLI (promote workflow) | Journal, Loki | Promote blocked by conflicting local changes on target nodes (CR4) | vCluster |
 
 **Invariants enforced:**
 - J3: Every entry has authenticated Identity (non-empty principal + role)
@@ -112,6 +116,9 @@ Journal streams structured JSON events to Loki for external monitoring.
 | OPA unreachable | component=policy | last_healthy, fallback=cached | Yes (F7) |
 | GPU state change | component=agent, node_id | gpu_id, old_state, new_state | If Failed |
 | Partition detected | component=agent, node_id | journal_last_seen, cached_seq | Yes (F1) |
+| Merge conflict | component=agent, node_id, vcluster_id | conflicting_keys, local_values, journal_values | Yes (F13) |
+| Grace period overwrite | component=agent, node_id | overwritten_keys, grace_period_seconds | Yes (F13) |
+| Promote conflict | component=cli, vcluster_id | promoting_node, conflicting_nodes, keys | No (blocks until resolved) |
 | Boot config streamed | component=journal | node_id, overlay_version, duration_ms | If > 5s |
 
 ---

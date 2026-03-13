@@ -106,7 +106,7 @@ Feature: Cross-Context Integration
     Then the approval is rejected
     And the pending operation remains pending
 
-  # --- Partition → Degraded → Replay ---
+  # --- Partition → Degraded → Conflict Resolution → Replay ---
 
   Scenario: Agent operates during partition and replays on reconnect
     Given node "node-001" has cached config and policy for vCluster "ml-training"
@@ -118,6 +118,20 @@ Feature: Cross-Context Integration
     Then node "node-001" reconnects to the journal
     And locally logged events are replayed to the journal
     And config subscription resumes from last known sequence
+
+  Scenario: Partition with local admin changes triggers merge conflict on reconnect
+    Given node "node-001" has cached config and policy for vCluster "ml-training"
+    And the journal is unreachable from node "node-001"
+    When an admin changes "net.core.somaxconn" to "2048" on node "node-001" via pact shell
+    And meanwhile "net.core.somaxconn" is committed as "4096" in the journal for vCluster "ml-training"
+    And the network partition heals
+    Then node "node-001" reports its local change to the journal first
+    And a merge conflict is detected on "net.core.somaxconn"
+    And node "node-001" pauses convergence for "net.core.somaxconn"
+    When admin "ops@example.com" resolves by accepting journal value
+    Then node "node-001" applies "net.core.somaxconn" as "4096"
+    And the overwritten local value "2048" is logged for audit
+    And config subscription resumes normally
 
   # --- Promote → Overlay Update → Boot ---
 

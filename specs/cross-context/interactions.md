@@ -47,6 +47,21 @@ Integration points between bounded contexts and external systems.
 **Failure mode:** F3 (partition) — logged locally, replayed on reconnect
 **Invariants:** J3 (authenticated authorship), O3 (audit continuity)
 
+### I3a: Agent → Journal (Partition Reconnect Protocol)
+
+**Direction:** Agent reconnects to journal after partition heal.
+**Protocol:** gRPC unary + streaming (combines I3 and I1)
+**Data flow:**
+1. Agent sends accumulated local changes (unpromoted drift, emergency events, audit logs) via `ConfigService.AppendEntry`
+2. Journal detects conflicts: local change keys vs. current journal state for same vCluster/node
+3. If conflicts exist: journal returns conflict manifest (affected keys, local values, journal values)
+4. Agent pauses convergence for conflicting keys, flags merge conflict (F13)
+5. Admin resolves via CLI: accept local or accept journal, per key
+6. Grace period timeout (default: commit window duration): journal-wins, local changes logged as overwritten
+7. After resolution: agent resumes config subscription via I1 (`SubscribeConfigUpdates` with `from_sequence`)
+**Failure mode:** F13 (merge conflict) — see failure modes catalog
+**Invariants:** CR1 (local first), CR2 (pause on conflict), CR3 (grace period fallback), O3 (audit continuity)
+
 ### I5: CLI → Journal (Config Queries)
 
 **Direction:** CLI queries journal for status, diff, log, overlay.
@@ -179,6 +194,7 @@ Integration points between bounded contexts and external systems.
 | Agent | Journal (config) | gRPC stream | Subscribe | Cached config |
 | Agent | Journal (boot) | gRPC stream | Request | Cached config |
 | Agent | Journal (write) | gRPC unary | Push | Block until available |
+| Agent | Journal (reconnect) | gRPC unary+stream | Push then subscribe | Merge conflict (F13) |
 | Agent | PolicyService | gRPC unary | Request | Cached policy |
 | CLI | Journal | gRPC | Request | Timeout (exit 5) |
 | CLI | Agent | gRPC | Request | Connection error |

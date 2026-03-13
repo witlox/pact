@@ -31,6 +31,11 @@ pub enum PactError {
     // --- Drift errors ---
     DriftDetected { node: String, detail: String },
 
+    // --- Conflict errors ---
+    MergeConflict { node: String, keys: Vec<String> },
+    TtlOutOfBounds { value: u32, min: u32, max: u32 },
+    PromoteConflict { node: String, conflicting_nodes: Vec<String>, keys: Vec<String> },
+
     // --- Serialization/Transport ---
     Serialization(String),
     Transport(tonic::Status),     // #[from]
@@ -55,6 +60,9 @@ pub enum PactError {
 | ShellError | INTERNAL | Shell session setup/teardown failure |
 | ServiceFailed | INTERNAL | Service start/stop/health failure |
 | DriftDetected | OK (informational) | Not an error per se — returned as event data |
+| MergeConflict | FAILED_PRECONDITION | Local changes conflict with journal state on reconnect |
+| TtlOutOfBounds | INVALID_ARGUMENT | TTL value outside allowed range [900, 864000] seconds |
+| PromoteConflict | FAILED_PRECONDITION | Promote blocked — target nodes have conflicting local changes |
 | Serialization | INTERNAL | Protobuf or serde encoding failure |
 | Transport | (preserved) | Underlying tonic status passed through |
 | Internal | INTERNAL | Unexpected internal failure |
@@ -68,6 +76,9 @@ pub enum PactError {
 | Not found | 2 | *NotFound variants | "Not found: {entity}" |
 | Precondition | 3 | CommitWindowExpired, EmergencyActive | "Cannot proceed: {detail}" |
 | Journal down | 5 | JournalUnavailable | "Journal unavailable — retry or check cluster health" |
+| Merge conflict | 7 | MergeConflict | "Merge conflict on node {node}: keys {keys} differ from journal" |
+| TTL out of bounds | 8 | TtlOutOfBounds | "TTL {value}s out of range [{min}, {max}]" |
+| Promote conflict | 9 | PromoteConflict | "Promote blocked: nodes {nodes} have local changes on {keys}" |
 | Rollback blocked | 10 | Internal (active consumers) | "Rollback blocked: active consumers on affected resources" |
 | Internal | 99 | Internal, Serialization | "Internal error: {detail}" |
 
@@ -93,6 +104,8 @@ pub enum JournalResponse {
 | Empty author role | J3 | `author.role.is_empty()` | `ValidationError { reason: "author role required" }` |
 | Cyclic parent | J4 | `parent >= next_sequence` | `ValidationError { reason: "parent must precede entry" }` |
 | Checksum mismatch | J5 | `checksum != hash(data)` | `ValidationError { reason: "overlay checksum mismatch" }` |
+| TTL below minimum | ND1 | `ttl > 0 && ttl < 900` | `ValidationError { reason: "TTL must be >= 900 seconds (15 minutes)" }` |
+| TTL above maximum | ND2 | `ttl > 864000` | `ValidationError { reason: "TTL must be <= 864000 seconds (10 days)" }` |
 
 These are deterministic — same input always produces same validation result on every Raft replica.
 

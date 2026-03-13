@@ -52,6 +52,7 @@ message VClusterPolicy {
   string supervisor_backend = 15;
   repeated string exec_whitelist = 16;
   repeated string shell_whitelist = 17;
+  bool emergency_allowed = 18;
 }
 
 message RoleBinding {

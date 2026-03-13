@@ -52,6 +52,8 @@ pub enum JournalResponse {
     Ok,
     /// Entry appended, returns the sequence number.
     EntryAppended { sequence: u64 },
+    /// Validation failed — deterministic rejection (same on all replicas).
+    ValidationError { reason: String },
 }
 
 impl fmt::Display for JournalResponse {
@@ -59,6 +61,7 @@ impl fmt::Display for JournalResponse {
         match self {
             Self::Ok => write!(f, "Ok"),
             Self::EntryAppended { sequence } => write!(f, "EntryAppended(seq={sequence})"),
+            Self::ValidationError { reason } => write!(f, "ValidationError({reason})"),
         }
     }
 }

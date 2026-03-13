@@ -164,6 +164,41 @@ If Sovra is unreachable, the system continues with locally cached policy templat
 
 ---
 
+## Conflict Resolution Invariants
+
+### CR1: Local changes fed back before journal sync
+When a partitioned agent reconnects, it reports all unpromoted local drift to the journal BEFORE accepting the journal's current state stream.
+
+### CR2: Merge conflict pauses agent convergence
+If local changes conflict with journal state on the same config keys, the agent pauses convergence and flags a merge conflict. It does NOT silently overwrite local state.
+
+### CR3: Grace period fallback to journal-wins
+If a merge conflict is not resolved by an admin within the grace period (default: commit window duration), the system falls back to journal-wins. Overwritten local changes are logged for audit.
+
+### CR4: Promote requires conflict acknowledgment
+When promoting node-level changes to a vCluster overlay, if target nodes have local changes recorded in the journal on conflicting keys, the promoting admin must explicitly accept or overwrite each conflict.
+
+### CR5: Admin notification on overwrite
+If an admin's uncommitted or local changes are overwritten by a promote or grace period timeout, and the admin has an active CLI session, they are notified in that session.
+
+### CR6: No cross-vCluster atomicity
+Config commits are scoped to a single vCluster. Cross-vCluster atomic operations are not supported. Partial failures across multiple vCluster commits are handled operationally.
+
+---
+
+## Node Delta Invariants
+
+### ND1: TTL minimum bound
+Node delta TTL must be >= 15 minutes. Deltas with shorter TTL are rejected at commit time.
+
+### ND2: TTL maximum bound
+Node delta TTL must be <= 10 days. Deltas with longer TTL are rejected at commit time.
+
+### ND3: vCluster homogeneity expectation
+All nodes within a vCluster are expected to converge to the same overlay. Per-node deltas are temporary exceptions. The system warns when nodes within a vCluster have divergent configurations or when deltas exceed their TTL.
+
+---
+
 ## Raft Invariants
 
 ### R1: Independent Raft groups

@@ -152,3 +152,36 @@ Feature: CLI Commands
   Scenario: pact group show displays group details
     When the user runs "pact group show ml-training"
     Then the output should show the group policy and member nodes
+
+  # --- Admin notification on overwrite (CR5) ---
+
+  Scenario: Active CLI session notified when local changes are overwritten
+    Given admin "ops@example.com" has an active CLI session on node "node-001"
+    And admin "ops@example.com" has uncommitted local changes on "kernel.shmmax"
+    When another admin promotes a change that overwrites "kernel.shmmax"
+    Then admin "ops@example.com" should receive a notification in their session
+    And the notification should show which keys were overwritten and by whom
+
+  Scenario: Active CLI session notified on grace period overwrite
+    Given admin "ops@example.com" has an active CLI session on node "node-001"
+    And node "node-001" has a merge conflict on "kernel.shmmax"
+    When the grace period expires and journal-wins
+    Then admin "ops@example.com" should receive a notification in their session
+    And the notification should explain "grace period expired, journal value applied"
+
+  # --- No cross-vCluster atomicity (CR6) ---
+
+  Scenario: Cross-vCluster operations are independent commits
+    Given vClusters "ml-training" and "storage-ops" both exist
+    When admin commits a sysctl change to vCluster "ml-training"
+    And admin commits a sysctl change to vCluster "storage-ops"
+    Then each commit should be an independent journal entry
+    And if one fails the other should still succeed
+
+  Scenario: Partial failure across vClusters is reported
+    Given vClusters "ml-training" and "storage-ops" both exist
+    When admin commits a sysctl change to vCluster "ml-training" which succeeds
+    And admin commits a sysctl change to vCluster "storage-ops" which fails
+    Then the CLI should report success for "ml-training"
+    And the CLI should report failure for "storage-ops"
+    And no automatic rollback of the "ml-training" commit should occur

@@ -78,9 +78,11 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 **Recovery:**
 - Partition heals → agent reconnects
+- Agent feeds back unpromoted local changes to journal BEFORE accepting journal state (CR1)
+- If local changes conflict with journal state on same config keys → merge conflict (F13)
+- Non-conflicting local changes are recorded in journal, then agent syncs to current state
 - Config subscription resumes from `from_sequence`
-- Locally logged events replayed to journal
-- Conflict resolution: timestamp ordering, admin-committed > auto-converge
+- Locally logged audit events replayed to journal for audit continuity
 
 **Detection:**
 - Agent logs partition events
@@ -309,6 +311,55 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F13: Merge conflict on partition reconnect
+
+**Trigger:** Partitioned agent reconnects with unpromoted local changes that conflict with journal state on the same config keys.
+
+**Impact:**
+- Agent pauses convergence — does not apply journal state for conflicting keys
+- Node remains in locally-drifted state until conflict resolved
+- Non-conflicting config keys sync normally
+
+**Degradation:**
+- Node operational but not converged to vCluster overlay for conflicting keys
+- Admin notification if active CLI session exists (CR5)
+- Scheduling may be affected if capability diverges
+
+**Recovery:**
+- Admin resolves conflict: accept local (promote to journal) or accept journal (overwrite local)
+- Grace period timeout (default: commit window duration) → journal-wins fallback (CR3)
+- Overwritten local changes logged for audit regardless of resolution path
+
+**Detection:**
+- Agent logs merge conflict with affected keys
+- Journal records conflict event with both local and journal values
+- Loki event: "merge conflict on reconnect" with node_id, vcluster_id, affected keys
+
+---
+
+## F14: Promote conflicts with local node changes
+
+**Trigger:** Admin promotes a node delta to vCluster overlay, but other nodes in the vCluster have local changes on the same config keys.
+
+**Impact:**
+- Promote workflow pauses at conflict acknowledgment step
+- Promotion does not proceed until admin resolves each conflicting key
+
+**Degradation:**
+- Promote blocked, but no data loss
+- Existing node configurations unchanged until resolution
+
+**Recovery:**
+- Promoting admin explicitly accepts or overwrites each conflict (CR4)
+- Accept: keep the target node's local value (it becomes a per-node delta)
+- Overwrite: apply promoted value, local change is superseded and logged
+
+**Detection:**
+- CLI displays conflict summary during promote workflow
+- Journal records promote-with-conflicts event
+
+---
+
 ## Severity Classification
 
 | Failure | Severity | Auto-Recovery | Human Required |
@@ -325,3 +376,5 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 | F10: Sovra unreachable | Low | Yes (on reconnect) | No |
 | F11: Boot storm | Low | Yes (self-limiting) | No |
 | F12: GPU failure | Medium | Partial (detect + report) | If hardware |
+| F13: Merge conflict on reconnect | Medium | Partial (grace period fallback) | If conflict |
+| F14: Promote conflicts | Low | No (blocks until resolved) | Yes (acknowledge) |

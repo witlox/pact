@@ -105,3 +105,27 @@ Feature: Commit Window
     Given emergency mode is active with window 14400 seconds
     When a commit is made during emergency mode
     Then the committed delta should have TTL 14400
+
+  # --- TTL bounds enforcement (ND1, ND2) ---
+
+  Scenario: TTL below minimum is rejected
+    When the user runs "pact commit -m 'too short' --ttl 300"
+    Then the commit should be rejected
+    And the error should say "TTL must be >= 900 seconds (15 minutes)"
+    And no entry should be recorded in the journal
+
+  Scenario: TTL at minimum boundary is accepted
+    When the user runs "pact commit -m 'minimum ttl' --ttl 900"
+    Then the commit should succeed
+    And the committed delta should have TTL 900
+
+  Scenario: TTL above maximum is rejected
+    When the user runs "pact commit -m 'too long' --ttl 1000000"
+    Then the commit should be rejected
+    And the error should say "TTL must be <= 864000 seconds (10 days)"
+    And no entry should be recorded in the journal
+
+  Scenario: TTL at maximum boundary is accepted
+    When the user runs "pact commit -m 'maximum ttl' --ttl 864000"
+    Then the commit should succeed
+    And the committed delta should have TTL 864000

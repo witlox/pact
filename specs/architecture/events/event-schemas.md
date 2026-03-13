@@ -183,6 +183,61 @@ pub enum ApprovalStatus {
 
 ---
 
+## Conflict Events (Partition Reconnect + Promote)
+
+### MergeConflict (Agent → Journal on reconnect)
+
+```rust
+pub struct MergeConflict {
+    pub node_id: NodeId,
+    pub vcluster_id: VClusterId,
+    pub conflicts: Vec<ConflictEntry>,
+    pub detected_at: DateTime<Utc>,
+    pub grace_period_expires: DateTime<Utc>,
+}
+
+pub struct ConflictEntry {
+    pub key: String,                    // config key (e.g., "kernel.shmmax")
+    pub local_value: String,            // value on the agent
+    pub journal_value: String,          // value in journal state
+    pub local_changed_at: DateTime<Utc>,
+    pub journal_changed_at: DateTime<Utc>,
+}
+
+pub enum ConflictResolution {
+    AcceptLocal,      // keep agent's value, promote to journal
+    AcceptJournal,    // overwrite agent with journal value
+    GracePeriodExpired, // automatic journal-wins after timeout
+}
+```
+
+**Producer:** Agent (on reconnect, after CR1 local feedback)
+**Consumer:** Journal (records conflict), CLI (notifies admin per CR5), Loki (alert)
+**Invariants:** CR2 (pause convergence), CR3 (grace period)
+
+### PromoteConflict (CLI → Journal during promote)
+
+```rust
+pub struct PromoteConflict {
+    pub promoting_node: NodeId,
+    pub vcluster_id: VClusterId,
+    pub conflicts: Vec<PromoteConflictEntry>,
+}
+
+pub struct PromoteConflictEntry {
+    pub key: String,
+    pub promoted_value: String,         // value being promoted
+    pub conflicting_node: NodeId,       // node with local change
+    pub conflicting_value: String,      // that node's local value
+}
+```
+
+**Producer:** CLI promote workflow
+**Consumer:** Journal (validates), CLI (blocks for admin resolution)
+**Invariant:** CR4 (promote requires acknowledgment)
+
+---
+
 ## CapabilityReport (Node → Scheduler)
 
 ```rust

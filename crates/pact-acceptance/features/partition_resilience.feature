@@ -82,3 +82,44 @@ Feature: Partition Resilience
     When connectivity is restored
     Then the subscription should reconnect with the last known sequence
     And missed updates should be delivered
+
+  # --- Conflict resolution on reconnect (CR1-CR3) ---
+
+  Scenario: Local changes fed back before journal sync on reconnect
+    Given the journal is unreachable from node "node-001"
+    And an admin changes "vm.swappiness" to "10" on node "node-001" via pact shell
+    When connectivity to the journal is restored
+    Then node "node-001" should report its local changes to the journal first
+    And only after local changes are recorded should it accept the journal state stream
+
+  Scenario: Merge conflict pauses agent convergence
+    Given the journal is unreachable from node "node-001"
+    And an admin changes "kernel.shmmax" to "68719476736" on node "node-001" via pact shell
+    And meanwhile "kernel.shmmax" is committed as "34359738368" in the journal for vCluster "ml-training"
+    When connectivity to the journal is restored
+    Then node "node-001" should detect a merge conflict on "kernel.shmmax"
+    And the agent should pause convergence for "kernel.shmmax"
+    And non-conflicting config keys should sync normally
+
+  Scenario: Merge conflict resolved by admin — accept local
+    Given node "node-001" has a merge conflict on "kernel.shmmax"
+    And the local value is "68719476736" and the journal value is "34359738368"
+    When admin "ops@example.com" resolves the conflict by accepting local
+    Then the journal should record "kernel.shmmax" as "68719476736" for node "node-001"
+    And the agent should resume convergence
+
+  Scenario: Merge conflict resolved by admin — accept journal
+    Given node "node-001" has a merge conflict on "kernel.shmmax"
+    And the local value is "68719476736" and the journal value is "34359738368"
+    When admin "ops@example.com" resolves the conflict by accepting journal
+    Then node "node-001" should apply "kernel.shmmax" as "34359738368"
+    And the overwritten local value should be logged for audit
+    And the agent should resume convergence
+
+  Scenario: Grace period fallback to journal-wins when no admin resolves
+    Given node "node-001" has a merge conflict on "kernel.shmmax"
+    And the grace period is configured as the commit window duration
+    When the grace period expires without admin resolution
+    Then the system should fall back to journal-wins
+    And "kernel.shmmax" on node "node-001" should be set to the journal value
+    And the overwritten local value should be logged for audit
