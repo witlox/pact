@@ -21,14 +21,14 @@ fmt-check:
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Run tests (skips tests marked #[ignore], excludes acceptance)
+# Run tests (skips tests marked #[ignore], excludes acceptance and e2e)
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace --exclude pact-acceptance
+        cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e
     else
-        cargo test --workspace --exclude pact-acceptance
+        cargo test --workspace --exclude pact-acceptance --exclude pact-e2e
     fi
 
 # Run BDD acceptance tests (cucumber, custom harness)
@@ -38,6 +38,10 @@ test-accept:
 # Run BDD acceptance tests with integration features (needs running services)
 test-accept-full:
     cargo test -p pact-acceptance --features integration
+
+# Run e2e integration tests (requires Docker)
+test-e2e:
+    cargo test -p pact-e2e -- --test-threads=1
 
 # Run the full test suite including slow tests
 test-all:

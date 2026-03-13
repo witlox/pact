@@ -9,6 +9,7 @@ members = [
     "crates/pact-test-harness",
     "crates/pact-mcp",
     "crates/pact-acceptance",
+    "crates/pact-e2e",
 ]
 
 [workspace.package]
@@ -104,6 +105,7 @@ proptest = "1"
 cucumber = "0.22"
 tempfile = "3"
 tokio-test = "0.4"
+testcontainers = "0.27"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
