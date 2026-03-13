@@ -7,6 +7,7 @@
 //! - **commit**: Commit window management with optimistic concurrency
 //! - **capability**: Hardware capability reporting (GPU, memory, network)
 //! - **emergency**: Emergency mode management
+//! - **shell**: Exec and interactive shell (ADR-007: replaces SSH)
 //!
 //! See `docs/architecture/agent-design.md` for design documentation.
 
@@ -17,5 +18,6 @@ pub mod conflict;
 pub mod drift;
 pub mod emergency;
 pub mod observer;
+pub mod shell;
 pub mod subscription;
 pub mod supervisor;

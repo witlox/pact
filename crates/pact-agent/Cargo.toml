@@ -31,6 +31,7 @@ nix = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
+jsonwebtoken = { workspace = true }
 prometheus = { workspace = true }
 
 # Optional: eBPF observers
