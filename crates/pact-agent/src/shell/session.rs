@@ -10,6 +10,8 @@
 //! PTY allocation is Linux-only (via nix crate). macOS uses stubs.
 
 use chrono::{DateTime, Utc};
+#[cfg(target_os = "linux")]
+use tracing::debug;
 use tracing::{info, warn};
 use uuid::Uuid;
 

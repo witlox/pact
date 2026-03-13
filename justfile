@@ -35,6 +35,10 @@ test:
 test-accept:
     cargo test -p pact-acceptance
 
+# Run BDD acceptance tests with integration features (needs running services)
+test-accept-full:
+    cargo test -p pact-acceptance --features integration
+
 # Run the full test suite including slow tests
 test-all:
     #!/usr/bin/env bash

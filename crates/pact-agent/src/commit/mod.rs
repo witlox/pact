@@ -120,6 +120,11 @@ impl CommitWindowManager {
         self.emergency = false;
     }
 
+    /// Get the current config.
+    pub fn config(&self) -> &CommitWindowConfig {
+        &self.config
+    }
+
     /// Get current state.
     pub fn state(&self) -> &WindowState {
         &self.state

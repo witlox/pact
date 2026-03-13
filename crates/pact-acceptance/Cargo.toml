@@ -9,6 +9,11 @@ description = "BDD acceptance tests for pact"
 [dependencies]
 pact-common = { workspace = true }
 pact-test-harness = { workspace = true }
+pact-journal = { workspace = true }
+pact-agent = { workspace = true }
+pact-policy = { workspace = true }
+pact-cli = { workspace = true }
+pact-mcp = { workspace = true }
 
 cucumber = { workspace = true }
 tokio = { workspace = true }
@@ -19,6 +24,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 futures = "0.3"
 tempfile = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = []
+integration = []
 
 [[test]]
 name = "acceptance"

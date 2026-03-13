@@ -117,6 +117,6 @@ Feature: Policy Evaluation
       | pact-viewer-ml-training       | status    | ml-training  | authorized |
       | pact-viewer-ml-training       | diff      | ml-training  | authorized |
       | pact-viewer-ml-training       | commit    | ml-training  | denied     |
-      | pact-viewer-ml-training       | exec      | ml-training  | authorized |
+      | pact-viewer-ml-training       | exec      | ml-training  | denied     |
       | pact-viewer-ml-training       | shell     | ml-training  | denied     |
       | pact-ops-ml-training          | commit    | storage-ops  | denied     |

@@ -49,6 +49,12 @@ pub struct HomogeneityWarning {
 }
 
 impl JournalState {
+    /// Convenience method to apply a command without importing the Raft trait.
+    pub fn apply_command(&mut self, cmd: JournalCommand) -> JournalResponse {
+        use raft_hpc_core::StateMachineState;
+        StateMachineState::<JournalTypeConfig>::apply(self, cmd)
+    }
+
     /// Detect conflicts between local entries and current journal state (CR2).
     ///
     /// For each local entry, compare its state_delta keys against the current

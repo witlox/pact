@@ -22,6 +22,11 @@ rust-version = "1.85"
 # Internal crates
 pact-common = { path = "crates/pact-common", version = "2026.1.0" }
 pact-test-harness = { path = "crates/pact-test-harness", version = "2026.1.0" }
+pact-journal = { path = "crates/pact-journal", version = "2026.1.0" }
+pact-agent = { path = "crates/pact-agent", default-features = false, version = "2026.1.0" }
+pact-policy = { path = "crates/pact-policy", default-features = false, version = "2026.1.0" }
+pact-cli = { path = "crates/pact-cli", version = "2026.1.0" }
+pact-mcp = { path = "crates/pact-mcp", version = "2026.1.0" }
 
 # Async runtime
 tokio = { version = "1", features = ["full", "process", "signal"] }
