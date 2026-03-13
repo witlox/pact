@@ -189,7 +189,24 @@ async fn validation_rejects_bad_entries() {
 async fn policy_service_evaluate_and_update() {
     let (_, policy_svc, _, _state, _tmp) = bootstrap_single_node().await;
 
-    // Evaluate stub — always returns authorized
+    // Admin should be authorized (P6: platform admin bypass)
+    let resp = policy_svc
+        .evaluate(Request::new(PolicyEvalRequest {
+            author: Some(ProtoIdentity {
+                principal: "admin@example.com".into(),
+                principal_type: "admin".into(),
+                role: "pact-platform-admin".into(),
+            }),
+            scope: Some(config::Scope { scope: Some(config::scope::Scope::Global(true)) }),
+            action: "commit".into(),
+            proposed_change: None,
+            command: None,
+        }))
+        .await
+        .unwrap();
+    assert!(resp.into_inner().authorized);
+
+    // Anonymous with no role should be denied
     let resp = policy_svc
         .evaluate(Request::new(PolicyEvalRequest {
             author: None,
@@ -200,7 +217,7 @@ async fn policy_service_evaluate_and_update() {
         }))
         .await
         .unwrap();
-    assert!(resp.into_inner().authorized);
+    assert!(!resp.into_inner().authorized);
 
     // Update policy through Raft
     let resp = policy_svc

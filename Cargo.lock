@@ -1941,6 +1941,7 @@ dependencies = [
  "flate2",
  "openraft",
  "pact-common",
+ "pact-policy",
  "pact-test-harness",
  "prometheus",
  "prost",
@@ -1961,6 +1962,25 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "pact-mcp"
+version = "2026.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "pact-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

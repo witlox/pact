@@ -1,24 +1,29 @@
 //! PolicyService gRPC implementation (hosted in journal per ADR-003).
 //!
-//! Phase 1 stub: Evaluate returns allow-all. GetEffectivePolicy reads from
-//! local state. UpdatePolicy writes through Raft.
-//! Real OPA/RBAC logic added in Phase 4 (pact-policy library).
+//! Evaluates policy using pact-policy RBAC engine (P1-P8).
+//! GetEffectivePolicy reads from local state.
+//! UpdatePolicy writes through Raft.
 
 use std::sync::Arc;
 
 use openraft::Raft;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
+use tracing::debug;
 
 use pact_common::proto::policy::{
-    policy_service_server::PolicyService, GetPolicyRequest, PolicyEvalRequest, PolicyEvalResponse,
-    UpdatePolicyRequest, UpdatePolicyResponse, VClusterPolicy as ProtoVClusterPolicy,
+    policy_service_server::PolicyService, ApprovalRequired as ProtoApprovalRequired,
+    GetPolicyRequest, PolicyEvalRequest, PolicyEvalResponse, UpdatePolicyRequest,
+    UpdatePolicyResponse, VClusterPolicy as ProtoVClusterPolicy,
 };
+use pact_common::types::{Identity, PrincipalType, Scope};
+use pact_policy::rbac::{RbacDecision, RbacEngine};
 
 use crate::raft::types::{JournalCommand, JournalResponse, JournalTypeConfig};
 use crate::JournalState;
 
-/// gRPC PolicyService — stub hosted in journal process (ADR-003).
+/// gRPC PolicyService — hosted in journal process (ADR-003).
+/// Uses pact-policy RBAC engine for real policy evaluation.
 pub struct PolicyServiceImpl {
     raft: Raft<JournalTypeConfig>,
     state: Arc<RwLock<JournalState>>,
@@ -28,24 +33,102 @@ impl PolicyServiceImpl {
     pub fn new(raft: Raft<JournalTypeConfig>, state: Arc<RwLock<JournalState>>) -> Self {
         Self { raft, state }
     }
+
+    /// Convert proto Identity to domain Identity.
+    fn proto_to_identity(proto: &pact_common::proto::config::Identity) -> Identity {
+        let principal_type = match proto.principal_type.as_str() {
+            "agent" => PrincipalType::Agent,
+            "service" => PrincipalType::Service,
+            _ => PrincipalType::Human,
+        };
+        Identity { principal: proto.principal.clone(), principal_type, role: proto.role.clone() }
+    }
+
+    /// Convert proto Scope to domain Scope.
+    fn proto_to_scope(proto: &pact_common::proto::config::Scope) -> Scope {
+        use pact_common::proto::config::scope::Scope as ProtoScope;
+        match &proto.scope {
+            Some(ProtoScope::NodeId(n)) => Scope::Node(n.clone()),
+            Some(ProtoScope::VclusterId(vc)) => Scope::VCluster(vc.clone()),
+            Some(ProtoScope::Global(true)) => Scope::Global,
+            _ => Scope::Global,
+        }
+    }
 }
 
 #[tonic::async_trait]
 impl PolicyService for PolicyServiceImpl {
-    /// Phase 1 stub: always returns authorized=true.
-    /// Real RBAC + OPA evaluation added in Phase 4.
+    /// Evaluate policy using RBAC engine (P1-P8 invariants).
     async fn evaluate(
         &self,
         request: Request<PolicyEvalRequest>,
     ) -> Result<Response<PolicyEvalResponse>, Status> {
         let req = request.into_inner();
-        let policy_ref = format!("stub:allow-all:{}", req.action);
-        Ok(Response::new(PolicyEvalResponse {
-            authorized: true,
-            policy_ref,
-            denial_reason: None,
-            approval: None,
-        }))
+
+        // Extract identity and scope from request
+        let identity =
+            req.author.as_ref().map(Self::proto_to_identity).unwrap_or_else(|| Identity {
+                principal: "anonymous".into(),
+                principal_type: PrincipalType::Human,
+                role: String::new(),
+            });
+
+        let scope = req.scope.as_ref().map(Self::proto_to_scope).unwrap_or(Scope::Global);
+
+        // Look up the vCluster policy for two-person approval check
+        let state = self.state.read().await;
+        let vcluster_policy = match &scope {
+            Scope::VCluster(vc) => state.policies.get(vc).cloned(),
+            _ => None,
+        };
+        drop(state);
+
+        let default_policy = pact_common::types::VClusterPolicy::default();
+        let policy = vcluster_policy.as_ref().unwrap_or(&default_policy);
+
+        // Run RBAC evaluation
+        let rbac_decision = RbacEngine::evaluate(&identity, &req.action, &scope, policy);
+
+        debug!(
+            principal = %identity.principal,
+            action = %req.action,
+            decision = ?rbac_decision,
+            "Policy evaluation"
+        );
+
+        match rbac_decision {
+            RbacDecision::Allow => {
+                let policy_ref = vcluster_policy
+                    .as_ref()
+                    .map(|p| format!("rbac:{}:{}", p.policy_id, req.action))
+                    .unwrap_or_else(|| format!("rbac:default:{}", req.action));
+                Ok(Response::new(PolicyEvalResponse {
+                    authorized: true,
+                    policy_ref,
+                    denial_reason: None,
+                    approval: None,
+                }))
+            }
+            RbacDecision::Deny { reason } => Ok(Response::new(PolicyEvalResponse {
+                authorized: false,
+                policy_ref: format!("rbac:denied:{}", req.action),
+                denial_reason: Some(reason),
+                approval: None,
+            })),
+            RbacDecision::Defer => {
+                // Defer = two-person approval needed
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                Ok(Response::new(PolicyEvalResponse {
+                    authorized: false,
+                    policy_ref: format!("rbac:deferred:{}", req.action),
+                    denial_reason: None,
+                    approval: Some(ProtoApprovalRequired {
+                        approval_type: "two_person".into(),
+                        pending_approval_id: approval_id,
+                    }),
+                }))
+            }
+        }
     }
 
     /// Read effective policy for a vCluster from local state (J8).
@@ -184,6 +267,9 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use openraft::Raft;
+    use pact_common::proto::config::{
+        scope::Scope as ProtoScopeInner, Identity as ProtoIdentity, Scope as ProtoScope,
+    };
     use pact_common::types::{RoleBinding, VClusterPolicy};
     use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, StateMachineState};
 
@@ -229,10 +315,88 @@ mod tests {
         (svc, temp)
     }
 
-    // --- Evaluate stub tests ---
+    fn admin_identity() -> Option<ProtoIdentity> {
+        Some(ProtoIdentity {
+            principal: "admin@example.com".into(),
+            principal_type: "admin".into(),
+            role: "pact-platform-admin".into(),
+        })
+    }
+
+    fn ops_identity(vcluster: &str) -> Option<ProtoIdentity> {
+        Some(ProtoIdentity {
+            principal: "ops@example.com".into(),
+            principal_type: "admin".into(),
+            role: format!("pact-ops-{}", vcluster),
+        })
+    }
+
+    fn vcluster_scope(vc: &str) -> Option<ProtoScope> {
+        Some(ProtoScope { scope: Some(ProtoScopeInner::VclusterId(vc.into())) })
+    }
+
+    // --- RBAC evaluate tests ---
 
     #[tokio::test]
-    async fn evaluate_always_authorizes() {
+    async fn evaluate_admin_allowed() {
+        let (svc, _tmp) = test_policy_service().await;
+        let resp = svc
+            .evaluate(Request::new(PolicyEvalRequest {
+                author: admin_identity(),
+                scope: vcluster_scope("ml-training"),
+                action: "commit".into(),
+                proposed_change: None,
+                command: None,
+            }))
+            .await
+            .unwrap();
+        let eval = resp.into_inner();
+        assert!(eval.authorized);
+        assert!(eval.policy_ref.contains("commit"));
+        assert!(eval.denial_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn evaluate_ops_allowed_on_own_vcluster() {
+        let (svc, _tmp) = test_policy_service().await;
+        let resp = svc
+            .evaluate(Request::new(PolicyEvalRequest {
+                author: ops_identity("ml-training"),
+                scope: vcluster_scope("ml-training"),
+                action: "exec".into(),
+                proposed_change: None,
+                command: Some("nvidia-smi".into()),
+            }))
+            .await
+            .unwrap();
+        let eval = resp.into_inner();
+        // ml-training has two_person_approval=true and regulated=true,
+        // but exec is not a state-changing action for regulated roles
+        // so ops should be allowed
+        assert!(eval.authorized);
+        assert!(eval.policy_ref.contains("exec"));
+    }
+
+    #[tokio::test]
+    async fn evaluate_ops_denied_wrong_vcluster() {
+        let (svc, _tmp) = test_policy_service().await;
+        let resp = svc
+            .evaluate(Request::new(PolicyEvalRequest {
+                author: ops_identity("other-vc"),
+                scope: vcluster_scope("ml-training"),
+                action: "commit".into(),
+                proposed_change: None,
+                command: None,
+            }))
+            .await
+            .unwrap();
+        let eval = resp.into_inner();
+        assert!(!eval.authorized);
+        assert!(eval.denial_reason.is_some());
+    }
+
+    #[tokio::test]
+    async fn evaluate_anonymous_denied() {
         let (svc, _tmp) = test_policy_service().await;
         let resp = svc
             .evaluate(Request::new(PolicyEvalRequest {
@@ -245,10 +409,33 @@ mod tests {
             .await
             .unwrap();
         let eval = resp.into_inner();
-        assert!(eval.authorized);
-        assert!(eval.policy_ref.contains("commit"));
-        assert!(eval.denial_reason.is_none());
-        assert!(eval.approval.is_none());
+        // Anonymous with empty role should be denied
+        assert!(!eval.authorized);
+    }
+
+    #[tokio::test]
+    async fn evaluate_regulated_defers_for_approval() {
+        let (svc, _tmp) = test_policy_service().await;
+        let resp = svc
+            .evaluate(Request::new(PolicyEvalRequest {
+                author: Some(ProtoIdentity {
+                    principal: "regulated@example.com".into(),
+                    principal_type: "admin".into(),
+                    role: "pact-regulated-ml-training".into(),
+                }),
+                scope: vcluster_scope("ml-training"),
+                action: "commit".into(),
+                proposed_change: None,
+                command: None,
+            }))
+            .await
+            .unwrap();
+        let eval = resp.into_inner();
+        assert!(!eval.authorized);
+        assert!(eval.approval.is_some());
+        let approval = eval.approval.unwrap();
+        assert_eq!(approval.approval_type, "two_person");
+        assert!(!approval.pending_approval_id.is_empty());
     }
 
     #[tokio::test]
@@ -256,8 +443,8 @@ mod tests {
         let (svc, _tmp) = test_policy_service().await;
         let resp = svc
             .evaluate(Request::new(PolicyEvalRequest {
-                author: None,
-                scope: None,
+                author: admin_identity(),
+                scope: vcluster_scope("ml-training"),
                 action: "exec".into(),
                 proposed_change: None,
                 command: Some("nvidia-smi".into()),
