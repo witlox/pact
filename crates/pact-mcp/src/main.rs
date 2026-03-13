@@ -21,7 +21,7 @@ fn main() {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("stdin error: {}", e);
+                eprintln!("stdin error: {e}");
                 break;
             }
         };
@@ -77,7 +77,7 @@ fn handle_request(request: &JsonRpcRequest) -> protocol::JsonRpcResponse {
                     return error_response(
                         request.id.clone(),
                         error_codes::INVALID_PARAMS,
-                        format!("invalid tool call params: {}", e),
+                        format!("invalid tool call params: {e}"),
                     );
                 }
             };

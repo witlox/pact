@@ -19,11 +19,11 @@ pub fn format_log_entry(entry: &ConfigEntry) -> String {
     );
 
     if let Some(ref reason) = entry.emergency_reason {
-        line.push_str(&format!("  reason: {}", reason));
+        line.push_str(&format!("  reason: {reason}"));
     }
 
     if let Some(ref policy_ref) = entry.policy_ref {
-        line.push_str(&format!("  policy: {}", policy_ref));
+        line.push_str(&format!("  policy: {policy_ref}"));
     }
 
     line
@@ -35,14 +35,14 @@ pub fn format_log(entries: &[ConfigEntry]) -> String {
         return "(no log entries)".to_string();
     }
 
-    entries.iter().map(|e| format_log_entry(e)).collect::<Vec<_>>().join("\n")
+    entries.iter().map(format_log_entry).collect::<Vec<_>>().join("\n")
 }
 
 fn format_scope(scope: &Scope) -> String {
     match scope {
         Scope::Global => "global".to_string(),
-        Scope::VCluster(vc) => format!("vc:{}", vc),
-        Scope::Node(n) => format!("node:{}", n),
+        Scope::VCluster(vc) => format!("vc:{vc}"),
+        Scope::Node(n) => format!("node:{n}"),
     }
 }
 

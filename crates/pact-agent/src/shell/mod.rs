@@ -391,7 +391,7 @@ mod tests {
 
         let names: Vec<&str> = commands.iter().map(|e| e.command.as_str()).collect();
         let mut sorted = names.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         assert_eq!(names, sorted);
     }
 }

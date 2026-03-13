@@ -25,7 +25,7 @@ pub fn format_commit_result(result: &CommitResult) -> String {
         let mut line =
             format!("Committed (seq:{}) on {}", result.sequence, format_scope(&result.scope),);
         if let Some(ref policy_ref) = result.policy_ref {
-            line.push_str(&format!("  policy: {}", policy_ref));
+            line.push_str(&format!("  policy: {policy_ref}"));
         }
         line
     }
@@ -42,8 +42,8 @@ pub fn validate_commit_args(message: Option<&str>, entry_type: &EntryType) -> Re
 fn format_scope(scope: &Scope) -> String {
     match scope {
         Scope::Global => "global".to_string(),
-        Scope::VCluster(vc) => format!("vcluster: {}", vc),
-        Scope::Node(n) => format!("node: {}", n),
+        Scope::VCluster(vc) => format!("vcluster: {vc}"),
+        Scope::Node(n) => format!("node: {n}"),
     }
 }
 

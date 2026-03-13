@@ -51,20 +51,18 @@ fn simulate_boot_stream(world: &mut PactWorld, node_id: &str, vcluster: &str) {
         let overlay = BootOverlay {
             vcluster_id: vcluster.to_string(),
             version: 1,
-            data: format!("[vcluster.{}]\n", vcluster).into_bytes(),
-            checksum: format!("sha256:on-demand-{}", vcluster),
+            data: format!("[vcluster.{vcluster}]\n").into_bytes(),
+            checksum: format!("sha256:on-demand-{vcluster}"),
         };
         world.boot_stream_chunks.push(BootStreamChunk::BaseOverlay {
             version: overlay.version,
             data: overlay.data.clone(),
             checksum: overlay.checksum.clone(),
         });
-        world
-            .journal
-            .apply_command(JournalCommand::SetOverlay {
-                vcluster_id: vcluster.to_string(),
-                overlay,
-            });
+        world.journal.apply_command(JournalCommand::SetOverlay {
+            vcluster_id: vcluster.to_string(),
+            overlay,
+        });
     }
 
     // Phase 2: node delta — look for committed node-scoped entries
@@ -72,9 +70,7 @@ fn simulate_boot_stream(world: &mut PactWorld, node_id: &str, vcluster: &str) {
         .journal
         .entries
         .values()
-        .filter(|e| {
-            e.entry_type == EntryType::Commit && e.scope == Scope::Node(node_id.into())
-        })
+        .filter(|e| e.entry_type == EntryType::Commit && e.scope == Scope::Node(node_id.into()))
         .collect();
 
     if !node_deltas.is_empty() {
@@ -90,25 +86,14 @@ fn simulate_boot_stream(world: &mut PactWorld, node_id: &str, vcluster: &str) {
                     .into_bytes()
             })
             .collect();
-        world
-            .boot_stream_chunks
-            .push(BootStreamChunk::NodeDelta { data: delta_data });
+        world.boot_stream_chunks.push(BootStreamChunk::NodeDelta { data: delta_data });
     }
 
     // ConfigComplete
-    let base_version = world
-        .journal
-        .overlays
-        .get(vcluster)
-        .map(|o| o.version)
-        .unwrap_or(0);
+    let base_version = world.journal.overlays.get(vcluster).map_or(0, |o| o.version);
     world.boot_stream_chunks.push(BootStreamChunk::Complete {
         base_version,
-        node_version: if node_deltas.is_empty() {
-            None
-        } else {
-            Some(1)
-        },
+        node_version: if node_deltas.is_empty() { None } else { Some(1) },
     });
 
     world.boot_phases_completed.push("overlay".into());
@@ -120,7 +105,7 @@ fn simulate_boot_stream(world: &mut PactWorld, node_id: &str, vcluster: &str) {
 // GIVEN
 // ---------------------------------------------------------------------------
 
-#[given(regex = r#"^a boot overlay with services:$"#)]
+#[given(regex = r"^a boot overlay with services:$")]
 async fn given_boot_overlay_with_services(world: &mut PactWorld, step: &cucumber::gherkin::Step) {
     if let Some(ref table) = step.table {
         for row in table.rows.iter().skip(1) {
@@ -132,19 +117,17 @@ async fn given_boot_overlay_with_services(world: &mut PactWorld, step: &cucumber
                 row[2].split(',').map(|s| s.trim().to_string()).collect()
             };
 
-            world
-                .service_declarations
-                .push(pact_common::types::ServiceDecl {
-                    name,
-                    binary: "/usr/bin/true".into(),
-                    args: vec![],
-                    restart: pact_common::types::RestartPolicy::Always,
-                    restart_delay_seconds: 1,
-                    depends_on,
-                    order,
-                    cgroup_memory_max: None,
-                    health_check: None,
-                });
+            world.service_declarations.push(pact_common::types::ServiceDecl {
+                name,
+                binary: "/usr/bin/true".into(),
+                args: vec![],
+                restart: pact_common::types::RestartPolicy::Always,
+                restart_delay_seconds: 1,
+                depends_on,
+                order,
+                cgroup_memory_max: None,
+                health_check: None,
+            });
         }
     }
 
@@ -155,13 +138,12 @@ async fn given_boot_overlay_with_services(world: &mut PactWorld, step: &cucumber
         data: b"boot-config-with-services".to_vec(),
         checksum: "sha256:svc".into(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: "ml-training".into(),
-        overlay,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::SetOverlay { vcluster_id: "ml-training".into(), overlay });
 }
 
-#[given(regex = r#"^the journal is unreachable$"#)]
+#[given(regex = r"^the journal is unreachable$")]
 async fn given_journal_unreachable(world: &mut PactWorld) {
     world.journal_reachable = false;
 }
@@ -169,17 +151,14 @@ async fn given_journal_unreachable(world: &mut PactWorld) {
 #[given(regex = r#"^cached config exists for node "([\w-]+)" in vCluster "([\w-]+)"$"#)]
 async fn given_cached_config(world: &mut PactWorld, _node: String, vcluster: String) {
     // Simulate cached config by having an overlay available despite unreachable journal
-    if world.journal.overlays.get(&vcluster).is_none() {
+    if !world.journal.overlays.contains_key(&vcluster) {
         let overlay = BootOverlay {
             vcluster_id: vcluster.clone(),
             version: 1,
             data: b"cached-config".to_vec(),
             checksum: "sha256:cached".into(),
         };
-        world.journal.apply_command(JournalCommand::SetOverlay {
-            vcluster_id: vcluster,
-            overlay,
-        });
+        world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
     }
 }
 
@@ -203,9 +182,7 @@ async fn given_committed_change(world: &mut PactWorld, node: String, change: Str
         }],
         ..Default::default()
     });
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 // ---------------------------------------------------------------------------
@@ -219,12 +196,10 @@ async fn when_agent_starts(world: &mut PactWorld, node: String, vcluster: String
     simulate_boot_stream(world, &node, &vcluster);
 
     // Set node state
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Committed,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Committed,
+    });
 }
 
 #[when(regex = r#"^pact-agent starts on node "([\w-]+)"$"#)]
@@ -232,12 +207,10 @@ async fn when_agent_starts_default(world: &mut PactWorld, node: String) {
     world.boot_phases_completed.push("auth".into());
     simulate_boot_stream(world, &node, "ml-training");
 
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Committed,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Committed,
+    });
 }
 
 #[when(regex = r#"^pact-agent completes boot on node "([\w-]+)"$"#)]
@@ -263,17 +236,16 @@ async fn when_agent_completes_boot(world: &mut PactWorld, node: String) {
 #[when(regex = r#"^node "([\w-]+)" requests boot config for vCluster "([\w-]+)"$"#)]
 async fn when_node_requests_boot(world: &mut PactWorld, node: String, vcluster: String) {
     // If no overlay, build on demand
-    if world.journal.overlays.get(&vcluster).is_none() {
+    if !world.journal.overlays.contains_key(&vcluster) {
         let overlay = BootOverlay {
             vcluster_id: vcluster.clone(),
             version: 1,
             data: b"on-demand-config".to_vec(),
             checksum: "sha256:ondemand".into(),
         };
-        world.journal.apply_command(JournalCommand::SetOverlay {
-            vcluster_id: vcluster.clone(),
-            overlay,
-        });
+        world
+            .journal
+            .apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster.clone(), overlay });
     }
     simulate_boot_stream(world, &node, &vcluster);
 }
@@ -282,93 +254,67 @@ async fn when_node_requests_boot(world: &mut PactWorld, node: String, vcluster: 
 async fn when_config_commit(world: &mut PactWorld, vcluster: String) {
     // Append commit entry
     let entry = make_entry(EntryType::Commit, Scope::VCluster(vcluster.clone()));
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     // Rebuild overlay with incremented version
-    let old_version = world
-        .journal
-        .overlays
-        .get(&vcluster)
-        .map(|o| o.version)
-        .unwrap_or(0);
+    let old_version = world.journal.overlays.get(&vcluster).map_or(0, |o| o.version);
     let overlay = BootOverlay {
         vcluster_id: vcluster.clone(),
         version: old_version + 1,
         data: b"rebuilt-config".to_vec(),
         checksum: format!("sha256:v{}", old_version + 1),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 
     // Notify subscribers
     let seq = world.journal.entries.len() as u64;
-    world.received_updates.push(ConfigUpdateEvent {
-        sequence: seq,
-        update_type: "config_commit".into(),
-    });
+    world
+        .received_updates
+        .push(ConfigUpdateEvent { sequence: seq, update_type: "config_commit".into() });
 }
 
 #[when(regex = r#"^a config commit is appended for vCluster "([\w-]+)"$"#)]
 async fn when_config_commit_appended(world: &mut PactWorld, vcluster: String) {
     let entry = make_entry(EntryType::Commit, Scope::VCluster(vcluster));
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     let seq = world.journal.entries.len() as u64;
-    world.received_updates.push(ConfigUpdateEvent {
-        sequence: seq,
-        update_type: "config_commit".into(),
-    });
+    world
+        .received_updates
+        .push(ConfigUpdateEvent { sequence: seq, update_type: "config_commit".into() });
 }
 
-#[when(regex = r#"^config commits were appended at sequences 5, 6, and 7$"#)]
+#[when(regex = r"^config commits were appended at sequences 5, 6, and 7$")]
 async fn when_multiple_commits(world: &mut PactWorld) {
     for seq_label in [5u64, 6, 7] {
-        let entry = make_entry(
-            EntryType::Commit,
-            Scope::VCluster("ml-training".into()),
-        );
+        let entry = make_entry(EntryType::Commit, Scope::VCluster("ml-training".into()));
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
         world
-            .journal
-            .apply_command(JournalCommand::AppendEntry(entry));
-        world.received_updates.push(ConfigUpdateEvent {
-            sequence: seq_label,
-            update_type: "config_commit".into(),
-        });
+            .received_updates
+            .push(ConfigUpdateEvent { sequence: seq_label, update_type: "config_commit".into() });
     }
 }
 
 #[when(regex = r#"^the policy for vCluster "([\w-]+)" is updated$"#)]
 async fn when_policy_updated(world: &mut PactWorld, vcluster: String) {
     let entry = make_entry(EntryType::PolicyUpdate, Scope::VCluster(vcluster));
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     let seq = world.journal.entries.len() as u64;
-    world.received_updates.push(ConfigUpdateEvent {
-        sequence: seq,
-        update_type: "policy_update".into(),
-    });
+    world
+        .received_updates
+        .push(ConfigUpdateEvent { sequence: seq, update_type: "policy_update".into() });
 }
 
 #[when(regex = r#"^the blacklist for vCluster "([\w-]+)" is updated$"#)]
 async fn when_blacklist_updated(world: &mut PactWorld, vcluster: String) {
     let entry = make_entry(EntryType::PolicyUpdate, Scope::VCluster(vcluster));
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     let seq = world.journal.entries.len() as u64;
-    world.received_updates.push(ConfigUpdateEvent {
-        sequence: seq,
-        update_type: "blacklist_update".into(),
-    });
+    world
+        .received_updates
+        .push(ConfigUpdateEvent { sequence: seq, update_type: "blacklist_update".into() });
 }
 
 #[when(regex = r#"^node "([\w-]+)" reboots and pact-agent starts$"#)]
@@ -407,10 +353,8 @@ async fn then_auth_identity(_world: &mut PactWorld) {
 
 #[then("the agent should stream the vCluster overlay")]
 async fn then_stream_overlay(world: &mut PactWorld) {
-    let has_overlay = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
+    let has_overlay =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
     assert!(has_overlay, "boot stream should contain overlay");
 }
 
@@ -424,10 +368,8 @@ async fn then_overlay_applied(world: &mut PactWorld) {
 
 #[then("the agent should apply the node-specific delta after the overlay")]
 async fn then_delta_applied(world: &mut PactWorld) {
-    let has_delta = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
+    let has_delta =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
     assert!(has_delta, "boot stream should contain node delta");
 }
 
@@ -438,7 +380,7 @@ async fn then_start_first(world: &mut PactWorld, name: String) {
         decls.sort_by_key(|d| d.order);
         decls.iter().map(|d| d.name.clone()).collect()
     };
-    assert_eq!(sorted.first().map(|s| s.as_str()), Some(name.as_str()));
+    assert_eq!(sorted.first().map(std::string::String::as_str), Some(name.as_str()));
 }
 
 #[then(regex = r#"^"([\w-]+)" should start second$"#)]
@@ -448,7 +390,7 @@ async fn then_start_second(world: &mut PactWorld, name: String) {
         decls.sort_by_key(|d| d.order);
         decls.iter().map(|d| d.name.clone()).collect()
     };
-    assert_eq!(sorted.get(1).map(|s| s.as_str()), Some(name.as_str()));
+    assert_eq!(sorted.get(1).map(std::string::String::as_str), Some(name.as_str()));
 }
 
 #[then(regex = r#"^"([\w-]+)" should start last$"#)]
@@ -458,7 +400,7 @@ async fn then_start_last(world: &mut PactWorld, name: String) {
         decls.sort_by_key(|d| d.order);
         decls.iter().map(|d| d.name.clone()).collect()
     };
-    assert_eq!(sorted.last().map(|s| s.as_str()), Some(name.as_str()));
+    assert_eq!(sorted.last().map(std::string::String::as_str), Some(name.as_str()));
 }
 
 #[then("a CapabilityReport should be written to tmpfs")]
@@ -473,10 +415,7 @@ async fn then_node_ready(world: &mut PactWorld) {
 
 #[then("the agent should subscribe to config updates")]
 async fn then_subscribed(world: &mut PactWorld) {
-    assert!(
-        !world.subscriptions.is_empty(),
-        "agent should have a config subscription"
-    );
+    assert!(!world.subscriptions.is_empty(), "agent should have a config subscription");
 }
 
 #[then("the subscription should start from the current sequence")]
@@ -487,28 +426,20 @@ async fn then_sub_from_current(world: &mut PactWorld) {
 
 #[then("the journal should build an overlay on demand")]
 async fn then_on_demand_overlay(world: &mut PactWorld) {
-    let has_overlay = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
+    let has_overlay =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
     assert!(has_overlay, "on-demand overlay should be built");
 }
 
 #[then("the boot should proceed normally")]
 async fn then_boot_normal(world: &mut PactWorld) {
-    assert!(
-        !world.boot_phases_completed.is_empty(),
-        "boot should have completed phases"
-    );
+    assert!(!world.boot_phases_completed.is_empty(), "boot should have completed phases");
 }
 
 #[then("the agent should apply cached config")]
 async fn then_cached_config(world: &mut PactWorld) {
     // If journal unreachable, we still applied from cached overlay
-    assert!(
-        !world.boot_stream_chunks.is_empty(),
-        "should have boot stream chunks from cache"
-    );
+    assert!(!world.boot_stream_chunks.is_empty(), "should have boot stream chunks from cache");
 }
 
 #[then("the agent should start services from cached declarations")]
@@ -521,10 +452,7 @@ async fn then_cached_services(world: &mut PactWorld) {
 
 #[then("the agent should retry journal connection in background")]
 async fn then_retry_journal(world: &mut PactWorld) {
-    assert!(
-        !world.journal_reachable,
-        "journal should still be unreachable (retry is background)"
-    );
+    assert!(!world.journal_reachable, "journal should still be unreachable (retry is background)");
 }
 
 #[then(regex = r#"^the node delta should include "(.*)"$"#)]
@@ -537,11 +465,7 @@ async fn then_delta_includes(world: &mut PactWorld, setting: String) {
                 world.journal.entries.values().any(|e| {
                     if let Some(ref delta) = e.state_delta {
                         delta.kernel.iter().any(|k| {
-                            let kv = format!(
-                                "{}={}",
-                                k.key,
-                                k.value.as_deref().unwrap_or("")
-                            );
+                            let kv = format!("{}={}", k.key, k.value.as_deref().unwrap_or(""));
                             kv == setting
                         })
                     } else {
@@ -567,27 +491,23 @@ async fn then_setting_applied(world: &mut PactWorld) {
 
 #[then("the boot stream should contain a base overlay chunk")]
 async fn then_has_base_overlay(world: &mut PactWorld) {
-    let has = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
+    let has =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
     assert!(has, "stream should contain base overlay");
 }
 
 #[then("the overlay data should match the stored overlay")]
 async fn then_overlay_data_matches(world: &mut PactWorld) {
     // Verify first overlay chunk data matches what's in journal
-    if let Some(BootStreamChunk::BaseOverlay { data, .. }) = world
-        .boot_stream_chunks
-        .iter()
-        .find(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }))
+    if let Some(BootStreamChunk::BaseOverlay { data, .. }) =
+        world.boot_stream_chunks.iter().find(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }))
     {
         // Data should not be empty
         assert!(!data.is_empty(), "overlay data should not be empty");
     }
 }
 
-#[then(regex = r#"^the overlay version should be (\d+)$"#)]
+#[then(regex = r"^the overlay version should be (\d+)$")]
 async fn then_overlay_version(world: &mut PactWorld, version: u64) {
     let chunk_version = world.boot_stream_chunks.iter().find_map(|c| match c {
         BootStreamChunk::BaseOverlay { version: v, .. } => Some(*v),
@@ -607,10 +527,8 @@ async fn then_overlay_checksum(world: &mut PactWorld) {
 
 #[then("the boot stream should contain a node delta")]
 async fn then_has_node_delta(world: &mut PactWorld) {
-    let has = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
+    let has =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
     assert!(has, "stream should contain node delta");
 }
 
@@ -625,10 +543,8 @@ async fn then_delta_has_kernel(world: &mut PactWorld) {
 
 #[then("the boot stream should not contain a node delta")]
 async fn then_no_node_delta(world: &mut PactWorld) {
-    let has = world
-        .boot_stream_chunks
-        .iter()
-        .any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
+    let has =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::NodeDelta { .. }));
     assert!(!has, "stream should not contain node delta");
 }
 
@@ -652,25 +568,13 @@ async fn then_complete_has_version(world: &mut PactWorld) {
 
 #[then(regex = r#"^the overlay for vCluster "([\w-]+)" should be rebuilt$"#)]
 async fn then_overlay_rebuilt(world: &mut PactWorld, vcluster: String) {
-    assert!(
-        world.journal.overlays.contains_key(&vcluster),
-        "overlay should exist for {vcluster}"
-    );
+    assert!(world.journal.overlays.contains_key(&vcluster), "overlay should exist for {vcluster}");
 }
 
-#[then(regex = r#"^the new overlay version should be greater than (\d+)$"#)]
+#[then(regex = r"^the new overlay version should be greater than (\d+)$")]
 async fn then_overlay_version_gt(world: &mut PactWorld, min_version: u64) {
-    let max_version = world
-        .journal
-        .overlays
-        .values()
-        .map(|o| o.version)
-        .max()
-        .unwrap_or(0);
-    assert!(
-        max_version > min_version,
-        "overlay version {max_version} should be > {min_version}"
-    );
+    let max_version = world.journal.overlays.values().map(|o| o.version).max().unwrap_or(0);
+    assert!(max_version > min_version, "overlay version {max_version} should be > {min_version}");
 }
 
 #[then(regex = r#"^an overlay should be built on demand for vCluster "([\w-]+)"$"#)]
@@ -683,14 +587,8 @@ async fn then_on_demand_built(world: &mut PactWorld, vcluster: String) {
 
 #[then(regex = r#"^node "([\w-]+)" should receive a config update notification$"#)]
 async fn then_update_notification(world: &mut PactWorld, node: String) {
-    assert!(
-        world.subscriptions.contains_key(&node),
-        "node should be subscribed"
-    );
-    assert!(
-        !world.received_updates.is_empty(),
-        "should have received update notifications"
-    );
+    assert!(world.subscriptions.contains_key(&node), "node should be subscribed");
+    assert!(!world.received_updates.is_empty(), "should have received update notifications");
 }
 
 #[then("the update should include the new sequence number")]
@@ -715,17 +613,11 @@ async fn then_updates_from_seq(world: &mut PactWorld, node: String, seq: u64) {
 #[then(regex = r#"^node "([\w-]+)" should receive a policy change notification$"#)]
 async fn then_policy_notification(world: &mut PactWorld, node: String) {
     assert!(world.subscriptions.contains_key(&node));
-    assert!(world
-        .received_updates
-        .iter()
-        .any(|u| u.update_type == "policy_update"));
+    assert!(world.received_updates.iter().any(|u| u.update_type == "policy_update"));
 }
 
 #[then(regex = r#"^node "([\w-]+)" should receive a blacklist change notification$"#)]
 async fn then_blacklist_notification(world: &mut PactWorld, node: String) {
     assert!(world.subscriptions.contains_key(&node));
-    assert!(world
-        .received_updates
-        .iter()
-        .any(|u| u.update_type == "blacklist_update"));
+    assert!(world.received_updates.iter().any(|u| u.update_type == "blacklist_update"));
 }

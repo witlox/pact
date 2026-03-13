@@ -30,7 +30,7 @@ pub enum ConfigUpdateAction {
 }
 
 /// Tracks subscription state for reconnection.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SubscriptionState {
     /// Last successfully processed sequence number.
     pub last_sequence: u64,
@@ -38,12 +38,6 @@ pub struct SubscriptionState {
     pub reconnect_attempts: u32,
     /// Whether the subscription is currently connected.
     pub connected: bool,
-}
-
-impl Default for SubscriptionState {
-    fn default() -> Self {
-        Self { last_sequence: 0, reconnect_attempts: 0, connected: false }
-    }
 }
 
 /// Configuration for subscription behavior.

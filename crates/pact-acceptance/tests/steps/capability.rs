@@ -27,12 +27,8 @@ fn make_gpu(index: u32, vendor: GpuVendor, model: &str, health: GpuHealth) -> Gp
 }
 
 fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
-    let config_state = world
-        .journal
-        .node_states
-        .get(node_id)
-        .cloned()
-        .unwrap_or(ConfigState::ObserveOnly);
+    let config_state =
+        world.journal.node_states.get(node_id).cloned().unwrap_or(ConfigState::ObserveOnly);
 
     let emergency = if config_state == ConfigState::Emergency {
         Some(EmergencyInfo {
@@ -54,21 +50,10 @@ fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
         timestamp: chrono::Utc::now(),
         report_id: uuid::Uuid::new_v4(),
         gpus: world.gpu_capabilities.clone(),
-        memory: MemoryCapability {
-            total_bytes: 0,
-            available_bytes: 0,
-            numa_nodes: 1,
-        },
+        memory: MemoryCapability { total_bytes: 0, available_bytes: 0, numa_nodes: 1 },
         network: None,
-        storage: StorageCapability {
-            tmpfs_bytes: 0,
-            mounts: vec![],
-        },
-        software: SoftwareCapability {
-            loaded_modules: vec![],
-            uenv_image: None,
-            services: vec![],
-        },
+        storage: StorageCapability { tmpfs_bytes: 0, mounts: vec![] },
+        software: SoftwareCapability { loaded_modules: vec![], uenv_image: None, services: vec![] },
         config_state,
         drift_summary: None,
         emergency,
@@ -80,21 +65,19 @@ fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
 // GIVEN
 // ---------------------------------------------------------------------------
 
-#[given(regex = r#"^a node with (\d+) NVIDIA (\S+) GPUs$"#)]
+#[given(regex = r"^a node with (\d+) NVIDIA (\S+) GPUs$")]
 async fn given_nvidia_gpus(world: &mut PactWorld, count: u32, model: String) {
-    world.gpu_capabilities = (0..count)
-        .map(|i| make_gpu(i, GpuVendor::Nvidia, &model, GpuHealth::Healthy))
-        .collect();
+    world.gpu_capabilities =
+        (0..count).map(|i| make_gpu(i, GpuVendor::Nvidia, &model, GpuHealth::Healthy)).collect();
 }
 
-#[given(regex = r#"^a node with (\d+) AMD (\S+) GPUs$"#)]
+#[given(regex = r"^a node with (\d+) AMD (\S+) GPUs$")]
 async fn given_amd_gpus(world: &mut PactWorld, count: u32, model: String) {
-    world.gpu_capabilities = (0..count)
-        .map(|i| make_gpu(i, GpuVendor::Amd, &model, GpuHealth::Healthy))
-        .collect();
+    world.gpu_capabilities =
+        (0..count).map(|i| make_gpu(i, GpuVendor::Amd, &model, GpuHealth::Healthy)).collect();
 }
 
-#[given(regex = r#"^a node with (\d+) NVIDIA (\S+) GPUs and (\d+) AMD (\S+) GPUs$"#)]
+#[given(regex = r"^a node with (\d+) NVIDIA (\S+) GPUs and (\d+) AMD (\S+) GPUs$")]
 async fn given_mixed_gpus(
     world: &mut PactWorld,
     nv_count: u32,
@@ -105,9 +88,10 @@ async fn given_mixed_gpus(
     let mut gpus: Vec<GpuCapability> = (0..nv_count)
         .map(|i| make_gpu(i, GpuVendor::Nvidia, &nv_model, GpuHealth::Healthy))
         .collect();
-    gpus.extend((0..amd_count).map(|i| {
-        make_gpu(nv_count + i, GpuVendor::Amd, &amd_model, GpuHealth::Healthy)
-    }));
+    gpus.extend(
+        (0..amd_count)
+            .map(|i| make_gpu(nv_count + i, GpuVendor::Amd, &amd_model, GpuHealth::Healthy)),
+    );
     world.gpu_capabilities = gpus;
 }
 
@@ -131,7 +115,7 @@ async fn given_failed_gpu(world: &mut PactWorld) {
     world.gpu_capabilities = vec![make_gpu(0, GpuVendor::Nvidia, "A100", GpuHealth::Failed)];
 }
 
-#[given(regex = r#"^a node with (\d+) GB of memory$"#)]
+#[given(regex = r"^a node with (\d+) GB of memory$")]
 async fn given_memory(world: &mut PactWorld, gb: u64) {
     // Store memory in a temporary capability report
     let report = CapabilityReport {
@@ -146,11 +130,7 @@ async fn given_memory(world: &mut PactWorld, gb: u64) {
         },
         network: None,
         storage: StorageCapability { tmpfs_bytes: 0, mounts: vec![] },
-        software: SoftwareCapability {
-            loaded_modules: vec![],
-            uenv_image: None,
-            services: vec![],
-        },
+        software: SoftwareCapability { loaded_modules: vec![], uenv_image: None, services: vec![] },
         config_state: ConfigState::ObserveOnly,
         drift_summary: None,
         emergency: None,
@@ -170,19 +150,11 @@ async fn given_stable_report(world: &mut PactWorld) {
 #[given(regex = r#"^node "([\w-]+)" is in state "([\w]+)"$"#)]
 async fn given_node_state(world: &mut PactWorld, node: String, state_str: String) {
     let state = super::helpers::parse_config_state(&state_str);
-    world.journal.apply_command(JournalCommand::UpdateNodeState {
-        node_id: node,
-        state,
-    });
+    world.journal.apply_command(JournalCommand::UpdateNodeState { node_id: node, state });
 }
 
-#[given(regex = r#"^(\d+) declared services with (\d+) running and (\d+) failed$"#)]
-async fn given_supervisor_counts(
-    world: &mut PactWorld,
-    declared: u32,
-    running: u32,
-    failed: u32,
-) {
+#[given(regex = r"^(\d+) declared services with (\d+) running and (\d+) failed$")]
+async fn given_supervisor_counts(world: &mut PactWorld, declared: u32, running: u32, failed: u32) {
     world.supervisor_status = SupervisorStatus {
         backend: SupervisorBackend::Pact,
         services_declared: declared,
@@ -209,11 +181,8 @@ async fn when_detection_runs(world: &mut PactWorld) {
     let existing_memory = world
         .capability_report
         .as_ref()
-        .map(|r| r.memory.clone())
-        .unwrap_or(MemoryCapability {
-            total_bytes: 0,
-            available_bytes: 0,
-            numa_nodes: 1,
+        .map_or(MemoryCapability { total_bytes: 0, available_bytes: 0, numa_nodes: 1 }, |r| {
+            r.memory.clone()
         });
 
     let mut report = build_report(world, "test-node");
@@ -278,9 +247,7 @@ async fn when_gpu_transition(world: &mut PactWorld) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 #[when("the configured poll interval elapses")]
@@ -299,7 +266,7 @@ async fn when_supervisor_status(world: &mut PactWorld) {
 // THEN
 // ---------------------------------------------------------------------------
 
-#[then(regex = r#"^the capability report should contain (\d+) GPUs?$"#)]
+#[then(regex = r"^the capability report should contain (\d+) GPUs?$")]
 async fn then_gpu_count(world: &mut PactWorld, count: usize) {
     let report = world.capability_report.as_ref().expect("no capability report");
     assert_eq!(report.gpus.len(), count, "expected {count} GPUs, got {}", report.gpus.len());
@@ -365,7 +332,7 @@ async fn then_report_updated(world: &mut PactWorld) {
     assert!(world.capability_report.is_some(), "capability report should be updated");
 }
 
-#[then(regex = r#"^the capability report should show (\d+) memory bytes$"#)]
+#[then(regex = r"^the capability report should show (\d+) memory bytes$")]
 async fn then_memory_bytes(world: &mut PactWorld, bytes: u64) {
     let report = world.capability_report.as_ref().expect("no capability report");
     assert_eq!(report.memory.total_bytes, bytes);
@@ -423,13 +390,8 @@ async fn then_supervisor_backend(world: &mut PactWorld, backend_str: String) {
     assert_eq!(report.supervisor_status.backend, expected);
 }
 
-#[then(regex = r#"^the supervisor status should show (\d+) declared, (\d+) running, (\d+) failed$"#)]
-async fn then_supervisor_counts(
-    world: &mut PactWorld,
-    declared: u32,
-    running: u32,
-    failed: u32,
-) {
+#[then(regex = r"^the supervisor status should show (\d+) declared, (\d+) running, (\d+) failed$")]
+async fn then_supervisor_counts(world: &mut PactWorld, declared: u32, running: u32, failed: u32) {
     let report = world.capability_report.as_ref().expect("no capability report");
     assert_eq!(report.supervisor_status.services_declared, declared);
     assert_eq!(report.supervisor_status.services_running, running);
@@ -446,13 +408,8 @@ async fn then_status_backend(world: &mut PactWorld, backend_str: String) {
     assert_eq!(world.supervisor_status.backend, expected);
 }
 
-#[then(regex = r#"^the status should report (\d+) declared, (\d+) running, (\d+) failed$"#)]
-async fn then_status_counts(
-    world: &mut PactWorld,
-    declared: u32,
-    running: u32,
-    failed: u32,
-) {
+#[then(regex = r"^the status should report (\d+) declared, (\d+) running, (\d+) failed$")]
+async fn then_status_counts(world: &mut PactWorld, declared: u32, running: u32, failed: u32) {
     assert_eq!(world.supervisor_status.services_declared, declared);
     assert_eq!(world.supervisor_status.services_running, running);
     assert_eq!(world.supervisor_status.services_failed, failed);

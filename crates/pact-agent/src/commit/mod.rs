@@ -12,7 +12,7 @@ use chrono::{DateTime, Duration, Utc};
 use pact_common::config::CommitWindowConfig;
 
 /// Commit window state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowState {
     /// No drift — no active window.
     Idle,
@@ -38,7 +38,7 @@ impl CommitWindowManager {
     ///
     /// `window = base_window / (1 + magnitude * sensitivity)`
     pub fn calculate_window_seconds(&self, drift_magnitude: f64) -> u32 {
-        let denominator = 1.0 + drift_magnitude * self.config.drift_sensitivity;
+        let denominator = drift_magnitude.mul_add(self.config.drift_sensitivity, 1.0);
         let window = f64::from(self.config.base_window_seconds) / denominator;
         // Clamp to at least 60 seconds
         window.max(60.0) as u32
@@ -69,12 +69,12 @@ impl CommitWindowManager {
     pub fn check_expired(&mut self) -> bool {
         match &self.state {
             WindowState::Open { opened_at, deadline } if Utc::now() >= *deadline => {
-                if !self.emergency {
+                if self.emergency {
+                    false // Emergency mode: never expires
+                } else {
                     self.state =
                         WindowState::Expired { opened_at: *opened_at, expired_at: *deadline };
                     true
-                } else {
-                    false // Emergency mode: never expires
                 }
             }
             WindowState::Expired { .. } => true,

@@ -127,7 +127,7 @@ impl WhitelistManager {
 
     /// Check if a command is state-changing.
     pub fn is_state_changing(&self, command: &str) -> bool {
-        self.exec_whitelist.get(command).map_or(false, |e| e.state_changing)
+        self.exec_whitelist.get(command).is_some_and(|e| e.state_changing)
     }
 
     /// Check if a command is whitelisted for shell.
@@ -372,7 +372,7 @@ mod tests {
         let commands = mgr.exec_commands();
         let names: Vec<&str> = commands.iter().map(|e| e.command.as_str()).collect();
         let mut sorted = names.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         assert_eq!(names, sorted);
     }
 

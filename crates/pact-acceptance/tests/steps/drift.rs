@@ -75,14 +75,12 @@ async fn given_enforcement_mode(world: &mut PactWorld, mode: String) {
     world.enforcement_mode = mode;
 }
 
-#[given(regex = r#"^a drift vector with (\w+) magnitude (\d+\.\d+)$"#)]
+#[given(regex = r"^a drift vector with (\w+) magnitude (\d+\.\d+)$")]
 async fn given_drift_single_dim(world: &mut PactWorld, dim: String, mag: f64) {
     set_drift_dimension(&mut world.drift_vector_override, &dim, mag);
 }
 
-#[given(
-    regex = r#"^a drift vector with (\w+) magnitude (\d+\.\d+) and (\w+) magnitude (\d+\.\d+)$"#
-)]
+#[given(regex = r"^a drift vector with (\w+) magnitude (\d+\.\d+) and (\w+) magnitude (\d+\.\d+)$")]
 async fn given_drift_two_dim(
     world: &mut PactWorld,
     dim1: String,
@@ -115,37 +113,27 @@ async fn when_file_change(world: &mut PactWorld, path: String) {
 
 #[when(regex = r#"^a mount change is detected for "(.*)"$"#)]
 async fn when_mount_change(world: &mut PactWorld, path: String) {
-    world
-        .drift_evaluator
-        .process_event(&make_event("mount", &path));
+    world.drift_evaluator.process_event(&make_event("mount", &path));
 }
 
 #[when(regex = r#"^a kernel parameter change is detected for "([\w.]+)"$"#)]
 async fn when_kernel_change(world: &mut PactWorld, param: String) {
-    world
-        .drift_evaluator
-        .process_event(&make_event("kernel", &param));
+    world.drift_evaluator.process_event(&make_event("kernel", &param));
 }
 
 #[when(regex = r#"^a service state change is detected for "([\w-]+)"$"#)]
 async fn when_service_change(world: &mut PactWorld, service: String) {
-    world
-        .drift_evaluator
-        .process_event(&make_event("service", &service));
+    world.drift_evaluator.process_event(&make_event("service", &service));
 }
 
 #[when(regex = r#"^a network interface change is detected for "([\w]+)"$"#)]
 async fn when_network_change(world: &mut PactWorld, iface: String) {
-    world
-        .drift_evaluator
-        .process_event(&make_event("network", &iface));
+    world.drift_evaluator.process_event(&make_event("network", &iface));
 }
 
-#[when(regex = r#"^a GPU state change is detected for GPU index (\d+)$"#)]
+#[when(regex = r"^a GPU state change is detected for GPU index (\d+)$")]
 async fn when_gpu_change(world: &mut PactWorld, index: u32) {
-    world
-        .drift_evaluator
-        .process_event(&make_event("gpu", &format!("gpu-{index}")));
+    world.drift_evaluator.process_event(&make_event("gpu", &format!("gpu-{index}")));
 }
 
 // ---------------------------------------------------------------------------
@@ -154,10 +142,7 @@ async fn when_gpu_change(world: &mut PactWorld, index: u32) {
 
 #[then("the change should be filtered by the blacklist")]
 async fn then_filtered(world: &mut PactWorld) {
-    assert!(
-        world.drift_filtered,
-        "expected the change to be filtered by blacklist"
-    );
+    assert!(world.drift_filtered, "expected the change to be filtered by blacklist");
 }
 
 #[then("no drift event should be emitted")]
@@ -171,10 +156,7 @@ async fn then_no_drift(world: &mut PactWorld) {
 
 #[then("a drift event should be emitted")]
 async fn then_drift_emitted(world: &mut PactWorld) {
-    assert!(
-        world.drift_evaluator.magnitude() > 0.0,
-        "expected drift event but magnitude is 0.0"
-    );
+    assert!(world.drift_evaluator.magnitude() > 0.0, "expected drift event but magnitude is 0.0");
 }
 
 #[then(regex = r#"^the drift should be in the "(\w+)" dimension$"#)]
@@ -199,18 +181,13 @@ async fn then_drift_nonzero(world: &mut PactWorld, dim: String) {
 #[then("other dimensions should be zero")]
 async fn then_other_zero(world: &mut PactWorld) {
     let v = world.drift_evaluator.drift_vector();
-    let dims = [
-        v.mounts, v.files, v.network, v.services, v.kernel, v.packages, v.gpu,
-    ];
+    let dims = [v.mounts, v.files, v.network, v.services, v.kernel, v.packages, v.gpu];
     let non_zero_count = dims.iter().filter(|&&d| d > 0.0).count();
-    assert!(
-        non_zero_count <= 1,
-        "expected at most 1 non-zero dimension, got {non_zero_count}"
-    );
+    assert!(non_zero_count <= 1, "expected at most 1 non-zero dimension, got {non_zero_count}");
 }
 
 #[then(
-    regex = r#"^the (\w+) drift total magnitude should be greater than the (\w+) drift total magnitude$"#
+    regex = r"^the (\w+) drift total magnitude should be greater than the (\w+) drift total magnitude$"
 )]
 async fn then_drift_comparison(world: &mut PactWorld, dim1: String, dim2: String) {
     let weights = &world.drift_weights;
@@ -232,19 +209,13 @@ async fn then_drift_comparison(world: &mut PactWorld, dim1: String, dim2: String
 #[then("the total drift magnitude should be 0.0")]
 async fn then_drift_zero(world: &mut PactWorld) {
     let mag = world.drift_vector_override.magnitude(&world.drift_weights);
-    assert!(
-        mag.abs() < f64::EPSILON,
-        "expected total magnitude 0.0, got {mag}"
-    );
+    assert!(mag.abs() < f64::EPSILON, "expected total magnitude 0.0, got {mag}");
 }
 
 #[then("the total drift magnitude should be greater than a single dimension at 0.5")]
 async fn then_drift_compound(world: &mut PactWorld) {
     let compound = world.drift_vector_override.magnitude(&world.drift_weights);
-    let single = DriftVector {
-        kernel: 0.5,
-        ..DriftVector::default()
-    };
+    let single = DriftVector { kernel: 0.5, ..DriftVector::default() };
     let single_mag = single.magnitude(&world.drift_weights);
     assert!(
         compound > single_mag,

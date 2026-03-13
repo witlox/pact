@@ -55,7 +55,7 @@ impl Default for FederationConfig {
 }
 
 /// Federation state tracking.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FederationState {
     /// Last successful sync timestamp.
     pub last_sync: Option<DateTime<Utc>>,
@@ -65,12 +65,6 @@ pub struct FederationState {
     pub failure_count: u32,
     /// Cached template names.
     pub templates: Vec<String>,
-}
-
-impl Default for FederationState {
-    fn default() -> Self {
-        Self { last_sync: None, connected: false, failure_count: 0, templates: Vec::new() }
-    }
 }
 
 impl FederationState {

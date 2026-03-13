@@ -55,7 +55,7 @@ fn format_service_state(state: &ServiceState) -> &'static str {
 
 fn format_uptime(seconds: u64) -> String {
     if seconds < 60 {
-        format!("{}s", seconds)
+        format!("{seconds}s")
     } else if seconds < 3600 {
         format!("{}m{}s", seconds / 60, seconds % 60)
     } else if seconds < 86400 {

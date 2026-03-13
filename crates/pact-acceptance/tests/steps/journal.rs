@@ -3,8 +3,8 @@
 use chrono::Utc;
 use cucumber::{given, then, when};
 use pact_common::types::{
-    AdminOperation, AdminOperationType, BootOverlay, ConfigEntry, DeltaAction, DeltaItem, EntryType,
-    Identity, PrincipalType, Scope, StateDelta, VClusterPolicy,
+    AdminOperation, AdminOperationType, BootOverlay, ConfigEntry, DeltaAction, DeltaItem,
+    EntryType, Identity, PrincipalType, Scope, StateDelta, VClusterPolicy,
 };
 use pact_journal::JournalCommand;
 use uuid::Uuid;
@@ -56,10 +56,7 @@ async fn given_boot_overlay(world: &mut PactWorld, vcluster: String, version: u6
         checksum: format!("sha256:{:x}", md5_simple(&data)),
         data: data.into_bytes(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(
@@ -72,10 +69,7 @@ async fn given_boot_overlay_sysctl(world: &mut PactWorld, vcluster: String) {
         data: b"sysctl.vm.swappiness=60\nmount./scratch=nfs".to_vec(),
         checksum: "sha256:abc".to_string(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^a boot overlay for vCluster "([\w-]+)"$"#)]
@@ -86,10 +80,7 @@ async fn given_boot_overlay_simple(world: &mut PactWorld, vcluster: String) {
         data: b"default-config".to_vec(),
         checksum: "sha256:default".to_string(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^no overlay exists for vCluster "([\w-]+)"$"#)]
@@ -137,13 +128,9 @@ async fn given_node_delta_simple(world: &mut PactWorld, node_id: String) {
     regex = r#"^node "([\w-]+)" is subscribed to config updates for vCluster "([\w-]+)" from sequence (\d+)$"#
 )]
 async fn given_subscription(world: &mut PactWorld, node: String, vcluster: String, seq: u64) {
-    world.subscriptions.insert(
-        node,
-        crate::ConfigSubscription {
-            vcluster_id: vcluster,
-            from_sequence: seq,
-        },
-    );
+    world
+        .subscriptions
+        .insert(node, crate::ConfigSubscription { vcluster_id: vcluster, from_sequence: seq });
 }
 
 // ---------------------------------------------------------------------------
@@ -169,11 +156,8 @@ async fn when_append_commit_role(
     author: String,
     role: String,
 ) {
-    let entry = make_entry(
-        EntryType::Commit,
-        Scope::VCluster(vcluster),
-        make_identity(&author, &role),
-    );
+    let entry =
+        make_entry(EntryType::Commit, Scope::VCluster(vcluster), make_identity(&author, &role));
     world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
@@ -213,7 +197,7 @@ async fn when_append_commit_sysctl(world: &mut PactWorld, key: String, from: Str
     world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
-#[when(regex = r#"^I append a commit entry with TTL (\d+) seconds$"#)]
+#[when(regex = r"^I append a commit entry with TTL (\d+) seconds$")]
 async fn when_append_commit_ttl(world: &mut PactWorld, ttl: u32) {
     let mut entry = make_entry(
         EntryType::Commit,
@@ -227,10 +211,7 @@ async fn when_append_commit_ttl(world: &mut PactWorld, ttl: u32) {
 #[when(regex = r#"^I set node "([\w-]+)" state to "(\w+)"$"#)]
 async fn when_set_node_state(world: &mut PactWorld, node: String, state_str: String) {
     let state = parse_config_state(&state_str);
-    world.journal.apply_command(JournalCommand::UpdateNodeState {
-        node_id: node,
-        state,
-    });
+    world.journal.apply_command(JournalCommand::UpdateNodeState { node_id: node, state });
 }
 
 #[when(
@@ -245,10 +226,7 @@ async fn when_set_policy(world: &mut PactWorld, vcluster: String, max_drift: f64
         two_person_approval: false,
         ..VClusterPolicy::default()
     };
-    world.journal.apply_command(JournalCommand::SetPolicy {
-        vcluster_id: vcluster,
-        policy,
-    });
+    world.journal.apply_command(JournalCommand::SetPolicy { vcluster_id: vcluster, policy });
 }
 
 #[when(
@@ -260,16 +238,9 @@ async fn when_store_overlay(
     version: u64,
     checksum: String,
 ) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version,
-        data: vec![1, 2, 3],
-        checksum,
-    };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    let overlay =
+        BootOverlay { vcluster_id: vcluster.clone(), version, data: vec![1, 2, 3], checksum };
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[when(
@@ -323,15 +294,12 @@ async fn when_serde_roundtrip(world: &mut PactWorld) {
 // THEN
 // ---------------------------------------------------------------------------
 
-#[then(regex = r#"^the entry should be assigned sequence (\d+)$"#)]
+#[then(regex = r"^the entry should be assigned sequence (\d+)$")]
 async fn then_assigned_sequence(world: &mut PactWorld, seq: u64) {
-    assert!(
-        world.journal.entries.contains_key(&seq),
-        "entry at sequence {seq} not found"
-    );
+    assert!(world.journal.entries.contains_key(&seq), "entry at sequence {seq} not found");
 }
 
-#[then(regex = r#"^the journal should contain (\d+) entr(?:y|ies)$"#)]
+#[then(regex = r"^the journal should contain (\d+) entr(?:y|ies)$")]
 async fn then_journal_count(world: &mut PactWorld, count: usize) {
     assert_eq!(world.journal.entries.len(), count);
 }
@@ -375,7 +343,7 @@ async fn then_delta_action(world: &mut PactWorld, action_str: String) {
     assert!(delta.kernel.iter().any(|d| d.action == expected));
 }
 
-#[then(regex = r#"^entry (\d+) should have TTL (\d+)$"#)]
+#[then(regex = r"^entry (\d+) should have TTL (\d+)$")]
 async fn then_entry_ttl(world: &mut PactWorld, seq: u64, ttl: u32) {
     let entry = world.journal.entries.get(&seq).expect("entry not found");
     assert_eq!(entry.ttl_seconds, Some(ttl));
@@ -411,7 +379,7 @@ async fn then_overlay_checksum(world: &mut PactWorld, vcluster: String, checksum
     assert_eq!(overlay.checksum, checksum);
 }
 
-#[then(regex = r#"^the audit log should contain (\d+) entr(?:y|ies)$"#)]
+#[then(regex = r"^the audit log should contain (\d+) entr(?:y|ies)$")]
 async fn then_audit_count(world: &mut PactWorld, count: usize) {
     assert_eq!(world.journal.audit_log.len(), count);
 }

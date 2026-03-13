@@ -66,13 +66,15 @@ async fn given_running_service(world: &mut PactWorld, name: String) {
     let sup = PactSupervisor::new();
     sup.start(&decl).await.unwrap();
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[given(regex = r#"^a running service "([\w-]+)" with health check type "(\w+)"$"#)]
-async fn given_running_with_health_process(world: &mut PactWorld, name: String, check_type: String) {
+async fn given_running_with_health_process(
+    world: &mut PactWorld,
+    name: String,
+    check_type: String,
+) {
     let mut decl = long_running_service(&name);
     decl.health_check = Some(HealthCheck {
         check_type: match check_type.as_str() {
@@ -82,35 +84,25 @@ async fn given_running_with_health_process(world: &mut PactWorld, name: String, 
         interval_seconds: 10,
     });
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[given(regex = r#"^a running service "([\w-]+)" with health check type "Http" at "(.*)"$"#)]
 async fn given_running_with_http_health(world: &mut PactWorld, name: String, url: String) {
     let mut decl = long_running_service(&name);
-    decl.health_check = Some(HealthCheck {
-        check_type: HealthCheckType::Http { url },
-        interval_seconds: 10,
-    });
+    decl.health_check =
+        Some(HealthCheck { check_type: HealthCheckType::Http { url }, interval_seconds: 10 });
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[given(regex = r#"^a running service "([\w-]+)" with health check type "Tcp" on port (\d+)$"#)]
 async fn given_running_with_tcp_health(world: &mut PactWorld, name: String, port: u16) {
     let mut decl = long_running_service(&name);
-    decl.health_check = Some(HealthCheck {
-        check_type: HealthCheckType::Tcp { port },
-        interval_seconds: 10,
-    });
+    decl.health_check =
+        Some(HealthCheck { check_type: HealthCheckType::Tcp { port }, interval_seconds: 10 });
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[given(regex = r#"^a service "([\w-]+)" with restart policy "([\w]+)" and delay (\d+) seconds$"#)]
@@ -133,15 +125,8 @@ async fn given_service_order(world: &mut PactWorld, name: String, order: u32) {
     world.service_declarations.push(decl);
 }
 
-#[given(
-    regex = r#"^a service "([\w-]+)" with order (\d+) and depends on "([\w-]+)"$"#
-)]
-async fn given_service_with_dep(
-    world: &mut PactWorld,
-    name: String,
-    order: u32,
-    dep: String,
-) {
+#[given(regex = r#"^a service "([\w-]+)" with order (\d+) and depends on "([\w-]+)"$"#)]
+async fn given_service_with_dep(world: &mut PactWorld, name: String, order: u32, dep: String) {
     let mut decl = long_running_service(&name);
     decl.order = order;
     decl.depends_on = vec![dep];
@@ -153,27 +138,16 @@ async fn given_running_with_order(world: &mut PactWorld, name: String, order: u3
     let mut decl = long_running_service(&name);
     decl.order = order;
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
-#[given(
-    regex = r#"^a running service "([\w-]+)" with order (\d+) and depends on "([\w-]+)"$"#
-)]
-async fn given_running_with_dep(
-    world: &mut PactWorld,
-    name: String,
-    order: u32,
-    dep: String,
-) {
+#[given(regex = r#"^a running service "([\w-]+)" with order (\d+) and depends on "([\w-]+)"$"#)]
+async fn given_running_with_dep(world: &mut PactWorld, name: String, order: u32, dep: String) {
     let mut decl = long_running_service(&name);
     decl.order = order;
     decl.depends_on = vec![dep];
     world.service_declarations.push(decl);
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[given(regex = r#"^supervisor config with backend "([\w]+)"$"#)]
@@ -215,9 +189,7 @@ async fn when_service_started(world: &mut PactWorld, name: String) {
 
 #[when(regex = r#"^the service "([\w-]+)" is stopped$"#)]
 async fn when_service_stopped(world: &mut PactWorld, name: String) {
-    world
-        .service_states
-        .insert(name.clone(), ServiceState::Stopped);
+    world.service_states.insert(name.clone(), ServiceState::Stopped);
     world.service_stop_order.push(name);
 }
 
@@ -225,18 +197,12 @@ async fn when_service_stopped(world: &mut PactWorld, name: String) {
 async fn when_service_restarted(world: &mut PactWorld, name: String) {
     world.service_stop_order.push(name.clone());
     world.service_start_order.push(name.clone());
-    world
-        .service_states
-        .insert(name, ServiceState::Running);
+    world.service_states.insert(name, ServiceState::Running);
 }
 
 #[when(regex = r#"^a health check is performed for "([\w-]+)"$"#)]
 async fn when_health_check(world: &mut PactWorld, name: String) {
-    let state = world
-        .service_states
-        .get(&name)
-        .cloned()
-        .unwrap_or(ServiceState::Stopped);
+    let state = world.service_states.get(&name).cloned().unwrap_or(ServiceState::Stopped);
     // Health checks pass if service is running
     if state == ServiceState::Running {
         world.last_error = None;
@@ -245,28 +211,20 @@ async fn when_health_check(world: &mut PactWorld, name: String) {
 
 #[when(regex = r#"^the service "([\w-]+)" fails$"#)]
 async fn when_service_fails(world: &mut PactWorld, name: String) {
-    world
-        .service_states
-        .insert(name, ServiceState::Failed);
+    world.service_states.insert(name, ServiceState::Failed);
 }
 
 #[when(regex = r#"^the service "([\w-]+)" exits with non-zero code$"#)]
 async fn when_service_exits_nonzero(world: &mut PactWorld, name: String) {
-    world
-        .service_states
-        .insert(name, ServiceState::Failed);
+    world.service_states.insert(name, ServiceState::Failed);
 }
 
 #[when(regex = r#"^the service "([\w-]+)" exits with code (\d+)$"#)]
 async fn when_service_exits_code(world: &mut PactWorld, name: String, code: i32) {
     if code == 0 {
-        world
-            .service_states
-            .insert(name, ServiceState::Stopped);
+        world.service_states.insert(name, ServiceState::Stopped);
     } else {
-        world
-            .service_states
-            .insert(name, ServiceState::Failed);
+        world.service_states.insert(name, ServiceState::Failed);
     }
 }
 
@@ -276,9 +234,7 @@ async fn when_all_started(world: &mut PactWorld) {
     sorted.sort_by_key(|s| s.order);
     for svc in &sorted {
         world.service_start_order.push(svc.name.clone());
-        world
-            .service_states
-            .insert(svc.name.clone(), ServiceState::Running);
+        world.service_states.insert(svc.name.clone(), ServiceState::Running);
     }
 }
 
@@ -289,17 +245,13 @@ async fn when_all_stopped(world: &mut PactWorld) {
     sorted.reverse();
     for svc in &sorted {
         world.service_stop_order.push(svc.name.clone());
-        world
-            .service_states
-            .insert(svc.name.clone(), ServiceState::Stopped);
+        world.service_states.insert(svc.name.clone(), ServiceState::Stopped);
     }
 }
 
 #[when(regex = r#"^the service "([\w-]+)" is started by "([\w@.]+)"$"#)]
 async fn when_service_started_by(world: &mut PactWorld, name: String, actor: String) {
-    world
-        .service_states
-        .insert(name.clone(), ServiceState::Running);
+    world.service_states.insert(name.clone(), ServiceState::Running);
     world.service_start_order.push(name.clone());
 
     let op = AdminOperation {
@@ -314,16 +266,12 @@ async fn when_service_started_by(world: &mut PactWorld, name: String, actor: Str
         scope: Scope::Global,
         detail: format!("service {name} started"),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::RecordOperation(op));
+    world.journal.apply_command(JournalCommand::RecordOperation(op));
 }
 
 #[when(regex = r#"^the service "([\w-]+)" is restarted by "([\w@.]+)"$"#)]
 async fn when_service_restarted_by(world: &mut PactWorld, name: String, actor: String) {
-    world
-        .service_states
-        .insert(name.clone(), ServiceState::Running);
+    world.service_states.insert(name.clone(), ServiceState::Running);
 
     let op = AdminOperation {
         operation_id: uuid::Uuid::new_v4().to_string(),
@@ -337,9 +285,7 @@ async fn when_service_restarted_by(world: &mut PactWorld, name: String, actor: S
         scope: Scope::Global,
         detail: format!("service {name} restarted"),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::RecordOperation(op));
+    world.journal.apply_command(JournalCommand::RecordOperation(op));
 }
 
 // ---------------------------------------------------------------------------
@@ -357,11 +303,7 @@ async fn then_service_state(world: &mut PactWorld, name: String, state_str: Stri
         "Stopping" => ServiceState::Stopping,
         _ => panic!("unknown service state: {state_str}"),
     };
-    let actual = world
-        .service_states
-        .get(&name)
-        .cloned()
-        .unwrap_or(ServiceState::Stopped);
+    let actual = world.service_states.get(&name).cloned().unwrap_or(ServiceState::Stopped);
     assert_eq!(actual, expected, "service {name}: expected {state_str}");
 }
 
@@ -382,7 +324,7 @@ async fn then_http_health(world: &mut PactWorld) {
     let has_http = world.service_declarations.iter().any(|d| {
         d.health_check
             .as_ref()
-            .map_or(false, |h| matches!(h.check_type, HealthCheckType::Http { .. }))
+            .is_some_and(|h| matches!(h.check_type, HealthCheckType::Http { .. }))
     });
     assert!(has_http, "should have HTTP health check configured");
 }
@@ -390,9 +332,7 @@ async fn then_http_health(world: &mut PactWorld) {
 #[then("the health check should be evaluated against the TCP port")]
 async fn then_tcp_health(world: &mut PactWorld) {
     let has_tcp = world.service_declarations.iter().any(|d| {
-        d.health_check
-            .as_ref()
-            .map_or(false, |h| matches!(h.check_type, HealthCheckType::Tcp { .. }))
+        d.health_check.as_ref().is_some_and(|h| matches!(h.check_type, HealthCheckType::Tcp { .. }))
     });
     assert!(has_tcp, "should have TCP health check configured");
 }
@@ -400,11 +340,8 @@ async fn then_tcp_health(world: &mut PactWorld) {
 #[then(regex = r#"^the service "([\w-]+)" should be restarted after (\d+) seconds$"#)]
 async fn then_restarted_after(world: &mut PactWorld, name: String, _delay: u32) {
     // Verify restart policy is configured with proper delay
-    let decl = world
-        .service_declarations
-        .iter()
-        .find(|d| d.name == name)
-        .expect("service decl not found");
+    let decl =
+        world.service_declarations.iter().find(|d| d.name == name).expect("service decl not found");
     assert_eq!(decl.restart_delay_seconds, _delay);
     assert!(
         matches!(decl.restart, RestartPolicy::Always | RestartPolicy::OnFailure),
@@ -420,11 +357,7 @@ async fn then_remain_state(world: &mut PactWorld, name: String, state_str: Strin
         "Running" => ServiceState::Running,
         _ => panic!("unknown state: {state_str}"),
     };
-    let actual = world
-        .service_states
-        .get(&name)
-        .cloned()
-        .unwrap_or(ServiceState::Stopped);
+    let actual = world.service_states.get(&name).cloned().unwrap_or(ServiceState::Stopped);
     assert_eq!(actual, expected);
 }
 
@@ -476,26 +409,22 @@ async fn then_backend(world: &mut PactWorld, backend_str: String) {
 
 #[then("a ServiceLifecycle entry should be recorded")]
 async fn then_service_lifecycle_entry(world: &mut PactWorld) {
-    let has_entry = world
-        .journal
-        .audit_log
-        .iter()
-        .any(|op| {
-            matches!(
-                op.operation_type,
-                AdminOperationType::ServiceStart | AdminOperationType::ServiceRestart
-            )
-        });
+    let has_entry = world.journal.audit_log.iter().any(|op| {
+        matches!(
+            op.operation_type,
+            AdminOperationType::ServiceStart | AdminOperationType::ServiceRestart
+        )
+    });
     assert!(has_entry, "no ServiceLifecycle audit entry found");
 }
 
-#[then(
-    regex = r#"^the entry should record action "([\w]+)" for service "([\w-]+)"$"#
-)]
+#[then(regex = r#"^the entry should record action "([\w]+)" for service "([\w-]+)"$"#)]
 async fn then_entry_action_service(world: &mut PactWorld, action: String, service: String) {
     let expected_type = super::helpers::parse_admin_op_type(&action);
-    let found = world.journal.audit_log.iter().any(|op| {
-        op.operation_type == expected_type && op.detail.contains(&service)
-    });
+    let found = world
+        .journal
+        .audit_log
+        .iter()
+        .any(|op| op.operation_type == expected_type && op.detail.contains(&service));
     assert!(found, "no {action} entry for service {service}");
 }

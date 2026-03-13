@@ -51,7 +51,7 @@ pub fn format_node_status(status: &NodeStatus) -> String {
     if let Some(ref drift) = status.drift_summary {
         let categories = format_drift_categories(drift);
         if !categories.is_empty() {
-            lines.push(format!("Drift: {}", categories));
+            lines.push(format!("Drift: {categories}"));
         }
     }
 

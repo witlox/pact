@@ -5,6 +5,10 @@
 //!
 //! Run with: `cargo test -p pact-acceptance`
 
+// Cucumber step definitions often have parameters extracted by macros that aren't
+// always used in stub implementations. Accept that in this test crate.
+#![allow(unused_variables, unused_imports, dead_code, unused_mut)]
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -33,7 +37,6 @@ mod steps;
 #[world(init = Self::new)]
 pub struct PactWorld {
     // === Wired to real crate code ===
-
     /// Journal state machine — real `JournalState::apply_command()`.
     pub journal: JournalState,
 
@@ -56,7 +59,6 @@ pub struct PactWorld {
     pub auth_result: Option<AuthResult>,
 
     // === Drift test helpers ===
-
     /// Override drift vector for GIVEN steps that set specific magnitudes.
     pub drift_vector_override: DriftVector,
 

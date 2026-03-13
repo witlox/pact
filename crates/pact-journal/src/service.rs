@@ -152,15 +152,11 @@ fn proto_to_config_entry(
 
     let author = proto.author.ok_or_else(|| Status::invalid_argument("author required"))?;
 
-    let scope = proto
-        .scope
-        .and_then(|s| s.scope)
-        .map(|s| match s {
-            pact_common::proto::config::scope::Scope::NodeId(n) => Scope::Node(n),
-            pact_common::proto::config::scope::Scope::VclusterId(v) => Scope::VCluster(v),
-            pact_common::proto::config::scope::Scope::Global(_) => Scope::Global,
-        })
-        .unwrap_or(Scope::Global);
+    let scope = proto.scope.and_then(|s| s.scope).map_or(Scope::Global, |s| match s {
+        pact_common::proto::config::scope::Scope::NodeId(n) => Scope::Node(n),
+        pact_common::proto::config::scope::Scope::VclusterId(v) => Scope::VCluster(v),
+        pact_common::proto::config::scope::Scope::Global(_) => Scope::Global,
+    });
 
     let entry_type = match proto.entry_type {
         1 => EntryType::Commit,
@@ -231,7 +227,7 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
         }),
     };
 
-    let ttl = entry.ttl_seconds.map(|s| prost_types::Duration { seconds: s as i64, nanos: 0 });
+    let ttl = entry.ttl_seconds.map(|s| prost_types::Duration { seconds: i64::from(s), nanos: 0 });
 
     ProtoConfigEntry {
         sequence: entry.sequence,

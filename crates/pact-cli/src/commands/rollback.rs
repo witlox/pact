@@ -26,8 +26,7 @@ pub fn format_rollback_result(result: &RollbackResult) -> String {
 pub fn validate_rollback_target(target_seq: u64, current_seq: u64) -> Result<(), String> {
     if target_seq >= current_seq {
         return Err(format!(
-            "Cannot rollback to seq:{} — current is seq:{}. Target must be earlier.",
-            target_seq, current_seq,
+            "Cannot rollback to seq:{target_seq} — current is seq:{current_seq}. Target must be earlier.",
         ));
     }
     if target_seq == 0 {
@@ -39,8 +38,8 @@ pub fn validate_rollback_target(target_seq: u64, current_seq: u64) -> Result<(),
 fn format_scope(scope: &Scope) -> String {
     match scope {
         Scope::Global => "global".to_string(),
-        Scope::VCluster(vc) => format!("vcluster: {}", vc),
-        Scope::Node(n) => format!("node: {}", n),
+        Scope::VCluster(vc) => format!("vcluster: {vc}"),
+        Scope::Node(n) => format!("node: {n}"),
     }
 }
 

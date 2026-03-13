@@ -66,14 +66,16 @@ impl PolicyService for PolicyServiceImpl {
         let req = request.into_inner();
 
         // Extract identity and scope from request
-        let identity =
-            req.author.as_ref().map(Self::proto_to_identity).unwrap_or_else(|| Identity {
+        let identity = req.author.as_ref().map_or_else(
+            || Identity {
                 principal: "anonymous".into(),
                 principal_type: PrincipalType::Human,
                 role: String::new(),
-            });
+            },
+            Self::proto_to_identity,
+        );
 
-        let scope = req.scope.as_ref().map(Self::proto_to_scope).unwrap_or(Scope::Global);
+        let scope = req.scope.as_ref().map_or(Scope::Global, Self::proto_to_scope);
 
         // Look up the vCluster policy for two-person approval check
         let state = self.state.read().await;
@@ -98,10 +100,10 @@ impl PolicyService for PolicyServiceImpl {
 
         match rbac_decision {
             RbacDecision::Allow => {
-                let policy_ref = vcluster_policy
-                    .as_ref()
-                    .map(|p| format!("rbac:{}:{}", p.policy_id, req.action))
-                    .unwrap_or_else(|| format!("rbac:default:{}", req.action));
+                let policy_ref = vcluster_policy.as_ref().map_or_else(
+                    || format!("rbac:default:{}", req.action),
+                    |p| format!("rbac:{}:{}", p.policy_id, req.action),
+                );
                 Ok(Response::new(PolicyEvalResponse {
                     authorized: true,
                     policy_ref,
@@ -327,7 +329,7 @@ mod tests {
         Some(ProtoIdentity {
             principal: "ops@example.com".into(),
             principal_type: "admin".into(),
-            role: format!("pact-ops-{}", vcluster),
+            role: format!("pact-ops-{vcluster}"),
         })
     }
 

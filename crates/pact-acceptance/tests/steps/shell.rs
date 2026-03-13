@@ -41,12 +41,7 @@ fn make_test_token(sub: &str, role: &str) -> String {
         pact_role: Some(role.into()),
         pact_principal_type: None,
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(TEST_SECRET),
-    )
-    .unwrap()
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(TEST_SECRET)).unwrap()
 }
 
 fn make_expired_token(sub: &str) -> String {
@@ -60,12 +55,7 @@ fn make_expired_token(sub: &str) -> String {
         pact_role: Some("pact-ops-ml-training".into()),
         pact_principal_type: None,
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(TEST_SECRET),
-    )
-    .unwrap()
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(TEST_SECRET)).unwrap()
 }
 
 fn make_wrong_audience_token() -> String {
@@ -79,12 +69,7 @@ fn make_wrong_audience_token() -> String {
         pact_role: Some("pact-ops-ml-training".into()),
         pact_principal_type: None,
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(TEST_SECRET),
-    )
-    .unwrap()
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(TEST_SECRET)).unwrap()
 }
 
 fn make_identity(principal: &str, role: &str) -> Identity {
@@ -170,19 +155,16 @@ async fn given_two_person(world: &mut PactWorld) {
         ..VClusterPolicy::default()
     };
     world.policy_engine.set_policy(policy.clone());
-    world.journal.apply_command(JournalCommand::SetPolicy {
-        vcluster_id: "ml-training".into(),
-        policy,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::SetPolicy { vcluster_id: "ml-training".into(), policy });
 }
 
 // ---------------------------------------------------------------------------
 // WHEN — Shell sessions
 // ---------------------------------------------------------------------------
 
-#[when(
-    regex = r#"^user "([\w@.]+)" with role "([\w-]+)" requests a shell on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" with role "([\w-]+)" requests a shell on node "([\w-]+)"$"#)]
 async fn when_user_requests_shell(world: &mut PactWorld, user: String, role: String, node: String) {
     world.current_identity = Some(make_identity(&user, &role));
 
@@ -198,33 +180,26 @@ async fn when_user_requests_shell(world: &mut PactWorld, user: String, role: Str
                 world.shell_session_id = Some(uuid::Uuid::new_v4().to_string());
                 record_shell_session_to_journal(world, &user, &node, true);
             } else {
-                world.auth_result = Some(AuthResult::Denied {
-                    reason: "authorization denied".into(),
-                });
+                world.auth_result =
+                    Some(AuthResult::Denied { reason: "authorization denied".into() });
             }
         }
         Err(_) => {
-            world.auth_result = Some(AuthResult::Denied {
-                reason: "authorization denied".into(),
-            });
+            world.auth_result = Some(AuthResult::Denied { reason: "authorization denied".into() });
         }
     }
 }
 
 #[when("an unauthenticated user requests a shell on node \"node-001\"")]
 async fn when_unauth_shell(world: &mut PactWorld) {
-    world.auth_result = Some(AuthResult::Denied {
-        reason: "authorization denied".into(),
-    });
+    world.auth_result = Some(AuthResult::Denied { reason: "authorization denied".into() });
 }
 
 #[when(
     regex = r#"^user "([\w@.]+)" with exec-only permissions requests a shell on node "([\w-]+)"$"#
 )]
 async fn when_exec_only_shell(world: &mut PactWorld, user: String, _node: String) {
-    world.auth_result = Some(AuthResult::Denied {
-        reason: "authorization denied".into(),
-    });
+    world.auth_result = Some(AuthResult::Denied { reason: "authorization denied".into() });
 }
 
 #[when(regex = r#"^user "([\w@.]+)" opens a shell session$"#)]
@@ -236,7 +211,8 @@ async fn when_open_shell(world: &mut PactWorld, user: String) {
     // Populate available/blocked commands from real WhitelistManager
     let wl = WhitelistManager::new(true);
     world.available_commands = wl.shell_command_names().into_iter().map(String::from).collect();
-    world.blocked_commands = vec!["vi".into(), "vim".into(), "python".into(), "python3".into(), "bash".into()];
+    world.blocked_commands =
+        vec!["vi".into(), "vim".into(), "python".into(), "python3".into(), "bash".into()];
     world.lesssecure_set = true; // LESSSECURE is set if less is whitelisted
 }
 
@@ -247,12 +223,12 @@ async fn when_try_run(world: &mut PactWorld, command: String) {
     if !wl.is_exec_allowed(base_cmd) && !wl.is_shell_allowed(base_cmd) {
         // Check if it's an absolute path (rbash blocks these)
         if base_cmd.starts_with('/') {
-            world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-                "restricted: cannot specify command names with '/'".into(),
+            world.last_error = Some(pact_common::error::PactError::Unauthorized {
+                reason: "restricted: cannot specify command names with '/'".into(),
             });
         } else {
-            world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-                "command not found".into(),
+            world.last_error = Some(pact_common::error::PactError::Unauthorized {
+                reason: "command not found".into(),
             });
         }
     }
@@ -260,8 +236,8 @@ async fn when_try_run(world: &mut PactWorld, command: String) {
 
 #[when("the user tries to modify PATH")]
 async fn when_modify_path(world: &mut PactWorld) {
-    world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-        "restricted: cannot change PATH".into(),
+    world.last_error = Some(pact_common::error::PactError::Unauthorized {
+        reason: "restricted: cannot change PATH".into(),
     });
 }
 
@@ -316,8 +292,8 @@ async fn when_state_changing_shell(world: &mut PactWorld, user: String) {
 async fn when_try_run_in_session(world: &mut PactWorld, _user: String, command: String) {
     let wl = WhitelistManager::new(true);
     if !wl.is_shell_allowed(&command) {
-        world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-            "command not found".into(),
+        world.last_error = Some(pact_common::error::PactError::Unauthorized {
+            reason: "command not found".into(),
         });
         if world.shell_whitelist_mode == "learning" {
             world.whitelist_suggestions.push(command);
@@ -339,9 +315,7 @@ async fn when_open_shell_vcluster(world: &mut PactWorld, vc: String) {
 // WHEN — Exec endpoint
 // ---------------------------------------------------------------------------
 
-#[when(
-    regex = r#"^user "([\w@.]+)" with role "([\w-]+)" executes "([\w-]+)" on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" with role "([\w-]+)" executes "([\w-]+)" on node "([\w-]+)"$"#)]
 async fn when_exec_with_role(
     world: &mut PactWorld,
     user: String,
@@ -357,38 +331,39 @@ async fn when_exec_with_role(
     match server.authorize_exec(&identity, &command).await {
         Ok(state_changing) => {
             // Execute the command
-            let result = execute_command(&command, &[], &ExecConfig { timeout_seconds: 5, max_output_bytes: 1024 }).await;
-            match result {
-                Ok(res) => {
-                    let stdout = String::from_utf8_lossy(&res.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&res.stderr).to_string();
-                    world.exec_results.push(ExecResult {
-                        command: command.clone(),
-                        exit_code: res.exit_code,
-                        stdout,
-                        stderr,
-                        logged: true,
-                    });
-                    world.cli_exit_code = Some(0);
-                    record_exec_to_journal(world, &user, &command, &node);
+            let result = execute_command(
+                &command,
+                &[],
+                &ExecConfig { timeout_seconds: 5, max_output_bytes: 1024 },
+            )
+            .await;
+            let exec_result = if let Ok(res) = result {
+                let stdout = String::from_utf8_lossy(&res.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&res.stderr).to_string();
+                ExecResult {
+                    command: command.clone(),
+                    exit_code: res.exit_code,
+                    stdout,
+                    stderr,
+                    logged: true,
                 }
-                Err(_) => {
-                    world.exec_results.push(ExecResult {
-                        command: command.clone(),
-                        exit_code: 0,
-                        stdout: format!("{command} output"),
-                        stderr: String::new(),
-                        logged: true,
-                    });
-                    world.cli_exit_code = Some(0);
-                    record_exec_to_journal(world, &user, &command, &node);
+            } else {
+                ExecResult {
+                    command: command.clone(),
+                    exit_code: 0,
+                    stdout: format!("{command} output"),
+                    stderr: String::new(),
+                    logged: true,
                 }
-            }
+            };
+            world.exec_results.push(exec_result);
+            world.cli_exit_code = Some(0);
+            record_exec_to_journal(world, &user, &command, &node);
         }
         Err(AuthError::InsufficientPrivileges(reason)) => {
             if reason.contains("not whitelisted") {
-                world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-                    "command not whitelisted".into(),
+                world.last_error = Some(pact_common::error::PactError::Unauthorized {
+                    reason: "command not whitelisted".into(),
                 });
                 world.cli_exit_code = Some(6);
             } else {
@@ -396,16 +371,12 @@ async fn when_exec_with_role(
             }
         }
         Err(_) => {
-            world.auth_result = Some(AuthResult::Denied {
-                reason: "authorization denied".into(),
-            });
+            world.auth_result = Some(AuthResult::Denied { reason: "authorization denied".into() });
         }
     }
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes "([^"]*)" on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes "([^"]*)" on node "([\w-]+)"$"#)]
 async fn when_exec_on_node(world: &mut PactWorld, user: String, command: String, node: String) {
     let base_cmd = command.split_whitespace().next().unwrap_or(&command);
     world.current_identity = Some(make_identity(&user, "pact-ops-ml-training"));
@@ -417,8 +388,8 @@ async fn when_exec_on_node(world: &mut PactWorld, user: String, command: String,
 
     let wl = WhitelistManager::new(true);
     if !wl.is_exec_allowed(base_cmd) {
-        world.last_error = Some(pact_common::error::PactError::Unauthorized { reason:
-            "command not whitelisted".into(),
+        world.last_error = Some(pact_common::error::PactError::Unauthorized {
+            reason: "command not whitelisted".into(),
         });
         world.cli_exit_code = Some(6);
         return;
@@ -441,9 +412,7 @@ async fn when_exec_on_node(world: &mut PactWorld, user: String, command: String,
     }
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes "([\w-]+)" with args "(.*)" on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes "([\w-]+)" with args "(.*)" on node "([\w-]+)"$"#)]
 async fn when_exec_with_args(
     world: &mut PactWorld,
     user: String,
@@ -463,9 +432,7 @@ async fn when_exec_with_args(
     record_exec_to_journal(world, &user, &command, &node);
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes a long-running command on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes a long-running command on node "([\w-]+)"$"#)]
 async fn when_exec_long_running(world: &mut PactWorld, user: String, node: String) {
     world.exec_results.push(ExecResult {
         command: "long-running".into(),
@@ -477,9 +444,7 @@ async fn when_exec_long_running(world: &mut PactWorld, user: String, node: Strin
     world.cli_exit_code = Some(0);
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes a command that writes to stderr on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes a command that writes to stderr on node "([\w-]+)"$"#)]
 async fn when_exec_stderr(world: &mut PactWorld, user: String, node: String) {
     world.exec_results.push(ExecResult {
         command: "stderr-cmd".into(),
@@ -490,9 +455,7 @@ async fn when_exec_stderr(world: &mut PactWorld, user: String, node: String) {
     });
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes a command that fails on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes a command that fails on node "([\w-]+)"$"#)]
 async fn when_exec_fails(world: &mut PactWorld, user: String, node: String) {
     world.exec_results.push(ExecResult {
         command: "failing-cmd".into(),
@@ -504,9 +467,7 @@ async fn when_exec_fails(world: &mut PactWorld, user: String, node: String) {
     record_exec_to_journal(world, &user, "failing-cmd", &node);
 }
 
-#[when(
-    regex = r#"^user "([\w@.]+)" executes a state-changing command on node "([\w-]+)"$"#
-)]
+#[when(regex = r#"^user "([\w@.]+)" executes a state-changing command on node "([\w-]+)"$"#)]
 async fn when_exec_state_changing(world: &mut PactWorld, user: String, node: String) {
     if world.policy_degraded && world.journal.policies.values().any(|p| p.two_person_approval) {
         world.auth_result = Some(AuthResult::Denied {
@@ -552,10 +513,7 @@ async fn then_denied_error(world: &mut PactWorld, expected: String) {
                 "expected error '{expected}', got '{reason}'"
             );
         }
-        _ => panic!(
-            "expected denial with '{expected}', got {:?}",
-            world.auth_result
-        ),
+        _ => panic!("expected denial with '{expected}', got {:?}", world.auth_result),
     }
 }
 
@@ -567,7 +525,9 @@ async fn then_rbash(world: &mut PactWorld) {
         make_identity("admin@example.com", "pact-ops-ml"),
         "node-001".into(),
         "ml-training".into(),
-        24, 80, "xterm-256color".into(),
+        24,
+        80,
+        "xterm-256color".into(),
     );
     let env = session.env_vars();
     let env_map: std::collections::HashMap<_, _> = env.into_iter().collect();
@@ -580,7 +540,9 @@ async fn then_path_restricted(world: &mut PactWorld) {
         make_identity("admin@example.com", "pact-ops-ml"),
         "node-001".into(),
         "ml-training".into(),
-        24, 80, "xterm-256color".into(),
+        24,
+        80,
+        "xterm-256color".into(),
     );
     let env = session.env_vars();
     let env_map: std::collections::HashMap<_, _> = env.into_iter().collect();
@@ -591,29 +553,20 @@ async fn then_path_restricted(world: &mut PactWorld) {
 #[then(regex = r#"^the command "([\w-]+)" should be available$"#)]
 async fn then_command_available(world: &mut PactWorld, command: String) {
     let wl = WhitelistManager::new(true);
-    assert!(
-        wl.is_shell_allowed(&command),
-        "{command} should be in whitelist"
-    );
+    assert!(wl.is_shell_allowed(&command), "{command} should be in whitelist");
 }
 
 #[then(regex = r#"^the command "([\w]+)" should not be available in the default whitelist$"#)]
 async fn then_command_not_available(world: &mut PactWorld, command: String) {
     let wl = WhitelistManager::new(false);
-    assert!(
-        !wl.is_shell_allowed(&command),
-        "{command} should not be in default whitelist"
-    );
+    assert!(!wl.is_shell_allowed(&command), "{command} should not be in default whitelist");
 }
 
 #[then(regex = r#"^the command should fail with "(.*)"$"#)]
 async fn then_command_fails(world: &mut PactWorld, expected: String) {
     let err = world.last_error.as_ref().expect("expected error");
     let err_msg = err.to_string();
-    assert!(
-        err_msg.contains(&expected),
-        "expected '{expected}', got '{err_msg}'"
-    );
+    assert!(err_msg.contains(&expected), "expected '{expected}', got '{err_msg}'");
 }
 
 #[then("the command should be blocked by rbash restrictions")]
@@ -639,11 +592,7 @@ async fn then_command_logged(world: &mut PactWorld, command: String) {
 
 #[then("the log should include the authenticated identity")]
 async fn then_log_identity(world: &mut PactWorld) {
-    let has_actor = world
-        .journal
-        .audit_log
-        .iter()
-        .any(|op| !op.actor.principal.is_empty());
+    let has_actor = world.journal.audit_log.iter().any(|op| !op.actor.principal.is_empty());
     assert!(has_actor, "audit log should include identity");
 }
 
@@ -686,10 +635,7 @@ async fn then_session_id_returned(world: &mut PactWorld) {
 #[then("the drift observer should detect the change")]
 async fn then_drift_detected(world: &mut PactWorld) {
     // State-changing command triggers drift detection
-    assert!(
-        !world.journal.audit_log.is_empty(),
-        "exec should be logged in audit"
-    );
+    assert!(!world.journal.audit_log.is_empty(), "exec should be logged in audit");
 }
 
 #[then("a commit window should be opened")]
@@ -728,10 +674,7 @@ async fn then_cmd_not_available(world: &mut PactWorld, cmd: String) {
 
 #[then("the command should execute successfully")]
 async fn then_exec_success(world: &mut PactWorld) {
-    assert!(
-        !world.exec_results.is_empty(),
-        "expected exec result"
-    );
+    assert!(!world.exec_results.is_empty(), "expected exec result");
 }
 
 #[then("stdout should be streamed back")]
@@ -742,11 +685,8 @@ async fn then_stdout_streamed(world: &mut PactWorld) {
 
 #[then("an ExecLog entry should be recorded in the journal")]
 async fn then_exec_log_entry(world: &mut PactWorld) {
-    let has_exec = world
-        .journal
-        .audit_log
-        .iter()
-        .any(|op| op.operation_type == AdminOperationType::Exec);
+    let has_exec =
+        world.journal.audit_log.iter().any(|op| op.operation_type == AdminOperationType::Exec);
     assert!(has_exec, "no ExecLog audit entry found");
 }
 
@@ -755,8 +695,7 @@ async fn then_command_rejected(world: &mut PactWorld, expected: String) {
     if let Some(ref err) = world.last_error {
         assert!(
             err.to_string().contains(&expected) || expected.contains("whitelisted"),
-            "expected '{expected}', got '{}'",
-            err
+            "expected '{expected}', got '{err}'"
         );
     } else if let Some(AuthResult::Denied { ref reason }) = world.auth_result {
         assert!(
@@ -768,7 +707,7 @@ async fn then_command_rejected(world: &mut PactWorld, expected: String) {
     }
 }
 
-#[then(regex = r#"^exit code should be (\d+)$"#)]
+#[then(regex = r"^exit code should be (\d+)$")]
 async fn then_exit_code(world: &mut PactWorld, code: i32) {
     if let Some(actual) = world.cli_exit_code {
         assert_eq!(actual, code, "expected exit code {code}, got {actual}");
@@ -785,10 +724,7 @@ async fn then_exit_code(world: &mut PactWorld, code: i32) {
 
 #[then("the bypass should be logged in the audit trail")]
 async fn then_bypass_logged(world: &mut PactWorld) {
-    assert!(
-        !world.journal.audit_log.is_empty(),
-        "bypass should be in audit trail"
-    );
+    assert!(!world.journal.audit_log.is_empty(), "bypass should be in audit trail");
 }
 
 #[then("the command should execute immediately")]
@@ -844,11 +780,10 @@ async fn then_stderr_separate(world: &mut PactWorld) {
 
 #[then(regex = r#"^the ExecLog entry should contain the command "(.*)"$"#)]
 async fn then_exec_log_command(world: &mut PactWorld, command: String) {
-    let found = world
-        .journal
-        .audit_log
-        .iter()
-        .any(|op| op.operation_type == AdminOperationType::Exec && op.detail.contains(&command));
+    let found =
+        world.journal.audit_log.iter().any(|op| {
+            op.operation_type == AdminOperationType::Exec && op.detail.contains(&command)
+        });
     assert!(found, "ExecLog should contain command '{command}'");
 }
 
@@ -866,10 +801,7 @@ async fn then_entry_scope_node(world: &mut PactWorld, node: String) {
 
 #[then("the ExecLog entry should still be recorded")]
 async fn then_failed_exec_logged(world: &mut PactWorld) {
-    assert!(
-        !world.journal.audit_log.is_empty(),
-        "failed exec should still be logged"
-    );
+    assert!(!world.journal.audit_log.is_empty(), "failed exec should still be logged");
 }
 
 #[then("the entry should include the exit code")]

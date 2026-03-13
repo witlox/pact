@@ -28,7 +28,7 @@ pub struct ConflictEntry {
 }
 
 /// Resolution choice for a conflict.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
     /// Accept the local value (promote it to journal).
     AcceptLocal,
@@ -37,7 +37,7 @@ pub enum Resolution {
 }
 
 /// State of a pending conflict.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictState {
     /// Conflict detected, awaiting admin resolution.
     Pending,

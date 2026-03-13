@@ -22,21 +22,16 @@ async fn when_emergency_enter(world: &mut PactWorld, admin: String, node: String
     };
 
     // Start emergency mode
-    world
-        .emergency_mgr
-        .start(actor.clone(), reason.clone())
-        .expect("failed to start emergency");
+    world.emergency_mgr.start(actor, reason.clone()).expect("failed to start emergency");
 
     // Enter emergency on commit window manager
     world.commit_mgr.enter_emergency();
 
     // Update node state in journal
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node.clone(),
-            state: ConfigState::Emergency,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node.clone(),
+        state: ConfigState::Emergency,
+    });
 
     // Record EmergencyStart entry in journal
     let entry = ConfigEntry {
@@ -55,9 +50,7 @@ async fn when_emergency_enter(world: &mut PactWorld, admin: String, node: String
         ttl_seconds: None,
         emergency_reason: Some(reason),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 // ---------------------------------------------------------------------------
@@ -66,19 +59,12 @@ async fn when_emergency_enter(world: &mut PactWorld, admin: String, node: String
 
 #[then(regex = r#"^node "([\w-]+)" should be in emergency state$"#)]
 async fn then_emergency_state(world: &mut PactWorld, node: String) {
-    assert_eq!(
-        world.journal.node_states.get(&node),
-        Some(&ConfigState::Emergency)
-    );
+    assert_eq!(world.journal.node_states.get(&node), Some(&ConfigState::Emergency));
 }
 
 #[then("an EmergencyStart entry should be recorded in the journal")]
 async fn then_emergency_start_entry(world: &mut PactWorld) {
-    assert!(world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::EmergencyStart));
+    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyStart));
 }
 
 #[then(regex = r#"^the emergency reason should be "(.*)"$"#)]

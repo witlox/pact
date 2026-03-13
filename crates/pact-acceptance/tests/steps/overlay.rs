@@ -26,8 +26,8 @@ fn overlay_at_seq(vcluster: &str, version: u64, seq: u64) -> BootOverlay {
     BootOverlay {
         vcluster_id: vcluster.into(),
         version,
-        data: format!("config-at-seq-{}", seq).into_bytes(),
-        checksum: format!("sha256:seq{}", seq),
+        data: format!("config-at-seq-{seq}").into_bytes(),
+        checksum: format!("sha256:seq{seq}"),
     }
 }
 
@@ -44,10 +44,7 @@ async fn given_vc_full_config(world: &mut PactWorld, vcluster: String) {
             .to_vec(),
         checksum: "sha256:fullconfig".into(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^vCluster "([\w-]+)" has a large config$"#)]
@@ -60,10 +57,7 @@ async fn given_vc_large_config(world: &mut PactWorld, vcluster: String) {
         data: raw.into_bytes(),
         checksum: "sha256:large".into(),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^an existing overlay for vCluster "([\w-]+)" at version (\d+)$"#)]
@@ -71,22 +65,16 @@ async fn given_overlay_at_version(world: &mut PactWorld, vcluster: String, versi
     let overlay = BootOverlay {
         vcluster_id: vcluster.clone(),
         version,
-        data: format!("config-v{}", version).into_bytes(),
-        checksum: format!("sha256:v{}", version),
+        data: format!("config-v{version}").into_bytes(),
+        checksum: format!("sha256:v{version}"),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^an overlay for vCluster "([\w-]+)" built at sequence (\d+)$"#)]
 async fn given_overlay_at_seq(world: &mut PactWorld, vcluster: String, seq: u64) {
     let overlay = overlay_at_seq(&vcluster, 1, seq);
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^the latest config sequence for vCluster "([\w-]+)" is (\d+)$"#)]
@@ -106,21 +94,12 @@ async fn given_latest_seq(world: &mut PactWorld, vcluster: String, seq: u64) {
             ttl_seconds: None,
             emergency_reason: None,
         };
-        world
-            .journal
-            .apply_command(JournalCommand::AppendEntry(entry));
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
     }
 }
 
-#[given(
-    regex = r#"^node "([\w-]+)" has a committed delta changing "([\w.]+)" to "([\w]+)"$"#
-)]
-async fn given_node_delta_change(
-    world: &mut PactWorld,
-    node: String,
-    key: String,
-    value: String,
-) {
+#[given(regex = r#"^node "([\w-]+)" has a committed delta changing "([\w.]+)" to "([\w]+)"$"#)]
+async fn given_node_delta_change(world: &mut PactWorld, node: String, key: String, value: String) {
     let mut entry = ConfigEntry {
         sequence: 0,
         timestamp: chrono::Utc::now(),
@@ -141,27 +120,16 @@ async fn given_node_delta_change(
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
-#[given(
-    regex = r#"^node "([\w-]+)" has a local change on "([\w.]+)" set to "([\w]+)"$"#
-)]
-async fn given_node_local_change(
-    world: &mut PactWorld,
-    node: String,
-    key: String,
-    value: String,
-) {
+#[given(regex = r#"^node "([\w-]+)" has a local change on "([\w.]+)" set to "([\w]+)"$"#)]
+async fn given_node_local_change(world: &mut PactWorld, node: String, key: String, value: String) {
     // Local (uncommitted) change — tracked in node state as Drifted
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Drifted,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Drifted,
+    });
     // Store the local value in drift_vector_override for later reference
     world.drift_vector_override.kernel = 1.0;
 }
@@ -187,7 +155,7 @@ async fn given_promote_conflict(
         state_delta: Some(StateDelta {
             kernel: vec![DeltaItem {
                 action: DeltaAction::Modify,
-                key: key.clone(),
+                key,
                 value: Some(promoted),
                 previous: None,
             }],
@@ -197,28 +165,22 @@ async fn given_promote_conflict(
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     // node-002 has local (drifted) value
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: "node-002".into(),
-            state: ConfigState::Drifted,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-002".into(),
+        state: ConfigState::Drifted,
+    });
 }
 
 #[given(regex = r#"^vCluster "([\w-]+)" has (\d+) nodes$"#)]
 async fn given_vc_nodes(world: &mut PactWorld, vcluster: String, count: u32) {
     for i in 1..=count {
-        world
-            .journal
-            .apply_command(JournalCommand::UpdateNodeState {
-                node_id: format!("node-{:03}", i),
-                state: ConfigState::Committed,
-            });
+        world.journal.apply_command(JournalCommand::UpdateNodeState {
+            node_id: format!("node-{i:03}"),
+            state: ConfigState::Committed,
+        });
     }
 }
 
@@ -228,7 +190,7 @@ async fn given_per_node_delta(world: &mut PactWorld, node: String, key: String) 
         sequence: 0,
         timestamp: chrono::Utc::now(),
         entry_type: EntryType::Commit,
-        scope: Scope::Node(node.clone()),
+        scope: Scope::Node(node),
         author: admin_identity(),
         parent: None,
         state_delta: Some(StateDelta {
@@ -244,27 +206,16 @@ async fn given_per_node_delta(world: &mut PactWorld, node: String, key: String) 
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
-#[given(
-    regex = r#"^nodes "([\w-]+)", "([\w-]+)", "([\w-]+)" are converged to the overlay$"#
-)]
-async fn given_nodes_converged(
-    world: &mut PactWorld,
-    n1: String,
-    n2: String,
-    n3: String,
-) {
+#[given(regex = r#"^nodes "([\w-]+)", "([\w-]+)", "([\w-]+)" are converged to the overlay$"#)]
+async fn given_nodes_converged(world: &mut PactWorld, n1: String, n2: String, n3: String) {
     for node in [n1, n2, n3] {
-        world
-            .journal
-            .apply_command(JournalCommand::UpdateNodeState {
-                node_id: node,
-                state: ConfigState::Committed,
-            });
+        world.journal.apply_command(JournalCommand::UpdateNodeState {
+            node_id: node,
+            state: ConfigState::Committed,
+        });
     }
 }
 
@@ -290,9 +241,7 @@ async fn given_expired_ttl_delta(world: &mut PactWorld, node: String) {
         ttl_seconds: Some(900), // 15 min TTL — valid but expired (timestamp is 1 hour old)
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 // ---------------------------------------------------------------------------
@@ -306,45 +255,32 @@ async fn when_overlay_built(world: &mut PactWorld, vcluster: String) {
         .journal
         .overlays
         .get(&vcluster)
-        .map(|o| o.data.clone())
-        .unwrap_or_else(|| b"rebuilt-config".to_vec());
+        .map_or_else(|| b"rebuilt-config".to_vec(), |o| o.data.clone());
 
-    let version = world
-        .journal
-        .overlays
-        .get(&vcluster)
-        .map(|o| o.version)
-        .unwrap_or(0)
-        + 1;
+    let version = world.journal.overlays.get(&vcluster).map_or(0, |o| o.version) + 1;
 
     // Simulate zstd compression (just note it's "compressed")
-    let compressed_data = config_data.clone(); // In real code this would be zstd::encode
+    let compressed_data = config_data; // In real code this would be zstd::encode
     let overlay = BootOverlay {
         vcluster_id: vcluster.clone(),
         version,
         data: compressed_data,
-        checksum: format!("sha256:v{}", version),
+        checksum: format!("sha256:v{version}"),
     };
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: vcluster,
-        overlay,
-    });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[when(regex = r#"^a boot request arrives for vCluster "([\w-]+)"$"#)]
 async fn when_boot_request(world: &mut PactWorld, vcluster: String) {
     // Build on demand if missing
-    if world.journal.overlays.get(&vcluster).is_none() {
+    if !world.journal.overlays.contains_key(&vcluster) {
         let overlay = BootOverlay {
             vcluster_id: vcluster.clone(),
             version: 1,
             data: b"on-demand-config".to_vec(),
             checksum: "sha256:ondemand".into(),
         };
-        world.journal.apply_command(JournalCommand::SetOverlay {
-            vcluster_id: vcluster,
-            overlay,
-        });
+        world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
     }
 }
 
@@ -366,17 +302,9 @@ async fn when_staleness_checked(world: &mut PactWorld, vcluster: String) {
 
     if overlay_seq < latest_seq {
         // Stale — trigger rebuild
-        let new_version = world
-            .journal
-            .overlays
-            .get(&vcluster)
-            .map(|o| o.version + 1)
-            .unwrap_or(1);
+        let new_version = world.journal.overlays.get(&vcluster).map_or(1, |o| o.version + 1);
         let overlay = overlay_at_seq(&vcluster, new_version, latest_seq);
-        world.journal.apply_command(JournalCommand::SetOverlay {
-            vcluster_id: vcluster,
-            overlay,
-        });
+        world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
         world.alert_raised = true; // reuse as "stale detected" flag
     } else {
         world.alert_raised = false; // fresh
@@ -388,16 +316,16 @@ async fn when_staleness_checked(world: &mut PactWorld, vcluster: String) {
 #[when(regex = r#"^the delta is promoted via "pact promote ([\w-]+)"$"#)]
 async fn when_delta_promoted(world: &mut PactWorld, node: String) {
     // Promote: merge node delta into overlay
-    let node_deltas: Vec<_> = world
+    let delta_count = world
         .journal
         .entries
         .values()
         .filter(|e| e.entry_type == EntryType::Commit && e.scope == Scope::Node(node.clone()))
-        .filter_map(|e| e.state_delta.clone())
-        .collect();
+        .filter_map(|e| e.state_delta.as_ref())
+        .count();
 
     // Store promoted data for "pact apply" step
-    world.cli_output = Some(format!("promoted {} deltas from {}", node_deltas.len(), node));
+    world.cli_output = Some(format!("promoted {delta_count} deltas from {node}"));
 }
 
 #[when(regex = r#"^the result is applied via "pact apply"$"#)]
@@ -430,31 +358,29 @@ async fn when_admin_promote(world: &mut PactWorld, node: String) {
         .map(|(n, _)| n.clone())
         .collect();
 
-    if !drifted_nodes.is_empty() {
+    if drifted_nodes.is_empty() {
+        world.cli_output = Some("Promote completed".into());
+        world.cli_exit_code = Some(0);
+    } else {
         // Conflict detected
         world.cli_output = Some(format!(
             "CONFLICT: nodes {} have local changes that conflict with promoted values",
             drifted_nodes.join(", ")
         ));
         world.cli_exit_code = Some(1);
-    } else {
-        world.cli_output = Some("Promote completed".into());
-        world.cli_exit_code = Some(0);
     }
 }
 
 #[when(regex = r#"^the admin accepts overwrite for node "([\w-]+)"$"#)]
 async fn when_accept_overwrite(world: &mut PactWorld, node: String) {
     // Accept overwrite — supersede local value
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node.clone(),
-            state: ConfigState::Committed,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node.clone(),
+        state: ConfigState::Committed,
+    });
 
     // Ensure overlay exists
-    if world.journal.overlays.get("ml-training").is_none() {
+    if !world.journal.overlays.contains_key("ml-training") {
         let overlay = BootOverlay {
             vcluster_id: "ml-training".into(),
             version: 1,
@@ -492,9 +418,7 @@ async fn when_accept_overwrite(world: &mut PactWorld, node: String) {
         scope: Scope::Node(node),
         detail: "promote: accepted overwrite of local value".into(),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::RecordOperation(op));
+    world.journal.apply_command(JournalCommand::RecordOperation(op));
 }
 
 #[when(regex = r#"^the admin keeps the local value for node "([\w-]+)"$"#)]
@@ -502,7 +426,7 @@ async fn when_keep_local(world: &mut PactWorld, node: String) {
     // Keep local — node retains its per-node delta
     // Overlay still gets the promoted value
     // Ensure overlay exists
-    if world.journal.overlays.get("ml-training").is_none() {
+    if !world.journal.overlays.contains_key("ml-training") {
         let overlay = BootOverlay {
             vcluster_id: "ml-training".into(),
             version: 1,
@@ -550,17 +474,13 @@ async fn when_keep_local(world: &mut PactWorld, node: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     // Ensure node stays in Drifted state (has local override)
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Drifted,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Drifted,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -581,11 +501,7 @@ async fn then_overlay_has_version(world: &mut PactWorld) {
 
 #[then("the overlay should have a checksum")]
 async fn then_overlay_has_checksum(world: &mut PactWorld) {
-    let has_checksum = world
-        .journal
-        .overlays
-        .values()
-        .any(|o| !o.checksum.is_empty());
+    let has_checksum = world.journal.overlays.values().any(|o| !o.checksum.is_empty());
     assert!(has_checksum, "overlay should have a checksum");
 }
 
@@ -611,30 +527,16 @@ async fn then_overlay_rebuilt(world: &mut PactWorld) {
     assert!(!world.journal.overlays.is_empty(), "overlay should exist");
 }
 
-#[then(regex = r#"^the new overlay version should be (\d+)$"#)]
+#[then(regex = r"^the new overlay version should be (\d+)$")]
 async fn then_new_version(world: &mut PactWorld, version: u64) {
-    let max_version = world
-        .journal
-        .overlays
-        .values()
-        .map(|o| o.version)
-        .max()
-        .unwrap_or(0);
+    let max_version = world.journal.overlays.values().map(|o| o.version).max().unwrap_or(0);
     assert_eq!(max_version, version, "overlay version should be {version}");
 }
 
 #[then(regex = r#"^the overlay for vCluster "([\w-]+)" should remain at version (\d+)$"#)]
 async fn then_overlay_unchanged(world: &mut PactWorld, vcluster: String, version: u64) {
-    let actual = world
-        .journal
-        .overlays
-        .get(&vcluster)
-        .map(|o| o.version)
-        .unwrap_or(0);
-    assert_eq!(
-        actual, version,
-        "overlay for {vcluster} should remain at version {version}"
-    );
+    let actual = world.journal.overlays.get(&vcluster).map_or(0, |o| o.version);
+    assert_eq!(actual, version, "overlay for {vcluster} should remain at version {version}");
 }
 
 #[then("an overlay should be built on demand")]
@@ -677,14 +579,8 @@ async fn then_delta_on_top(world: &mut PactWorld) {
         "delta should be applied after overlay"
     );
     // Verify order: overlay before delta
-    let overlay_pos = world
-        .boot_phases_completed
-        .iter()
-        .position(|p| p == "overlay");
-    let delta_pos = world
-        .boot_phases_completed
-        .iter()
-        .position(|p| p == "delta");
+    let overlay_pos = world.boot_phases_completed.iter().position(|p| p == "overlay");
+    let delta_pos = world.boot_phases_completed.iter().position(|p| p == "delta");
     if let (Some(o), Some(d)) = (overlay_pos, delta_pos) {
         assert!(o < d, "overlay should come before delta");
     }
@@ -694,33 +590,24 @@ async fn then_delta_on_top(world: &mut PactWorld) {
 async fn then_setting_value(world: &mut PactWorld, key: String, value: String) {
     // Verify via journal entries that the node delta has the expected value
     let has_value = world.journal.entries.values().any(|e| {
-        e.state_delta
-            .as_ref()
-            .map(|d| {
-                d.kernel
-                    .iter()
-                    .any(|k| k.key == key && k.value.as_deref() == Some(&value))
-            })
-            .unwrap_or(false)
+        e.state_delta.as_ref().is_some_and(|d| {
+            d.kernel.iter().any(|k| k.key == key && k.value.as_deref() == Some(&value))
+        })
     });
     assert!(has_value, "{key} should be {value}");
 }
 
 #[then(regex = r#"^the overlay for "([\w-]+)" should include "([\w.]+)=([\w]+)"$"#)]
-async fn then_overlay_includes(world: &mut PactWorld, vcluster: String, key: String, value: String) {
-    let overlay = world
-        .journal
-        .overlays
-        .get(&vcluster)
-        .expect("overlay should exist");
+async fn then_overlay_includes(
+    world: &mut PactWorld,
+    vcluster: String,
+    key: String,
+    value: String,
+) {
+    let overlay = world.journal.overlays.get(&vcluster).expect("overlay should exist");
     let data_str = String::from_utf8_lossy(&overlay.data);
-    let expected = format!("{}={}", key, value);
-    assert!(
-        data_str.contains(&expected),
-        "overlay should include '{}', got '{}'",
-        expected,
-        data_str
-    );
+    let expected = format!("{key}={value}");
+    assert!(data_str.contains(&expected), "overlay should include '{expected}', got '{data_str}'");
 }
 
 #[then("the node delta should no longer be needed for this setting")]
@@ -731,10 +618,7 @@ async fn then_delta_not_needed(_world: &mut PactWorld) {
 #[then("the promote should pause with a conflict report")]
 async fn then_conflict_report(world: &mut PactWorld) {
     let output = world.cli_output.as_ref().expect("no output");
-    assert!(
-        output.contains("CONFLICT") || output.contains("conflict"),
-        "should report conflict"
-    );
+    assert!(output.contains("CONFLICT") || output.contains("conflict"), "should report conflict");
 }
 
 #[then(
@@ -758,30 +642,24 @@ async fn then_must_acknowledge(world: &mut PactWorld) {
 
 #[then(regex = r#"^the overlay should include "([\w.]+)=([\w]+)"$"#)]
 async fn then_overlay_has_value(world: &mut PactWorld, key: String, value: String) {
-    let expected = format!("{}={}", key, value);
-    let has = world.journal.overlays.values().any(|o| {
-        String::from_utf8_lossy(&o.data).contains(&expected)
-    });
-    assert!(has, "overlay should include '{}'", expected);
+    let expected = format!("{key}={value}");
+    let has = world
+        .journal
+        .overlays
+        .values()
+        .any(|o| String::from_utf8_lossy(&o.data).contains(&expected));
+    assert!(has, "overlay should include '{expected}'");
 }
 
 #[then(regex = r#"^node "([\w-]+)" local value should be superseded$"#)]
 async fn then_local_superseded(world: &mut PactWorld, node: String) {
     let state = world.journal.node_states.get(&node);
-    assert_eq!(
-        state,
-        Some(&ConfigState::Committed),
-        "{node} should be Committed (superseded)"
-    );
+    assert_eq!(state, Some(&ConfigState::Committed), "{node} should be Committed (superseded)");
 }
 
 #[then("the overwritten local value should be logged for audit")]
 async fn then_overwrite_logged(world: &mut PactWorld) {
-    let has = world
-        .journal
-        .audit_log
-        .iter()
-        .any(|op| op.detail.contains("overwrite"));
+    let has = world.journal.audit_log.iter().any(|op| op.detail.contains("overwrite"));
     assert!(has, "overwrite should be logged in audit");
 }
 
@@ -790,21 +668,13 @@ async fn then_retain_delta(world: &mut PactWorld, node: String, key: String, val
     // Node has a committed delta entry with the local value
     let has = world.journal.entries.values().any(|e| {
         e.scope == Scope::Node(node.clone())
-            && e.state_delta
-                .as_ref()
-                .map(|d| {
-                    d.kernel
-                        .iter()
-                        .any(|k| k.key == key && k.value.as_deref() == Some(value.as_str()))
-                })
-                .unwrap_or(false)
+            && e.state_delta.as_ref().is_some_and(|d| {
+                d.kernel.iter().any(|k| k.key == key && k.value.as_deref() == Some(value.as_str()))
+            })
     });
     assert!(has, "{node} should retain delta {key}={value}");
     // Node should still be Drifted (has local override)
-    assert_eq!(
-        world.journal.node_states.get(&node),
-        Some(&ConfigState::Drifted)
-    );
+    assert_eq!(world.journal.node_states.get(&node), Some(&ConfigState::Drifted));
 }
 
 #[then(
@@ -812,9 +682,11 @@ async fn then_retain_delta(world: &mut PactWorld, node: String, key: String, val
 )]
 async fn then_homogeneity_warning(world: &mut PactWorld, node: String) {
     // Build warning from node states
-    let has_delta = world.journal.entries.values().any(|e| {
-        e.scope == Scope::Node(node.clone()) && e.state_delta.is_some()
-    });
+    let has_delta = world
+        .journal
+        .entries
+        .values()
+        .any(|e| e.scope == Scope::Node(node.clone()) && e.state_delta.is_some());
     assert!(has_delta, "{node} should have a per-node delta triggering warning");
 
     // The status output should contain this info
@@ -829,13 +701,13 @@ async fn then_recommend_promote(_world: &mut PactWorld) {
     // Recommendation is part of the warning text
 }
 
-#[then(
-    regex = r#"^the output should warn that node "([\w-]+)" has an expired delta$"#
-)]
+#[then(regex = r#"^the output should warn that node "([\w-]+)" has an expired delta$"#)]
 async fn then_expired_warning(world: &mut PactWorld, node: String) {
-    let has_expired = world.journal.entries.values().any(|e| {
-        e.scope == Scope::Node(node.clone()) && e.ttl_seconds.is_some()
-    });
+    let has_expired = world
+        .journal
+        .entries
+        .values()
+        .any(|e| e.scope == Scope::Node(node.clone()) && e.ttl_seconds.is_some());
     assert!(has_expired, "{node} should have an expired TTL delta");
 }
 

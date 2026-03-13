@@ -36,19 +36,15 @@ async fn given_cached_config(world: &mut PactWorld, node: String, vc: String) {
             data: b"cached-config".to_vec(),
             checksum: "sha256:cached".into(),
         };
-        world.journal.apply_command(JournalCommand::SetOverlay {
-            vcluster_id: vc.clone(),
-            overlay,
-        });
+        world
+            .journal
+            .apply_command(JournalCommand::SetOverlay { vcluster_id: vc.clone(), overlay });
     }
     // Ensure policy is cached
-    if world.journal.policies.get(&vc).is_none() {
+    if !world.journal.policies.contains_key(&vc) {
         world.journal.apply_command(JournalCommand::SetPolicy {
             vcluster_id: vc.clone(),
-            policy: VClusterPolicy {
-                vcluster_id: vc,
-                ..VClusterPolicy::default()
-            },
+            policy: VClusterPolicy { vcluster_id: vc, ..VClusterPolicy::default() },
         });
     }
     world.journal.apply_command(JournalCommand::AssignNode {
@@ -75,13 +71,10 @@ async fn given_two_person(world: &mut PactWorld, vc: String) {
         ..VClusterPolicy::default()
     };
     world.policy_engine.set_policy(policy.clone());
-    world.journal.apply_command(JournalCommand::SetPolicy {
-        vcluster_id: vc,
-        policy,
-    });
+    world.journal.apply_command(JournalCommand::SetPolicy { vcluster_id: vc, policy });
 }
 
-#[given(regex = r#"^(\d+) operations were performed in degraded mode$"#)]
+#[given(regex = r"^(\d+) operations were performed in degraded mode$")]
 async fn given_degraded_ops(world: &mut PactWorld, count: usize) {
     for i in 0..count {
         let op = AdminOperation {
@@ -126,7 +119,7 @@ async fn given_drift_during_partition(world: &mut PactWorld) {
     world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
-#[given(regex = r#"^a 3-node journal cluster with node (\d+) as leader$"#)]
+#[given(regex = r"^a 3-node journal cluster with node (\d+) as leader$")]
 async fn given_journal_cluster(world: &mut PactWorld, leader: u64) {
     world.journal_cluster_size = 3;
     world.journal_leader = Some(leader);
@@ -139,13 +132,9 @@ async fn given_cached_role(world: &mut PactWorld, user: String, role: String) {
 
 #[given(regex = r#"^node "([\w-]+)" was subscribed to config updates$"#)]
 async fn given_was_subscribed(world: &mut PactWorld, node: String) {
-    world.subscriptions.insert(
-        node,
-        ConfigSubscription {
-            vcluster_id: "ml-training".into(),
-            from_sequence: 5,
-        },
-    );
+    world
+        .subscriptions
+        .insert(node, ConfigSubscription { vcluster_id: "ml-training".into(), from_sequence: 5 });
 }
 
 #[given("the subscription was interrupted by a partition")]
@@ -181,12 +170,7 @@ async fn given_local_change(world: &mut PactWorld, key: String, value: String, n
 #[given(
     regex = r#"^meanwhile "([\w.]+)" is committed as "([\w]+)" in the journal for vCluster "([\w-]+)"$"#
 )]
-async fn given_journal_committed(
-    world: &mut PactWorld,
-    key: String,
-    value: String,
-    vc: String,
-) {
+async fn given_journal_committed(world: &mut PactWorld, key: String, value: String, vc: String) {
     let entry = ConfigEntry {
         sequence: 0,
         timestamp: chrono::Utc::now(),
@@ -215,9 +199,7 @@ async fn given_merge_conflict(world: &mut PactWorld, _node: String, _key: String
     // Conflict exists — world state tracks this implicitly via journal entries
 }
 
-#[given(
-    regex = r#"^the local value is "(\d+)" and the journal value is "(\d+)"$"#
-)]
+#[given(regex = r#"^the local value is "(\d+)" and the journal value is "(\d+)"$"#)]
 async fn given_conflict_values(world: &mut PactWorld, local: String, journal_val: String) {
     world.conflict_local_value = Some(local);
     world.conflict_journal_value = Some(journal_val);
@@ -234,15 +216,15 @@ async fn given_grace_period(world: &mut PactWorld) {
 
 #[when(regex = r#"^node "([\w-]+)" boots$"#)]
 async fn when_node_boots(world: &mut PactWorld, node: String) {
-    if !world.journal_reachable {
+    if world.journal_reachable {
+        world.boot_phases_completed.push("overlay".into());
+        world.boot_phases_completed.push("delta".into());
+        world.boot_phases_completed.push("boot".into());
+    } else {
         // Boot with cached config
         world.boot_phases_completed.push("cached-overlay".into());
         world.boot_phases_completed.push("cached-delta".into());
         world.boot_phases_completed.push("cached-boot".into());
-    } else {
-        world.boot_phases_completed.push("overlay".into());
-        world.boot_phases_completed.push("delta".into());
-        world.boot_phases_completed.push("boot".into());
     }
 }
 
@@ -425,7 +407,7 @@ async fn then_cached_policy_auth(world: &mut PactWorld) {
 async fn then_op_denied(world: &mut PactWorld) {
     match &world.auth_result {
         Some(AuthResult::Denied { .. }) => {}
-        other => panic!("expected Denied, got {:?}", other),
+        other => panic!("expected Denied, got {other:?}"),
     }
 }
 
@@ -434,21 +416,19 @@ async fn then_denial_reason(world: &mut PactWorld, expected: String) {
     let reason = world
         .last_denial_reason
         .as_ref()
-        .or_else(|| match &world.auth_result {
+        .or(match &world.auth_result {
             Some(AuthResult::Denied { reason }) => Some(reason),
             _ => None,
         })
         .expect("should have a denial reason");
-    let key_words: Vec<&str> = expected
-        .split_whitespace()
-        .filter(|w| w.len() > 3)
-        .collect();
-    let matched = key_words
-        .iter()
-        .filter(|w| reason.to_lowercase().contains(&w.to_lowercase()))
-        .count();
+    let key_words: Vec<&str> = expected.split_whitespace().filter(|w| w.len() > 3).collect();
+    let matched =
+        key_words.iter().filter(|w| reason.to_lowercase().contains(&w.to_lowercase())).count();
     assert!(
-        matched >= key_words.len() / 2 || reason.contains(&expected) || reason.contains("P8") || reason.contains("restricted"),
+        matched >= key_words.len() / 2
+            || reason.contains(&expected)
+            || reason.contains("P8")
+            || reason.contains("restricted"),
         "expected reason containing '{expected}', got '{reason}'"
     );
 }
@@ -463,14 +443,11 @@ async fn then_opa_denied(world: &mut PactWorld) {
     assert!(!world.opa_available);
 }
 
-#[then(regex = r#"^all (\d+) operations should be replayed to the journal$"#)]
+#[then(regex = r"^all (\d+) operations should be replayed to the journal$")]
 async fn then_ops_replayed(world: &mut PactWorld, count: usize) {
     assert!(world.journal_reachable, "journal should be reachable");
     let audit_count = world.journal.audit_log.len();
-    assert!(
-        audit_count >= count,
-        "expected at least {count} audit entries, got {audit_count}"
-    );
+    assert!(audit_count >= count, "expected at least {count} audit entries, got {audit_count}");
 }
 
 #[then("the replay should preserve original timestamps")]
@@ -483,21 +460,15 @@ async fn then_replay_timestamps(world: &mut PactWorld) {
 
 #[then("the drift event should be reported to the journal")]
 async fn then_drift_reported(world: &mut PactWorld) {
-    let has_drift = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::DriftDetected);
+    let has_drift =
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected);
     assert!(has_drift);
 }
 
 #[then("a DriftDetected entry should be recorded")]
 async fn then_drift_entry(world: &mut PactWorld) {
-    let has_drift = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::DriftDetected);
+    let has_drift =
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected);
     assert!(has_drift);
 }
 
@@ -528,7 +499,7 @@ async fn then_queries_from_followers(world: &mut PactWorld) {
 async fn then_cached_role_auth(world: &mut PactWorld) {
     match &world.auth_result {
         Some(AuthResult::Authorized) => {}
-        other => panic!("expected Authorized, got {:?}", other),
+        other => panic!("expected Authorized, got {other:?}"),
     }
 }
 

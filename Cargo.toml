@@ -109,9 +109,37 @@ tokio-test = "0.4"
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow noisy pedantic/nursery lints that don't improve code quality here
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+missing_const_for_fn = "allow"
+significant_drop_tightening = "allow"
+doc_markdown = "allow"
+module_name_repetitions = "allow"
+unused_async = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+float_cmp = "allow"
+manual_let_else = "allow"
+option_if_let_else = "allow"
+match_same_arms = "allow"
+match_wildcard_for_single_variants = "allow"
+implicit_hasher = "allow"
+large_enum_variant = "allow"
+format_push_string = "allow"
+items_after_test_module = "allow"
+field_reassign_with_default = "allow"
+needless_pass_by_ref_mut = "allow"
+used_underscore_binding = "allow"
+trivial_regex = "allow"
+unnecessary_wraps = "allow"
+struct_excessive_bools = "allow"
 
 [profile.release]
 lto = true

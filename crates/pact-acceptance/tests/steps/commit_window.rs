@@ -15,7 +15,7 @@ use crate::PactWorld;
 // ---------------------------------------------------------------------------
 
 #[given(
-    regex = r#"^default commit window config with base (\d+) seconds and sensitivity (\d+\.\d+)$"#
+    regex = r"^default commit window config with base (\d+) seconds and sensitivity (\d+\.\d+)$"
 )]
 async fn given_commit_window_config(world: &mut PactWorld, base: u32, sensitivity: f64) {
     let config = CommitWindowConfig {
@@ -26,7 +26,7 @@ async fn given_commit_window_config(world: &mut PactWorld, base: u32, sensitivit
     world.commit_mgr = CommitWindowManager::new(config);
 }
 
-#[given(regex = r#"^commit window config with base (\d+) seconds and sensitivity (\d+\.\d+)$"#)]
+#[given(regex = r"^commit window config with base (\d+) seconds and sensitivity (\d+\.\d+)$")]
 async fn given_commit_window_config_override(world: &mut PactWorld, base: u32, sensitivity: f64) {
     let config = CommitWindowConfig {
         base_window_seconds: base,
@@ -36,7 +36,7 @@ async fn given_commit_window_config_override(world: &mut PactWorld, base: u32, s
     world.commit_mgr = CommitWindowManager::new(config);
 }
 
-#[given(regex = r#"^emergency mode is active with window (\d+) seconds$"#)]
+#[given(regex = r"^emergency mode is active with window (\d+) seconds$")]
 async fn given_emergency_active(world: &mut PactWorld, window: u32) {
     let config = CommitWindowConfig {
         base_window_seconds: world.commit_mgr.config().base_window_seconds,
@@ -62,7 +62,7 @@ async fn given_emergency_active(world: &mut PactWorld, window: u32) {
 // WHEN
 // ---------------------------------------------------------------------------
 
-#[when(regex = r#"^drift is detected with magnitude (\d+\.\d+)$"#)]
+#[when(regex = r"^drift is detected with magnitude (\d+\.\d+)$")]
 async fn when_drift_magnitude(world: &mut PactWorld, magnitude: f64) {
     world.commit_mgr.open(magnitude);
 }
@@ -106,18 +106,15 @@ async fn when_drift_detected_node_impl(world: &mut PactWorld, magnitude: f64, no
 // THEN
 // ---------------------------------------------------------------------------
 
-#[then(regex = r#"^the commit window should be approximately (\d+) seconds$"#)]
+#[then(regex = r"^the commit window should be approximately (\d+) seconds$")]
 async fn then_window_approx(world: &mut PactWorld, expected: u32) {
     let tolerance = 10;
     let calculated = match world.commit_mgr.state() {
-        WindowState::Open {
-            opened_at,
-            deadline,
-        } => (*deadline - *opened_at).num_seconds() as u32,
+        WindowState::Open { opened_at, deadline } => (*deadline - *opened_at).num_seconds() as u32,
         _ => world.commit_mgr.seconds_remaining(),
     };
     assert!(
-        (calculated as i64 - expected as i64).unsigned_abs() < tolerance,
+        (i64::from(calculated) - i64::from(expected)).unsigned_abs() < tolerance,
         "expected ~{expected}s, got {calculated}s",
     );
 }

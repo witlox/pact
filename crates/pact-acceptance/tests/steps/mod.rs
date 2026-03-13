@@ -6,20 +6,20 @@
 //! Modules without real crate code behind them are deliberately absent —
 //! unmatched scenarios show as "skipped" until real implementations exist.
 
-pub(crate) mod helpers;
+pub mod helpers;
 
-mod journal; // JournalState::apply_command()
-mod drift; // DriftEvaluator
-mod commit_window; // CommitWindowManager
-mod emergency; // EmergencyManager
-mod policy; // RbacEngine + DefaultPolicyEngine + RBAC authorization
-mod capability; // CapabilityReporter + MockGpuBackend
-mod supervisor; // PactSupervisor + ServiceManager
-mod shell; // ShellServer + WhitelistManager + SessionManager + execute_command
-mod partition; // ConflictManager + cached config/policy
 mod boot; // Boot sequence + boot config streaming
-mod overlay; // Overlay management + staleness + promote/conflict
+mod capability; // CapabilityReporter + MockGpuBackend
 mod cli; // CLI formatting + exit codes + delegation
+mod commit_window; // CommitWindowManager
+mod drift; // DriftEvaluator
+mod emergency; // EmergencyManager
+mod federation;
+mod journal; // JournalState::apply_command()
 mod mcp; // MCP tools: all_tools() + dispatch_tool()
 mod observability; // Prometheus metrics + health + Loki events
-mod federation; // FederationState + MockFederationSync
+mod overlay; // Overlay management + staleness + promote/conflict
+mod partition; // ConflictManager + cached config/policy
+mod policy; // RbacEngine + DefaultPolicyEngine + RBAC authorization
+mod shell; // ShellServer + WhitelistManager + SessionManager + execute_command
+mod supervisor; // PactSupervisor + ServiceManager // FederationState + MockFederationSync

@@ -223,37 +223,37 @@ fn main() {
             eprintln!("(gRPC client not yet connected — journal endpoint needed)");
         }
         Commands::Diff { node, committed } => {
-            eprintln!("pact diff: node={:?}, committed={}", node, committed);
+            eprintln!("pact diff: node={node:?}, committed={committed}");
         }
         Commands::Log { n, scope } => {
-            eprintln!("pact log: n={}, scope={:?}", n, scope);
+            eprintln!("pact log: n={n}, scope={scope:?}");
         }
         Commands::Commit { m } => {
-            eprintln!("pact commit: message={:?}", m);
+            eprintln!("pact commit: message={m:?}");
         }
         Commands::Rollback { seq } => {
-            eprintln!("pact rollback: target_seq={}", seq);
+            eprintln!("pact rollback: target_seq={seq}");
         }
         Commands::Exec { node, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
                 Ok((cmd, args)) => {
-                    eprintln!("pact exec {}: {} {:?}", node, cmd, args);
+                    eprintln!("pact exec {node}: {cmd} {args:?}");
                 }
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Commands::Shell { node } => {
-            eprintln!("pact shell: node={}", node);
+            eprintln!("pact shell: node={node}");
         }
         Commands::Emergency { action } => match action {
             EmergencySubcommand::Start { reason } => {
-                eprintln!("pact emergency start: reason={:?}", reason);
+                eprintln!("pact emergency start: reason={reason:?}");
             }
             EmergencySubcommand::End { force } => {
-                eprintln!("pact emergency end: force={}", force);
+                eprintln!("pact emergency end: force={force}");
             }
         },
         Commands::Approve { action } => match action {
@@ -261,34 +261,34 @@ fn main() {
                 eprintln!("pact approve list");
             }
             ApproveSubcommand::Accept { id } => {
-                eprintln!("pact approve accept: id={}", id);
+                eprintln!("pact approve accept: id={id}");
             }
             ApproveSubcommand::Deny { id, m } => {
-                eprintln!("pact approve deny: id={}, reason={:?}", id, m);
+                eprintln!("pact approve deny: id={id}, reason={m:?}");
             }
         },
         Commands::Service { action } => match action {
             ServiceSubcommand::Status { name } => {
-                eprintln!("pact service status: name={:?}", name);
+                eprintln!("pact service status: name={name:?}");
             }
             ServiceSubcommand::Restart { name } => {
-                eprintln!("pact service restart: name={}", name);
+                eprintln!("pact service restart: name={name}");
             }
             ServiceSubcommand::Logs { name } => {
-                eprintln!("pact service logs: name={}", name);
+                eprintln!("pact service logs: name={name}");
             }
         },
         Commands::Cap { node } => {
-            eprintln!("pact cap: node={:?}", node);
+            eprintln!("pact cap: node={node:?}");
         }
         Commands::Watch { vcluster } => {
-            eprintln!("pact watch: vcluster={:?}", vcluster);
+            eprintln!("pact watch: vcluster={vcluster:?}");
         }
         Commands::Apply { spec } => {
-            eprintln!("pact apply: spec={}", spec);
+            eprintln!("pact apply: spec={spec}");
         }
         Commands::Extend { mins } => {
-            eprintln!("pact extend: mins={}", mins);
+            eprintln!("pact extend: mins={mins}");
         }
     }
 }

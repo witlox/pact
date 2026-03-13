@@ -15,27 +15,18 @@ use crate::{HealthResponse, LokiEvent, PactWorld};
 
 #[given("a healthy journal node")]
 async fn given_healthy_journal(world: &mut PactWorld) {
-    world.health_status = Some(HealthResponse {
-        status_code: 200,
-        role: "leader".into(),
-    });
+    world.health_status = Some(HealthResponse { status_code: 200, role: "leader".into() });
     world.metrics_available = true;
 }
 
 #[given("a journal node that is the Raft leader")]
 async fn given_raft_leader(world: &mut PactWorld) {
-    world.health_status = Some(HealthResponse {
-        status_code: 200,
-        role: "leader".into(),
-    });
+    world.health_status = Some(HealthResponse { status_code: 200, role: "leader".into() });
 }
 
 #[given("a journal node that is a Raft follower")]
 async fn given_raft_follower(world: &mut PactWorld) {
-    world.health_status = Some(HealthResponse {
-        status_code: 200,
-        role: "follower".into(),
-    });
+    world.health_status = Some(HealthResponse { status_code: 200, role: "follower".into() });
 }
 
 #[given("Loki forwarding is enabled")]
@@ -69,9 +60,7 @@ async fn given_audit_ops(world: &mut PactWorld) {
             scope: Scope::Node("node-001".into()),
             detail: "test op".into(),
         };
-        world
-            .journal
-            .apply_command(JournalCommand::RecordOperation(op));
+        world.journal.apply_command(JournalCommand::RecordOperation(op));
     }
 }
 
@@ -95,9 +84,7 @@ async fn given_emergency_sessions(world: &mut PactWorld) {
             ttl_seconds: None,
             emergency_reason: Some("test emergency".into()),
         };
-        world
-            .journal
-            .apply_command(JournalCommand::AppendEntry(entry));
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
     }
 }
 
@@ -155,15 +142,13 @@ async fn when_config_commit_obs(world: &mut PactWorld) {
         emergency_reason: None,
     };
     let seq = world.journal.entries.len() as u64 + 1;
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     if world.loki_enabled {
         world.loki_events.push(LokiEvent {
             component: "journal".into(),
             entry_type: "Commit".into(),
-            detail: format!("seq:{} scope:vc:ml-training author:admin@example.com", seq),
+            detail: format!("seq:{seq} scope:vc:ml-training author:admin@example.com"),
         });
     }
 }
@@ -182,9 +167,7 @@ async fn when_exec_recorded(world: &mut PactWorld) {
         scope: Scope::Node("node-001".into()),
         detail: "nvidia-smi".into(),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::RecordOperation(op));
+    world.journal.apply_command(JournalCommand::RecordOperation(op));
 
     if world.loki_enabled {
         world.loki_events.push(LokiEvent {
@@ -213,9 +196,7 @@ async fn when_emergency_entered(world: &mut PactWorld) {
         ttl_seconds: None,
         emergency_reason: Some("GPU failure on node-042".into()),
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     if world.loki_enabled {
         world.loki_events.push(LokiEvent {
@@ -230,16 +211,12 @@ async fn when_emergency_entered(world: &mut PactWorld) {
 async fn when_fleet_health(world: &mut PactWorld) {
     // Set up some node states for the query
     if world.journal.node_states.is_empty() {
-        for (node, state) in [
-            ("node-001", ConfigState::Committed),
-            ("node-002", ConfigState::Drifted),
-        ] {
+        for (node, state) in
+            [("node-001", ConfigState::Committed), ("node-002", ConfigState::Drifted)]
+        {
             world
                 .journal
-                .apply_command(JournalCommand::UpdateNodeState {
-                    node_id: node.into(),
-                    state,
-                });
+                .apply_command(JournalCommand::UpdateNodeState { node_id: node.into(), state });
         }
     }
 }
@@ -261,22 +238,16 @@ async fn when_emergency_queried(_world: &mut PactWorld) {
 #[then(regex = r#"^the response should include "([\w_]+)" (gauge|counter|histogram)$"#)]
 async fn then_metric_exists(world: &mut PactWorld, metric: String, _type: String) {
     let output = world.cli_output.as_ref().expect("no metrics output");
-    assert!(
-        output.contains(&metric),
-        "metrics should include '{metric}'"
-    );
+    assert!(output.contains(&metric), "metrics should include '{metric}'");
 }
 
-#[then(regex = r#"^the metrics endpoint should be available on port (\d+)$"#)]
+#[then(regex = r"^the metrics endpoint should be available on port (\d+)$")]
 async fn then_metrics_port(world: &mut PactWorld, port: u32) {
     let output = world.cli_output.as_ref().expect("no output");
-    assert!(
-        output.contains(&format!("{}", port)),
-        "metrics should be on port {port}"
-    );
+    assert!(output.contains(&format!("{port}")), "metrics should be on port {port}");
 }
 
-#[then(regex = r#"^the response status should be (\d+)$"#)]
+#[then(regex = r"^the response status should be (\d+)$")]
 async fn then_health_status(world: &mut PactWorld, code: u16) {
     let health = world.health_status.as_ref().expect("no health status");
     assert_eq!(health.status_code, code);
@@ -285,10 +256,7 @@ async fn then_health_status(world: &mut PactWorld, code: u16) {
 #[then("the response body should include the Raft role")]
 async fn then_health_has_role(world: &mut PactWorld) {
     let health = world.health_status.as_ref().expect("no health status");
-    assert!(
-        !health.role.is_empty(),
-        "health response should include Raft role"
-    );
+    assert!(!health.role.is_empty(), "health response should include Raft role");
 }
 
 #[then(regex = r#"^the response should indicate role "([\w]+)"$"#)]
@@ -299,10 +267,7 @@ async fn then_health_role(world: &mut PactWorld, role: String) {
 
 #[then("a structured JSON event should be sent to Loki")]
 async fn then_loki_event(world: &mut PactWorld) {
-    assert!(
-        !world.loki_events.is_empty(),
-        "Loki events should not be empty"
-    );
+    assert!(!world.loki_events.is_empty(), "Loki events should not be empty");
 }
 
 #[then(regex = r#"^the event should have label component "([\w]+)"$"#)]
@@ -326,20 +291,13 @@ async fn then_loki_emergency_reason(world: &mut PactWorld) {
 
 #[then("no event should be sent to Loki")]
 async fn then_no_loki_event(world: &mut PactWorld) {
-    assert!(
-        world.loki_events.is_empty(),
-        "no Loki events when forwarding disabled"
-    );
+    assert!(world.loki_events.is_empty(), "no Loki events when forwarding disabled");
 }
 
 #[then("the commit should still be recorded in the journal")]
 async fn then_commit_recorded(world: &mut PactWorld) {
     assert!(
-        world
-            .journal
-            .entries
-            .values()
-            .any(|e| e.entry_type == EntryType::Commit),
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::Commit),
         "commit should be in journal"
     );
 }
@@ -368,10 +326,7 @@ async fn then_commit_activity(world: &mut PactWorld) {
 
 #[then("the data should show operation frequency")]
 async fn then_op_frequency(world: &mut PactWorld) {
-    assert!(
-        !world.journal.audit_log.is_empty(),
-        "audit log should have operations"
-    );
+    assert!(!world.journal.audit_log.is_empty(), "audit log should have operations");
 }
 
 #[then("the data should show whitelist violations")]
@@ -395,15 +350,8 @@ async fn then_emergency_count(world: &mut PactWorld) {
 #[then("the data should show session durations")]
 async fn then_session_durations(world: &mut PactWorld) {
     // Emergency start/end pairs provide duration data
-    let has_start = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::EmergencyStart);
-    let has_end = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::EmergencyEnd);
+    let has_start =
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyStart);
+    let has_end = world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd);
     assert!(has_start && has_end, "should have start+end for duration");
 }

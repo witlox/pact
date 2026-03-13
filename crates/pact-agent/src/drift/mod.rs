@@ -76,12 +76,10 @@ impl DriftEvaluator {
 
 /// Simple glob matching supporting `**` (match anything) and `*` (single segment).
 fn matches_glob(pattern: &str, path: &str) -> bool {
-    if pattern.ends_with("/**") {
-        let prefix = &pattern[..pattern.len() - 3];
+    if let Some(prefix) = pattern.strip_suffix("/**") {
         return path.starts_with(prefix);
     }
-    if pattern.ends_with("/*") {
-        let prefix = &pattern[..pattern.len() - 2];
+    if let Some(prefix) = pattern.strip_suffix("/*") {
         if !path.starts_with(prefix) {
             return false;
         }
@@ -171,8 +169,8 @@ mod tests {
         assert!(matches_glob("/tmp/**", "/tmp/foo/bar"));
         assert!(!matches_glob("/tmp/**", "/var/tmp/foo"));
         assert!(matches_glob("/var/log/**", "/var/log/syslog"));
-        assert_eq!(matches_glob("/etc/foo", "/etc/foo"), true);
-        assert_eq!(matches_glob("/etc/foo", "/etc/bar"), false);
+        assert!(matches_glob("/etc/foo", "/etc/foo"));
+        assert!(!matches_glob("/etc/foo", "/etc/bar"));
     }
 
     #[test]

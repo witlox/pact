@@ -76,7 +76,7 @@ impl BootConfigService for BootConfigServiceImpl {
 
         // Chunk the overlay data
         let data = &overlay.data;
-        let total_chunks = (data.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        let total_chunks = data.len().div_ceil(CHUNK_SIZE);
         let total_chunks = total_chunks.max(1) as u32;
 
         let mut chunks: Vec<ConfigChunk> = Vec::new();

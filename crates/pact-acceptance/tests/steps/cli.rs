@@ -12,7 +12,7 @@ use pact_cli::commands::{
 };
 use pact_common::types::{
     AdminOperation, AdminOperationType, ConfigEntry, ConfigState, DeltaAction, DeltaItem,
-    DriftVector, EntryType, Identity, PrincipalType, Scope, ServiceStatusInfo, ServiceState,
+    DriftVector, EntryType, Identity, PrincipalType, Scope, ServiceState, ServiceStatusInfo,
     StateDelta, SupervisorBackend, SupervisorStatus, VClusterPolicy,
 };
 use pact_journal::JournalCommand;
@@ -46,26 +46,16 @@ fn admin_identity() -> Identity {
 #[given(regex = r#"^node "([\w-]+)" in vCluster "([\w-]+)" with state "([\w]+)"$"#)]
 async fn given_node_vc_state(world: &mut PactWorld, node: String, _vc: String, state_str: String) {
     let state = super::helpers::parse_config_state(&state_str);
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState { node_id: node, state });
 }
 
 #[given(regex = r#"^node "([\w-]+)" has drift in kernel parameter "([\w.]+)"$"#)]
 async fn given_node_drift(world: &mut PactWorld, node: String, param: String) {
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Drifted,
-        });
-    world.drift_vector_override = DriftVector {
-        kernel: 2.0,
-        ..Default::default()
-    };
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Drifted,
+    });
+    world.drift_vector_override = DriftVector { kernel: 2.0, ..Default::default() };
 }
 
 #[given(regex = r#"^node "([\w-]+)" has committed deltas not yet promoted to overlay$"#)]
@@ -90,22 +80,18 @@ async fn given_committed_deltas(world: &mut PactWorld, node: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 #[given("drift is detected on node \"node-001\"")]
 async fn given_drift_detected(world: &mut PactWorld) {
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: "node-001".into(),
-            state: ConfigState::Drifted,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Drifted,
+    });
 }
 
-#[given(regex = r#"^a committed change at sequence (\d+)$"#)]
+#[given(regex = r"^a committed change at sequence (\d+)$")]
 async fn given_committed_at_seq(world: &mut PactWorld, seq: u64) {
     // Ensure journal has at least `seq` entries
     while (world.journal.entries.len() as u64) < seq {
@@ -121,13 +107,11 @@ async fn given_committed_at_seq(world: &mut PactWorld, seq: u64) {
             ttl_seconds: None,
             emergency_reason: None,
         };
-        world
-            .journal
-            .apply_command(JournalCommand::AppendEntry(entry));
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
     }
 }
 
-#[given(regex = r#"^(\d+) config entries in the journal$"#)]
+#[given(regex = r"^(\d+) config entries in the journal$")]
 async fn given_n_entries_cli(world: &mut PactWorld, count: u64) {
     for _ in 0..count {
         let entry = ConfigEntry {
@@ -142,9 +126,7 @@ async fn given_n_entries_cli(world: &mut PactWorld, count: u64) {
             ttl_seconds: None,
             emergency_reason: None,
         };
-        world
-            .journal
-            .apply_command(JournalCommand::AppendEntry(entry));
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
     }
 }
 
@@ -155,22 +137,18 @@ async fn given_spec_file(_world: &mut PactWorld) {
 
 #[given(regex = r#"^node "([\w-]+)" in vCluster "([\w-]+)"$"#)]
 async fn given_node_in_vc(world: &mut PactWorld, node: String, _vc: String) {
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Committed,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Committed,
+    });
 }
 
 #[given(regex = r#"^an active commit window for node "([\w-]+)"$"#)]
 async fn given_active_window(world: &mut PactWorld, node: String) {
-    world
-        .journal
-        .apply_command(JournalCommand::UpdateNodeState {
-            node_id: node,
-            state: ConfigState::Drifted,
-        });
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node,
+        state: ConfigState::Drifted,
+    });
 }
 
 #[given(regex = r#"^node "([\w-]+)" has committed deltas with kernel and mount changes$"#)]
@@ -201,9 +179,7 @@ async fn given_kernel_mount_deltas(world: &mut PactWorld, node: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 #[given(regex = r#"^node "([\w-]+)" has committed deltas$"#)]
@@ -228,31 +204,24 @@ async fn given_committed_deltas_simple(world: &mut PactWorld, node: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 #[given("an invalid OIDC token")]
 async fn given_invalid_token(world: &mut PactWorld) {
-    world.auth_result = Some(AuthResult::Denied {
-        reason: "invalid token".into(),
-    });
+    world.auth_result = Some(AuthResult::Denied { reason: "invalid token".into() });
 }
 
 #[given("a policy that denies the requested operation")]
 async fn given_policy_deny(world: &mut PactWorld) {
-    world.auth_result = Some(AuthResult::Denied {
-        reason: "policy denied".into(),
-    });
+    world.auth_result = Some(AuthResult::Denied { reason: "policy denied".into() });
 }
 
 #[given("another admin is modifying the same node")]
 async fn given_concurrent_mod(world: &mut PactWorld) {
     // Set up concurrent modification scenario
-    world.last_error = Some(pact_common::error::PactError::PolicyError(
-        "concurrent modification".into(),
-    ));
+    world.last_error =
+        Some(pact_common::error::PactError::PolicyError("concurrent modification".into()));
 }
 
 #[given("a mount with active consumers")]
@@ -357,9 +326,7 @@ async fn when_pact_diff_committed(world: &mut PactWorld, node: String) {
         .iter()
         .filter(|(_, e)| e.entry_type == EntryType::Commit && e.scope == Scope::Node(node.clone()))
         .filter_map(|(seq, e)| {
-            e.state_delta.as_ref().map(|d| {
-                (*seq, e.timestamp.to_rfc3339(), d.clone())
-            })
+            e.state_delta.as_ref().map(|d| (*seq, e.timestamp.to_rfc3339(), d.clone()))
         })
         .collect();
     world.cli_output = Some(format_committed_diff(&node, &deltas));
@@ -398,9 +365,7 @@ async fn when_pact_commit(world: &mut PactWorld, message: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     let seq = world.journal.entries.len() as u64;
     let result = CommitResult {
@@ -433,9 +398,7 @@ async fn when_pact_rollback(world: &mut PactWorld, target: u64) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 
     let seq = world.journal.entries.len() as u64;
     let result = RollbackResult {
@@ -450,14 +413,7 @@ async fn when_pact_rollback(world: &mut PactWorld, target: u64) {
 
 #[when(regex = r#"^the user runs "pact log -n (\d+)"$"#)]
 async fn when_pact_log(world: &mut PactWorld, n: usize) {
-    let entries: Vec<_> = world
-        .journal
-        .entries
-        .values()
-        .rev()
-        .take(n)
-        .cloned()
-        .collect();
+    let entries: Vec<_> = world.journal.entries.values().rev().take(n).cloned().collect();
     world.cli_output = Some(format_log(&entries));
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
@@ -476,9 +432,7 @@ async fn when_pact_apply(world: &mut PactWorld, _spec: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
     world.cli_output = Some("Config applied".into());
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
@@ -508,9 +462,7 @@ async fn when_config_change(world: &mut PactWorld) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
     world.received_updates.push(crate::ConfigUpdateEvent {
         sequence: world.journal.entries.len() as u64,
         update_type: "config_commit".into(),
@@ -521,7 +473,7 @@ async fn when_config_change(world: &mut PactWorld) {
 
 #[when(regex = r#"^the user runs "pact extend (\d+)"$"#)]
 async fn when_pact_extend(world: &mut PactWorld, minutes: u32) {
-    world.cli_output = Some(format!("Commit window extended by {} minutes", minutes));
+    world.cli_output = Some(format!("Commit window extended by {minutes} minutes"));
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
 
@@ -572,14 +524,14 @@ async fn when_pact_exec(world: &mut PactWorld, node: String, command: String) {
     // Check whitelist
     if !world.shell_whitelist.contains(&command) && command != "nvidia-smi" {
         world.cli_exit_code = Some(exit_codes::NOT_WHITELISTED);
-        world.cli_output = Some(format!("command '{}' not whitelisted", command));
+        world.cli_output = Some(format!("command '{command}' not whitelisted"));
         return;
     }
 
     let result = CliExecResult {
         node_id: node,
         command: command.clone(),
-        stdout: format!("{} output", command),
+        stdout: format!("{command} output"),
         stderr: String::new(),
         exit_code: 0,
     };
@@ -645,7 +597,7 @@ async fn when_pact_status_simple(world: &mut PactWorld) {
 
 #[when(regex = r#"^the user runs "pact (drain|cordon) ([\w-]+)"$"#)]
 async fn when_pact_delegation(world: &mut PactWorld, cmd: String, _node: String) {
-    world.cli_output = Some(format!("{} delegated to lattice scheduler API", cmd));
+    world.cli_output = Some(format!("{cmd} delegated to lattice scheduler API"));
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
 
@@ -670,7 +622,7 @@ async fn when_pact_group_show(world: &mut PactWorld, group: String) {
             group, policy.drift_sensitivity, policy.base_commit_window_seconds
         ));
     } else {
-        world.cli_output = Some(format!("Group '{}' not found", group));
+        world.cli_output = Some(format!("Group '{group}' not found"));
     }
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
@@ -713,9 +665,7 @@ async fn when_admin_commit_vc(world: &mut PactWorld, vcluster: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world
-        .journal
-        .apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
 #[when(regex = r#"^admin commits a sysctl change to vCluster "([\w-]+)" which succeeds$"#)]
@@ -726,9 +676,7 @@ async fn when_admin_commit_success(world: &mut PactWorld, vcluster: String) {
 
 #[when(regex = r#"^admin commits a sysctl change to vCluster "([\w-]+)" which fails$"#)]
 async fn when_admin_commit_fail(world: &mut PactWorld, _vcluster: String) {
-    world.last_error = Some(pact_common::error::PactError::PolicyError(
-        "commit failed".into(),
-    ));
+    world.last_error = Some(pact_common::error::PactError::PolicyError("commit failed".into()));
     world.cli_exit_code = Some(exit_codes::CONFLICT);
 }
 
@@ -746,7 +694,7 @@ async fn then_output_node_state(world: &mut PactWorld, node: String, state: Stri
     );
 }
 
-#[then(regex = r#"^the exit code should be (\d+)$"#)]
+#[then(regex = r"^the exit code should be (\d+)$")]
 async fn then_exit_code(world: &mut PactWorld, code: i32) {
     assert_eq!(
         world.cli_exit_code,
@@ -776,33 +724,21 @@ async fn then_committed_deltas(world: &mut PactWorld) {
 
 #[then("a Commit entry should be recorded in the journal")]
 async fn then_commit_entry(world: &mut PactWorld) {
-    let has_commit = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::Commit);
+    let has_commit = world.journal.entries.values().any(|e| e.entry_type == EntryType::Commit);
     assert!(has_commit, "journal should contain a Commit entry");
 }
 
 #[then("a Rollback entry should be recorded in the journal")]
 async fn then_rollback_entry(world: &mut PactWorld) {
-    let has_rollback = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::Rollback);
+    let has_rollback = world.journal.entries.values().any(|e| e.entry_type == EntryType::Rollback);
     assert!(has_rollback, "journal should contain a Rollback entry");
 }
 
-#[then(regex = r#"^the output should show the (\d+) most recent entries$"#)]
+#[then(regex = r"^the output should show the (\d+) most recent entries$")]
 async fn then_recent_entries(world: &mut PactWorld, n: usize) {
     let output = world.cli_output.as_ref().expect("no output");
     let lines: Vec<_> = output.lines().filter(|l| l.contains('#')).collect();
-    assert!(
-        lines.len() <= n,
-        "should show at most {n} entries, got {}",
-        lines.len()
-    );
+    assert!(lines.len() <= n, "should show at most {n} entries, got {}", lines.len());
 }
 
 #[then("entries should be ordered newest first")]
@@ -818,11 +754,7 @@ async fn then_raft_write(world: &mut PactWorld) {
 
 #[then("a BootConfig entry should be recorded")]
 async fn then_boot_config_entry(world: &mut PactWorld) {
-    let has = world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::BootConfig);
+    let has = world.journal.entries.values().any(|e| e.entry_type == EntryType::BootConfig);
     assert!(has, "should have BootConfig entry");
 }
 
@@ -832,13 +764,10 @@ async fn then_event_displayed(world: &mut PactWorld) {
     assert!(world.cli_output.is_some());
 }
 
-#[then(regex = r#"^the commit window should be extended by (\d+) minutes$"#)]
+#[then(regex = r"^the commit window should be extended by (\d+) minutes$")]
 async fn then_window_extended(world: &mut PactWorld, minutes: u32) {
     let output = world.cli_output.as_ref().expect("no output");
-    assert!(
-        output.contains(&format!("{}", minutes)),
-        "output should confirm extension"
-    );
+    assert!(output.contains(&format!("{minutes}")), "output should confirm extension");
 }
 
 #[then("the output should be valid TOML")]
@@ -936,39 +865,27 @@ async fn then_list_groups(world: &mut PactWorld) {
 #[then("the output should show the group policy and member nodes")]
 async fn then_group_details(world: &mut PactWorld) {
     let output = world.cli_output.as_ref().expect("no output");
-    assert!(
-        output.contains("Group") || output.contains("Policy"),
-        "should show group details"
-    );
+    assert!(output.contains("Group") || output.contains("Policy"), "should show group details");
 }
 
 #[then(regex = r#"^admin "([\w@.]+)" should receive a notification in their session$"#)]
 async fn then_admin_notification(world: &mut PactWorld, _admin: String) {
-    assert!(
-        !world.received_updates.is_empty(),
-        "admin should receive notification"
-    );
+    assert!(!world.received_updates.is_empty(), "admin should receive notification");
 }
 
 #[then("the notification should show which keys were overwritten and by whom")]
 async fn then_overwrite_details(world: &mut PactWorld) {
-    assert!(world
-        .received_updates
-        .iter()
-        .any(|u| u.update_type == "overwrite_notification"));
+    assert!(world.received_updates.iter().any(|u| u.update_type == "overwrite_notification"));
 }
 
 #[then(regex = r#"^the notification should explain "(.*)"$"#)]
 async fn then_notification_explains(world: &mut PactWorld, _msg: String) {
-    assert!(world
-        .received_updates
-        .iter()
-        .any(|u| u.update_type == "grace_period_expired"));
+    assert!(world.received_updates.iter().any(|u| u.update_type == "grace_period_expired"));
 }
 
 #[then("each commit should be an independent journal entry")]
 async fn then_independent_commits(world: &mut PactWorld) {
-    let vc_scopes: Vec<_> = world
+    let vc_scope_count = world
         .journal
         .entries
         .values()
@@ -976,9 +893,9 @@ async fn then_independent_commits(world: &mut PactWorld) {
             Scope::VCluster(vc) => Some(vc.clone()),
             _ => None,
         })
-        .collect();
+        .count();
     // Should have entries for different vClusters
-    assert!(vc_scopes.len() >= 2, "should have independent commits");
+    assert!(vc_scope_count >= 2, "should have independent commits");
 }
 
 #[then("if one fails the other should still succeed")]
@@ -989,11 +906,7 @@ async fn then_independent_failure(_world: &mut PactWorld) {
 #[then(regex = r#"^the CLI should report success for "([\w-]+)"$"#)]
 async fn then_cli_success_for(world: &mut PactWorld, _vc: String) {
     // The successful commit exists in journal
-    assert!(world
-        .journal
-        .entries
-        .values()
-        .any(|e| e.entry_type == EntryType::Commit));
+    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::Commit));
 }
 
 #[then(regex = r#"^the CLI should report failure for "([\w-]+)"$"#)]

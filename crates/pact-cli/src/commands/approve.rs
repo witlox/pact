@@ -44,9 +44,9 @@ pub fn format_approval_list(approvals: &[PendingApproval]) -> String {
 /// Format approval result for display.
 pub fn format_approve_result(approval_id: &str, action: &str) -> String {
     match action {
-        "approve" => format!("Approved {}. Original operation will proceed.", approval_id),
-        "deny" => format!("Denied {}. Original operation cancelled.", approval_id),
-        _ => format!("{}: {}", action, approval_id),
+        "approve" => format!("Approved {approval_id}. Original operation will proceed."),
+        "deny" => format!("Denied {approval_id}. Original operation cancelled."),
+        _ => format!("{action}: {approval_id}"),
     }
 }
 
@@ -57,7 +57,7 @@ pub fn validate_approval(approval: &PendingApproval, approver: &str) -> Result<(
     }
 
     if approval.requester.principal == approver {
-        return Err(format!("Cannot approve your own request (P4: self-approval denied)"));
+        return Err("Cannot approve your own request (P4: self-approval denied)".to_string());
     }
 
     if Utc::now() > approval.expires_at {
@@ -78,7 +78,7 @@ fn format_scope(scope: &Scope) -> String {
 fn format_age(created: &DateTime<Utc>) -> String {
     let elapsed = (Utc::now() - *created).num_seconds();
     if elapsed < 60 {
-        format!("{}s ago", elapsed)
+        format!("{elapsed}s ago")
     } else if elapsed < 3600 {
         format!("{} min ago", elapsed / 60)
     } else {

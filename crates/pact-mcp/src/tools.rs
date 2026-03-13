@@ -286,7 +286,7 @@ pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResul
         "pact_service_status" => handle_service_status(arguments),
         "pact_query_fleet" => handle_query_fleet(arguments),
         "pact_emergency" => handle_emergency(arguments),
-        _ => tool_result(format!("Unknown tool: {}", name), true),
+        _ => tool_result(format!("Unknown tool: {name}"), true),
     }
 }
 
@@ -296,25 +296,22 @@ pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResul
 fn handle_status(args: &serde_json::Value) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("all");
     let vc = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
-    tool_result(
-        format!("Status query: node={}, vcluster={} (gRPC client required)", node, vc),
-        false,
-    )
+    tool_result(format!("Status query: node={node}, vcluster={vc} (gRPC client required)"), false)
 }
 
 fn handle_diff(args: &serde_json::Value) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("current");
-    let committed = args.get("committed").and_then(|v| v.as_bool()).unwrap_or(false);
+    let committed = args.get("committed").and_then(serde_json::Value::as_bool).unwrap_or(false);
     tool_result(
-        format!("Diff query: node={}, committed={} (gRPC client required)", node, committed),
+        format!("Diff query: node={node}, committed={committed} (gRPC client required)"),
         false,
     )
 }
 
 fn handle_log(args: &serde_json::Value) -> ToolCallResult {
-    let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(20);
+    let n = args.get("n").and_then(serde_json::Value::as_u64).unwrap_or(20);
     let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
-    tool_result(format!("Log query: n={}, scope={} (gRPC client required)", n, scope), false)
+    tool_result(format!("Log query: n={n}, scope={scope} (gRPC client required)"), false)
 }
 
 fn handle_commit(args: &serde_json::Value) -> ToolCallResult {
@@ -322,15 +319,15 @@ fn handle_commit(args: &serde_json::Value) -> ToolCallResult {
         Some(m) => m,
         None => return tool_result("Error: commit message required", true),
     };
-    tool_result(format!("Commit: message={:?} (gRPC client required)", message), false)
+    tool_result(format!("Commit: message={message:?} (gRPC client required)"), false)
 }
 
 fn handle_rollback(args: &serde_json::Value) -> ToolCallResult {
-    let seq = match args.get("sequence").and_then(|v| v.as_u64()) {
+    let seq = match args.get("sequence").and_then(serde_json::Value::as_u64) {
         Some(s) => s,
         None => return tool_result("Error: sequence number required", true),
     };
-    tool_result(format!("Rollback: target_seq={} (gRPC client required)", seq), false)
+    tool_result(format!("Rollback: target_seq={seq} (gRPC client required)"), false)
 }
 
 fn handle_exec(args: &serde_json::Value) -> ToolCallResult {
@@ -342,7 +339,7 @@ fn handle_exec(args: &serde_json::Value) -> ToolCallResult {
         Some(c) => c,
         None => return tool_result("Error: command required", true),
     };
-    tool_result(format!("Exec: node={}, command={:?} (gRPC client required)", node, command), false)
+    tool_result(format!("Exec: node={node}, command={command:?} (gRPC client required)"), false)
 }
 
 fn handle_apply(args: &serde_json::Value) -> ToolCallResult {
@@ -351,22 +348,19 @@ fn handle_apply(args: &serde_json::Value) -> ToolCallResult {
         None => return tool_result("Error: scope required", true),
     };
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("auto-apply");
-    tool_result(
-        format!("Apply: scope={}, message={:?} (gRPC client required)", scope, message),
-        false,
-    )
+    tool_result(format!("Apply: scope={scope}, message={message:?} (gRPC client required)"), false)
 }
 
 fn handle_cap(args: &serde_json::Value) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("all");
-    tool_result(format!("Capability report: node={} (gRPC client required)", node), false)
+    tool_result(format!("Capability report: node={node} (gRPC client required)"), false)
 }
 
 fn handle_service_status(args: &serde_json::Value) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("all");
     let service = args.get("service").and_then(|v| v.as_str()).unwrap_or("all");
     tool_result(
-        format!("Service status: node={}, service={} (gRPC client required)", node, service),
+        format!("Service status: node={node}, service={service} (gRPC client required)"),
         false,
     )
 }
@@ -375,7 +369,7 @@ fn handle_query_fleet(args: &serde_json::Value) -> ToolCallResult {
     let vc = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("all");
     let filter = args.get("capability_filter").and_then(|v| v.as_str()).unwrap_or("none");
     tool_result(
-        format!("Fleet query: vcluster={}, filter={} (gRPC client required)", vc, filter),
+        format!("Fleet query: vcluster={vc}, filter={filter} (gRPC client required)"),
         false,
     )
 }
@@ -395,7 +389,7 @@ fn handle_emergency(args: &serde_json::Value) -> ToolCallResult {
         );
     }
 
-    tool_result(format!("Emergency: action={} (gRPC client required)", action), false)
+    tool_result(format!("Emergency: action={action} (gRPC client required)"), false)
 }
 
 #[cfg(test)]
@@ -413,7 +407,7 @@ mod tests {
         let tools = all_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         let mut sorted = names.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(names.len(), sorted.len(), "duplicate tool names");
     }

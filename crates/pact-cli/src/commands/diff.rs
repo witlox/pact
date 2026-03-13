@@ -36,23 +36,23 @@ fn format_delta_section(lines: &mut Vec<String>, category: &str, items: &[DeltaI
             (None, None) => item.key.clone(),
         };
 
-        lines.push(format!("  {} {}: {}", prefix, category, detail));
+        lines.push(format!("  {prefix} {category}: {detail}"));
     }
 }
 
 /// Format a committed diff (node deltas not yet promoted).
 pub fn format_committed_diff(node_id: &str, deltas: &[(u64, String, StateDelta)]) -> String {
     if deltas.is_empty() {
-        return format!("(no committed node deltas on {})", node_id);
+        return format!("(no committed node deltas on {node_id})");
     }
 
     let mut lines = vec![format!("Committed node deltas on {} ({} total):", node_id, deltas.len())];
 
     for (seq, timestamp, delta) in deltas {
-        lines.push(format!("  seq:{} ({})", seq, timestamp));
+        lines.push(format!("  seq:{seq} ({timestamp})"));
         let diff = format_diff(delta);
         for line in diff.lines() {
-            lines.push(format!("    {}", line));
+            lines.push(format!("    {line}"));
         }
     }
 
