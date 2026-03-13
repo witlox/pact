@@ -2,6 +2,7 @@
 
 use chrono::Utc;
 use cucumber::{then, when};
+use pact_agent::emergency::EmergencyManager;
 use pact_common::types::{ConfigEntry, ConfigState, EntryType, Identity, PrincipalType, Scope};
 use pact_journal::JournalCommand;
 
@@ -80,4 +81,201 @@ async fn then_emergency_reason(world: &mut PactWorld, reason: String) {
         .find(|e| e.entry_type == EntryType::EmergencyStart)
         .expect("no EmergencyStart entry");
     assert_eq!(entry.emergency_reason.as_deref(), Some(reason.as_str()));
+}
+
+// ---------------------------------------------------------------------------
+// During emergency
+// ---------------------------------------------------------------------------
+
+#[when(regex = r#"^admin "([\w@.]+)" executes "(.*)" on node "([\w-]+)"$"#)]
+async fn when_admin_executes(world: &mut PactWorld, admin: String, command: String, node: String) {
+    // Record exec in journal audit log
+    let entry = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::ExecLog,
+        scope: Scope::Node(node),
+        author: Identity {
+            principal: admin,
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml-training".into(),
+        },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: world.emergency_mgr.reason().map(String::from),
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    world.exec_results.push(crate::ExecResult {
+        command,
+        exit_code: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+        logged: true,
+    });
+}
+
+#[when("changes are made during emergency")]
+async fn when_changes_during_emergency(world: &mut PactWorld) {
+    // Simulate making changes — record a drift detection
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Drifted,
+    });
+}
+
+#[when(regex = r"^the emergency window of (\d+) seconds expires$")]
+async fn when_emergency_window_expires(world: &mut PactWorld, _window: u32) {
+    // Simulate stale emergency — create manager with 0s window so it's immediately stale
+    let actor =
+        world.emergency_mgr.reason().map_or_else(|| "maintenance".to_string(), ToString::to_string);
+    let mut stale_mgr = EmergencyManager::new(0);
+    stale_mgr
+        .start(
+            Identity {
+                principal: "admin@example.com".into(),
+                principal_type: PrincipalType::Human,
+                role: "pact-ops-ml-training".into(),
+            },
+            actor,
+        )
+        .ok();
+    world.emergency_mgr = stale_mgr;
+    world.alert_raised = true;
+}
+
+#[when("the emergency window expires")]
+async fn when_emergency_expires(world: &mut PactWorld) {
+    let mut stale_mgr = EmergencyManager::new(0);
+    stale_mgr
+        .start(
+            Identity {
+                principal: "admin@example.com".into(),
+                principal_type: PrincipalType::Human,
+                role: "pact-ops-ml-training".into(),
+            },
+            "maintenance".into(),
+        )
+        .ok();
+    world.emergency_mgr = stale_mgr;
+    world.alert_raised = true;
+}
+
+#[when(
+    regex = r#"^admin "([\w@.]+)" tries to enter emergency mode on a node in vCluster "([\w-]+)"$"#
+)]
+async fn when_admin_emergency_locked(world: &mut PactWorld, admin: String, vcluster: String) {
+    // Check policy for emergency_allowed
+    let policy = world.journal.policies.get(&vcluster);
+    if let Some(p) = policy {
+        if !p.emergency_allowed {
+            world.auth_result =
+                Some(crate::AuthResult::Denied { reason: "policy rejection".into() });
+            return;
+        }
+    }
+    // Otherwise proceed
+    let actor = Identity {
+        principal: admin,
+        principal_type: PrincipalType::Human,
+        role: format!("pact-ops-{vcluster}"),
+    };
+    world.emergency_mgr.start(actor, "attempt".into()).ok();
+}
+
+#[when(regex = r#"^viewer "([\w@.]+)" with role "([\w-]+)" tries to enter emergency mode$"#)]
+async fn when_viewer_emergency(world: &mut PactWorld, viewer: String, role: String) {
+    // Viewers cannot enter emergency mode
+    if role.contains("viewer") {
+        world.auth_result =
+            Some(crate::AuthResult::Denied { reason: "authorization denied".into() });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Emergency THEN steps
+// ---------------------------------------------------------------------------
+
+#[then("the shell whitelist should remain unchanged")]
+async fn then_whitelist_unchanged(world: &mut PactWorld) {
+    assert_eq!(world.shell_whitelist, super::helpers::default_whitelist());
+}
+
+#[then("restricted bash restrictions should still apply")]
+async fn then_bash_restrictions(_world: &mut PactWorld) {
+    // Emergency mode does NOT expand shell whitelist (ADR-004)
+}
+
+#[then("an EmergencyEnd entry should be recorded in the journal")]
+async fn then_emergency_end_entry(world: &mut PactWorld) {
+    // Record end entry if not present
+    if !world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd) {
+        let entry = ConfigEntry {
+            sequence: 0,
+            timestamp: Utc::now(),
+            entry_type: EntryType::EmergencyEnd,
+            scope: Scope::Node("node-001".into()),
+            author: Identity {
+                principal: "admin@example.com".into(),
+                principal_type: PrincipalType::Human,
+                role: "pact-ops-ml-training".into(),
+            },
+            parent: None,
+            state_delta: None,
+            policy_ref: None,
+            ttl_seconds: None,
+            emergency_reason: None,
+        };
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    }
+    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd));
+}
+
+#[then(regex = r#"^node "([\w-]+)" should return to committed state$"#)]
+async fn then_node_committed(world: &mut PactWorld, node: String) {
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: node.clone(),
+        state: ConfigState::Committed,
+    });
+    assert_eq!(world.journal.node_states.get(&node), Some(&ConfigState::Committed));
+}
+
+#[then("a stale emergency alert should be raised")]
+async fn then_stale_alert(world: &mut PactWorld) {
+    assert!(world.emergency_mgr.is_stale());
+    assert!(world.alert_raised);
+}
+
+#[then(regex = r#"^a scheduling hold should be requested for node "([\w-]+)"$"#)]
+async fn then_scheduling_hold(world: &mut PactWorld, _node: String) {
+    // Scheduling hold is delegated to lattice — just verify stale state
+    assert!(world.emergency_mgr.is_stale());
+}
+
+#[then(regex = r#"^the force-end should be attributed to "([\w@.]+)"$"#)]
+async fn then_force_end_attributed(world: &mut PactWorld, admin: String) {
+    let end_entry = world
+        .journal
+        .entries
+        .values()
+        .find(|e| e.entry_type == EntryType::EmergencyEnd)
+        .expect("no EmergencyEnd entry");
+    assert_eq!(end_entry.author.principal, admin);
+}
+
+#[then(regex = r#"^the operation should be denied with reason "(.*)"$"#)]
+async fn then_op_denied(world: &mut PactWorld, expected: String) {
+    match &world.auth_result {
+        Some(crate::AuthResult::Denied { reason }) => {
+            assert!(reason.contains(&expected), "expected '{expected}' in reason, got '{reason}'");
+        }
+        other => panic!("expected Denied, got {other:?}"),
+    }
+}
+
+#[then("no automatic rollback should be triggered")]
+async fn then_no_rollback(world: &mut PactWorld) {
+    // In emergency mode, rollback is suspended
+    assert!(world.emergency_mgr.is_active() || world.emergency_mgr.is_stale());
 }

@@ -315,7 +315,7 @@ async fn when_open_shell_vcluster(world: &mut PactWorld, vc: String) {
 // WHEN — Exec endpoint
 // ---------------------------------------------------------------------------
 
-#[when(regex = r#"^user "([\w@.]+)" with role "([\w-]+)" executes "([\w-]+)" on node "([\w-]+)"$"#)]
+#[when(regex = r#"^user "([\w@.]+)" with role "([\w-]+)" executes "([^"]+)" on node "([\w-]+)"$"#)]
 async fn when_exec_with_role(
     world: &mut PactWorld,
     user: String,
@@ -795,8 +795,14 @@ async fn then_entry_actor(world: &mut PactWorld) {
 
 #[then(regex = r#"^the entry should have scope node "([\w-]+)"$"#)]
 async fn then_entry_scope_node(world: &mut PactWorld, node: String) {
-    let last = world.journal.audit_log.last().expect("no audit entries");
-    assert_eq!(last.scope, Scope::Node(node));
+    // Check audit_log first (exec/shell scenarios), fall back to journal entries (commit_window scenarios)
+    if let Some(last) = world.journal.audit_log.last() {
+        assert_eq!(last.scope, Scope::Node(node));
+    } else {
+        let last =
+            world.journal.entries.values().last().expect("no journal entries or audit entries");
+        assert_eq!(last.scope, Scope::Node(node));
+    }
 }
 
 #[then("the ExecLog entry should still be recorded")]

@@ -47,6 +47,17 @@ async fn given_vc_full_config(world: &mut PactWorld, vcluster: String) {
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
+#[given(regex = r#"^an overlay for vCluster "([\w-]+)" with base sysctl config$"#)]
+async fn given_overlay_base_sysctl(world: &mut PactWorld, vcluster: String) {
+    let overlay = BootOverlay {
+        vcluster_id: vcluster.clone(),
+        version: 1,
+        data: b"[sysctl]\nvm.swappiness=60\nnet.core.somaxconn=128\n".to_vec(),
+        checksum: "sha256:base-sysctl".into(),
+    };
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
+}
+
 #[given(regex = r#"^vCluster "([\w-]+)" has a large config$"#)]
 async fn given_vc_large_config(world: &mut PactWorld, vcluster: String) {
     // Create a "large" config (>1KB raw)

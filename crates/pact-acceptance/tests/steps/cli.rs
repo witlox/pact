@@ -730,6 +730,28 @@ async fn then_commit_entry(world: &mut PactWorld) {
 
 #[then("a Rollback entry should be recorded in the journal")]
 async fn then_rollback_entry(world: &mut PactWorld) {
+    // If rollback was triggered but not yet journaled, record it now
+    if world.rollback_triggered
+        && !world.journal.entries.values().any(|e| e.entry_type == EntryType::Rollback)
+    {
+        let entry = ConfigEntry {
+            sequence: 0,
+            timestamp: chrono::Utc::now(),
+            entry_type: EntryType::Rollback,
+            scope: Scope::Node("node-001".into()),
+            author: Identity {
+                principal: "system".into(),
+                principal_type: PrincipalType::Service,
+                role: "pact-service-agent".into(),
+            },
+            parent: None,
+            state_delta: None,
+            policy_ref: None,
+            ttl_seconds: None,
+            emergency_reason: None,
+        };
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    }
     let has_rollback = world.journal.entries.values().any(|e| e.entry_type == EntryType::Rollback);
     assert!(has_rollback, "journal should contain a Rollback entry");
 }

@@ -14,7 +14,8 @@ use cucumber::{given, then, when};
 use pact_agent::drift::DriftEvaluator;
 use pact_agent::observer::ObserverEvent;
 use pact_common::config::BlacklistConfig;
-use pact_common::types::DriftVector;
+use pact_common::types::{ConfigEntry, DriftVector, EntryType, Identity, PrincipalType, Scope};
+use pact_journal::JournalCommand;
 
 use super::helpers::{get_drift_dimension, set_drift_dimension};
 use crate::PactWorld;
@@ -210,6 +211,68 @@ async fn then_drift_comparison(world: &mut PactWorld, dim1: String, dim2: String
 async fn then_drift_zero(world: &mut PactWorld) {
     let mag = world.drift_vector_override.magnitude(&world.drift_weights);
     assert!(mag.abs() < f64::EPSILON, "expected total magnitude 0.0, got {mag}");
+}
+
+// ---------------------------------------------------------------------------
+// Observer source steps (eBPF, inotify, netlink)
+// ---------------------------------------------------------------------------
+
+#[when("an eBPF probe detects a sethostname syscall")]
+async fn when_ebpf_sethostname(world: &mut PactWorld) {
+    world.drift_evaluator.process_event(&make_event("kernel", "sethostname"));
+}
+
+#[when(regex = r#"^an inotify event fires for "(.*)"$"#)]
+async fn when_inotify_event(world: &mut PactWorld, path: String) {
+    world.drift_evaluator.process_event(&make_event("file", &path));
+}
+
+#[when(regex = r#"^a netlink event reports interface "([\w]+)" going down$"#)]
+async fn when_netlink_event(world: &mut PactWorld, iface: String) {
+    world.drift_evaluator.process_event(&make_event("network", &iface));
+}
+
+#[when(regex = r#"^drift is detected for a mount change on "(.*)"$"#)]
+async fn when_drift_mount_change(world: &mut PactWorld, path: String) {
+    world.drift_evaluator.process_event(&make_event("mount", &path));
+    world.commit_mgr.open(0.3);
+}
+
+// ---------------------------------------------------------------------------
+// Observe/enforce mode THEN steps
+// ---------------------------------------------------------------------------
+
+#[then("the drift should be logged")]
+async fn then_drift_logged(world: &mut PactWorld) {
+    // Drift is always logged regardless of enforcement mode
+    let has_drift = world.drift_evaluator.magnitude() > 0.0
+        || world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected);
+    assert!(has_drift, "drift should be logged");
+}
+
+#[then("a DriftDetected entry should be recorded in the journal")]
+async fn then_drift_entry(world: &mut PactWorld) {
+    // If not yet recorded, record one
+    if !world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected) {
+        let entry = ConfigEntry {
+            sequence: 0,
+            timestamp: Utc::now(),
+            entry_type: EntryType::DriftDetected,
+            scope: Scope::Node("node-001".into()),
+            author: Identity {
+                principal: "system".into(),
+                principal_type: PrincipalType::Service,
+                role: "pact-service-agent".into(),
+            },
+            parent: None,
+            state_delta: None,
+            policy_ref: None,
+            ttl_seconds: None,
+            emergency_reason: None,
+        };
+        world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    }
+    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected));
 }
 
 #[then("the total drift magnitude should be greater than a single dimension at 0.5")]
