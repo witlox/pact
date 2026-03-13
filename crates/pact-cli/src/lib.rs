@@ -1,3 +1,8 @@
-//! `pact-cli` — part of the pact configuration management system.
+//! `pact-cli` — CLI for pact configuration management and admin operations.
 //!
-//! See CLAUDE.md and docs/architecture/ for design documentation.
+//! Commands map to gRPC calls against pact-journal and pact-agent services.
+//! Every operation is authenticated via OIDC, authorized via RBAC, and logged.
+//!
+//! See `docs/architecture/cli-design.md` for the full command reference.
+
+pub mod commands;
