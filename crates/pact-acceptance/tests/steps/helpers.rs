@@ -121,6 +121,7 @@ pub fn default_whitelist() -> Vec<String> {
 pub fn map_action(action: &str) -> &str {
     match action {
         "emergency" => "emergency_start",
+        "service" => "service_start",
         other => other,
     }
 }

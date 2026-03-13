@@ -1846,6 +1846,7 @@ dependencies = [
  "chrono",
  "cucumber",
  "futures",
+ "jsonwebtoken",
  "pact-agent",
  "pact-cli",
  "pact-common",

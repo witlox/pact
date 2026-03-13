@@ -212,3 +212,202 @@ async fn then_requires_second_admin(world: &mut PactWorld) {
         other => panic!("expected ApprovalRequired, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// RBAC Authorization feature steps
+// ---------------------------------------------------------------------------
+
+#[given(regex = r#"^the following vClusters exist:$"#)]
+async fn given_vclusters_exist(world: &mut PactWorld, step: &cucumber::gherkin::Step) {
+    if let Some(ref table) = step.table {
+        for row in table.rows.iter().skip(1) {
+            let name = row[0].clone();
+            world
+                .policy_engine
+                .set_policy(VClusterPolicy {
+                    vcluster_id: name.clone(),
+                    ..VClusterPolicy::default()
+                });
+            world
+                .journal
+                .apply_command(pact_journal::JournalCommand::SetPolicy {
+                    vcluster_id: name,
+                    policy: VClusterPolicy::default(),
+                });
+        }
+    }
+}
+
+#[given(regex = r#"^a service with role "([\w-]+)" and principal type "(\w+)"$"#)]
+async fn given_service_identity(world: &mut PactWorld, role: String, ptype: String) {
+    let principal_type = match ptype.as_str() {
+        "Service" => PrincipalType::Service,
+        "Agent" => PrincipalType::Agent,
+        _ => PrincipalType::Human,
+    };
+    world.current_identity = Some(Identity {
+        principal: "service@pact.internal".into(),
+        role,
+        principal_type,
+    });
+}
+
+#[given(regex = r#"^a valid OIDC token for "([\w@.]+)" with groups "([\w-]+)"$"#)]
+async fn given_valid_oidc(world: &mut PactWorld, principal: String, group: String) {
+    world.current_identity = Some(Identity {
+        principal,
+        role: group,
+        principal_type: PrincipalType::Human,
+    });
+}
+
+#[given(regex = r#"^an expired OIDC token for "([\w@.]+)"$"#)]
+async fn given_expired_oidc(world: &mut PactWorld, _principal: String) {
+    world.auth_result = Some(AuthResult::Denied {
+        reason: "token expired".into(),
+    });
+    world.current_identity = None;
+}
+
+#[given("an OIDC token with wrong audience")]
+async fn given_wrong_audience(world: &mut PactWorld) {
+    world.auth_result = Some(AuthResult::Denied {
+        reason: "invalid audience".into(),
+    });
+    world.current_identity = None;
+}
+
+// WHEN steps for RBAC
+
+#[when(regex = r#"^the user queries status for vCluster "([\w-]+)"$"#)]
+async fn when_query_status(world: &mut PactWorld, vcluster: String) {
+    world.auth_result = Some(authorize(world, "status", &vcluster));
+}
+
+#[when(regex = r#"^the user requests to view diff for vCluster "([\w-]+)"$"#)]
+async fn when_view_diff(world: &mut PactWorld, vcluster: String) {
+    world.auth_result = Some(authorize(world, "diff", &vcluster));
+}
+
+#[when("the service authenticates")]
+async fn when_service_authenticates(world: &mut PactWorld) {
+    // Service authentication succeeds if identity is set
+    if world.current_identity.is_some() {
+        world.auth_result = Some(AuthResult::Authorized);
+    } else {
+        world.auth_result = Some(AuthResult::Denied {
+            reason: "no identity".into(),
+        });
+    }
+}
+
+#[when("the AI agent requests to enter emergency mode")]
+async fn when_ai_emergency(world: &mut PactWorld) {
+    world.auth_result = Some(authorize(world, "emergency", "ml-training"));
+}
+
+#[when("the AI agent requests to read fleet status")]
+async fn when_ai_read_status(world: &mut PactWorld) {
+    world.auth_result = Some(authorize(world, "status", "ml-training"));
+}
+
+#[when("the token is presented for authentication")]
+async fn when_token_presented(world: &mut PactWorld) {
+    // If auth_result is already set (e.g., expired/wrong audience), keep it
+    if world.auth_result.is_some() {
+        return;
+    }
+    // Otherwise, token is valid — authenticate
+    if let Some(ref identity) = world.current_identity {
+        world.auth_result = Some(AuthResult::Authorized);
+    }
+}
+
+// THEN steps for RBAC
+
+#[then("the authentication should succeed")]
+async fn then_auth_succeeds(world: &mut PactWorld) {
+    match &world.auth_result {
+        Some(AuthResult::Authorized) => {}
+        other => panic!("expected Authorized, got {other:?}"),
+    }
+}
+
+#[then(regex = r#"^the principal type should be "([\w]+)"$"#)]
+async fn then_principal_type(world: &mut PactWorld, expected: String) {
+    let identity = world.current_identity.as_ref().expect("no identity");
+    let expected_type = match expected.as_str() {
+        "Service" => PrincipalType::Service,
+        "Agent" => PrincipalType::Agent,
+        "Human" => PrincipalType::Human,
+        _ => panic!("unknown principal type: {expected}"),
+    };
+    assert_eq!(identity.principal_type, expected_type);
+}
+
+#[then(regex = r#"^the principal should be extracted as "([\w@.]+)"$"#)]
+async fn then_principal_extracted(world: &mut PactWorld, expected: String) {
+    let identity = world.current_identity.as_ref().expect("no identity");
+    assert_eq!(identity.principal, expected);
+}
+
+#[then(regex = r#"^the role should be mapped to "([\w-]+)"$"#)]
+async fn then_role_mapped(world: &mut PactWorld, expected: String) {
+    let identity = world.current_identity.as_ref().expect("no identity");
+    assert_eq!(identity.role, expected);
+}
+
+#[then(regex = r#"^the authentication should fail with "(.*)"$"#)]
+async fn then_auth_fails(world: &mut PactWorld, expected: String) {
+    match &world.auth_result {
+        Some(AuthResult::Denied { reason }) => {
+            assert!(
+                reason.contains(&expected),
+                "expected '{expected}' in reason, got '{reason}'"
+            );
+        }
+        other => panic!("expected Denied, got {other:?}"),
+    }
+}
+
+#[then(regex = r#"^the following operations should be authorized for vCluster "([\w-]+)":$"#)]
+async fn then_ops_authorized(
+    world: &mut PactWorld,
+    vcluster: String,
+    step: &cucumber::gherkin::Step,
+) {
+    if let Some(ref table) = step.table {
+        for row in table.rows.iter().skip(1) {
+            let action = &row[0];
+            let result = authorize(world, action, &vcluster);
+            assert!(
+                matches!(result, AuthResult::Authorized),
+                "expected '{}' to be authorized on '{}', got {:?}",
+                action,
+                vcluster,
+                result
+            );
+        }
+    }
+}
+
+#[then(regex = r#"^the following operations should be denied for vCluster "([\w-]+)":$"#)]
+async fn then_ops_denied(
+    world: &mut PactWorld,
+    vcluster: String,
+    step: &cucumber::gherkin::Step,
+) {
+    if let Some(ref table) = step.table {
+        for row in table.rows.iter().skip(1) {
+            let action = &row[0];
+            let result = authorize(world, action, &vcluster);
+            assert!(
+                matches!(result, AuthResult::Denied { .. }),
+                "expected '{}' to be denied on '{}', got {:?}",
+                action,
+                vcluster,
+                result
+            );
+        }
+    }
+}

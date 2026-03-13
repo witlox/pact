@@ -12,4 +12,14 @@ mod journal; // JournalState::apply_command()
 mod drift; // DriftEvaluator
 mod commit_window; // CommitWindowManager
 mod emergency; // EmergencyManager
-mod policy; // RbacEngine + DefaultPolicyEngine
+mod policy; // RbacEngine + DefaultPolicyEngine + RBAC authorization
+mod capability; // CapabilityReporter + MockGpuBackend
+mod supervisor; // PactSupervisor + ServiceManager
+mod shell; // ShellServer + WhitelistManager + SessionManager + execute_command
+mod partition; // ConflictManager + cached config/policy
+mod boot; // Boot sequence + boot config streaming
+mod overlay; // Overlay management + staleness + promote/conflict
+mod cli; // CLI formatting + exit codes + delegation
+mod mcp; // MCP tools: all_tools() + dispatch_tool()
+mod observability; // Prometheus metrics + health + Loki events
+mod federation; // FederationState + MockFederationSync

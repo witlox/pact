@@ -142,6 +142,10 @@ pub struct PactWorld {
     pub rollback_triggered: bool,
     pub rollback_deferred: bool,
     pub alert_raised: bool,
+
+    // --- Merge conflict ---
+    pub conflict_local_value: Option<String>,
+    pub conflict_journal_value: Option<String>,
 }
 
 // Manual Debug impl — real types don't all derive Debug uniformly.
@@ -310,6 +314,10 @@ impl PactWorld {
             rollback_triggered: false,
             rollback_deferred: false,
             alert_raised: false,
+
+            // Merge conflict
+            conflict_local_value: None,
+            conflict_journal_value: None,
         }
     }
 }
@@ -319,5 +327,7 @@ impl PactWorld {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    futures::executor::block_on(PactWorld::cucumber().run("features/"));
+    // Use tokio runtime so that PactSupervisor (tokio::process::Command) works
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(PactWorld::cucumber().run("features/"));
 }
