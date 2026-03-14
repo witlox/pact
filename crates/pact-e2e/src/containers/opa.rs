@@ -25,7 +25,7 @@ impl Opa {
 
 impl Default for Opa {
     fn default() -> Self {
-        Self { tag: "0.73.0-static".into() }
+        Self { tag: "1.14.1-static".into() }
     }
 }
 
