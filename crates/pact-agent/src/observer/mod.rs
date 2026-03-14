@@ -223,7 +223,8 @@ impl Observer for NetlinkObserver {
             None, // NETLINK_ROUTE is protocol 0, the default
         )?;
 
-        bind(sock.as_fd(), &addr)?;
+        let addr = NetlinkAddr::new(0, RTMGRP_LINK);
+        bind(std::os::fd::AsRawFd::as_raw_fd(&sock), &addr)?;
 
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
@@ -233,9 +234,8 @@ impl Observer for NetlinkObserver {
         let async_fd = tokio::io::unix::AsyncFd::new(async_fd_owned)?;
 
         tokio::spawn(async move {
-            // Keep the socket alive for the duration of the task
-            let _sock_guard = &sock;
-
+            // sock is moved here to keep the fd alive
+            let _sock = sock;
             let mut buf = [0u8; 4096];
 
             while running.load(Ordering::SeqCst) {
@@ -244,7 +244,8 @@ impl Observer for NetlinkObserver {
                     Err(_) => break,
                 };
 
-                match nix::unistd::read(sock.as_fd(), &mut buf) {
+                // Read from the cloned async fd
+                match nix::unistd::read(async_fd.as_fd(), &mut buf) {
                     Ok(n) if n > 0 => {
                         let event = ObserverEvent {
                             category: "network".into(),

@@ -408,30 +408,31 @@ pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     // pre_exec runs in the child after fork — set slave as stdin/stdout/stderr
     // SAFETY: pre_exec runs between fork and exec. We only call
     // async-signal-safe functions (setsid, dup2, close).
+    // SAFETY: pre_exec runs between fork and exec in the child process.
+    // We only call async-signal-safe functions (setsid, dup2, close).
+    // The #[allow(unsafe_code)] is needed because the workspace denies unsafe,
+    // but PTY allocation inherently requires unsafe fork/exec operations.
     #[allow(unsafe_code)]
-    let cmd = cmd.pre_exec(move || {
-        nix::unistd::setsid().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        // nix 0.31 provides dup2_stdin/stdout/stderr instead of generic dup2
-        // We use libc::dup2 directly since we need to dup to specific fds
-        let ret = nix::libc::dup2(slave_raw_fd, 0);
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let ret = nix::libc::dup2(slave_raw_fd, 1);
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let ret = nix::libc::dup2(slave_raw_fd, 2);
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        if slave_raw_fd > 2 {
-            nix::libc::close(slave_raw_fd);
-        }
-        Ok(())
-    });
+    unsafe {
+        cmd.pre_exec(move || {
+            nix::unistd::setsid()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            if nix::libc::dup2(slave_raw_fd, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if nix::libc::dup2(slave_raw_fd, 1) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if nix::libc::dup2(slave_raw_fd, 2) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if slave_raw_fd > 2 {
+                nix::libc::close(slave_raw_fd);
+            }
+            Ok(())
+        });
+    }
 
-    // SAFETY: pre_exec closure only calls async-signal-safe functions
     #[allow(unsafe_code)]
     let child = cmd
         .stdin(std::process::Stdio::null())
@@ -793,7 +794,7 @@ mod tests {
         // On systems with /bin/rbash, we get a real shell.
         // Either way, PtyHandle should be returned successfully.
         if let Ok(h) = handle {
-            assert!(h.master_fd() >= 0);
+            assert!(h.master_raw_fd() >= 0);
             assert!(h.child_pid() > 0);
             // Clean up
             let _ = h.close();
