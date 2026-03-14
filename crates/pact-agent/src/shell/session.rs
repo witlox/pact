@@ -341,7 +341,7 @@ impl PtyHandle {
             nix::libc::ioctl(
                 self.master_fd.as_raw_fd(),
                 nix::libc::TIOCSWINSZ,
-                &ws as *const nix::pty::Winsize,
+                std::ptr::from_ref(&ws),
             )
         };
         if ret < 0 {
@@ -381,7 +381,7 @@ impl PtyHandle {
 #[cfg(target_os = "linux")]
 pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     use nix::pty::openpty;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
 
     let win_size = Some(nix::pty::Winsize {
@@ -394,7 +394,7 @@ pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     let pty = openpty(win_size.as_ref(), None)
         .map_err(|e| SessionError::PtyFailed(format!("openpty: {e}")))?;
 
-    let master_fd: OwnedFd = pty.master.into();
+    let master_fd = pty.master;
     let slave_raw_fd = pty.slave.as_raw_fd();
 
     // Build environment
@@ -416,7 +416,7 @@ pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     unsafe {
         cmd.pre_exec(move || {
             nix::unistd::setsid()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(|e| std::io::Error::other(e))?;
             if nix::libc::dup2(slave_raw_fd, 0) < 0 {
                 return Err(std::io::Error::last_os_error());
             }

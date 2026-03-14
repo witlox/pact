@@ -86,7 +86,7 @@ impl Observer for InotifyObserver {
 
         // Wrap the inotify fd for async I/O. We use the raw fd via AsFd
         // and move the Inotify into the task to keep it alive.
-        let raw_fd = std::os::fd::OwnedFd::from(inotify.as_fd().try_clone_to_owned()?);
+        let raw_fd = inotify.as_fd().try_clone_to_owned()?;
         let async_fd = tokio::io::unix::AsyncFd::new(raw_fd)?;
 
         tokio::spawn(async move {

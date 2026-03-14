@@ -482,12 +482,10 @@ mod tests {
         // Stream stays open for live push, collect with timeout
         let mut stream = resp.into_inner();
         let mut updates = vec![];
-        loop {
-            match tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
-            {
-                Ok(Some(Ok(update))) => updates.push(update),
-                _ => break,
-            }
+        while let Ok(Some(Ok(update))) =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
+        {
+            updates.push(update);
         }
 
         assert_eq!(updates.len(), 2);
@@ -510,12 +508,10 @@ mod tests {
         // Stream stays open for live push, collect with timeout
         let mut stream = resp.into_inner();
         let mut updates = vec![];
-        loop {
-            match tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
-            {
-                Ok(Some(Ok(update))) => updates.push(update),
-                _ => break,
-            }
+        while let Ok(Some(Ok(update))) =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
+        {
+            updates.push(update);
         }
 
         assert_eq!(updates.len(), 3); // all 3 entries

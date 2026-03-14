@@ -324,7 +324,7 @@ pub fn apply_sysctl(entries: &[DeltaItem]) {
         match std::fs::write(&path, value) {
             Ok(()) => info!(key = %entry.key, value = %value, "Applied sysctl"),
             Err(e) => {
-                warn!(key = %entry.key, path = %path, error = %e, "Failed to apply sysctl — skipping")
+                warn!(key = %entry.key, path = %path, error = %e, "Failed to apply sysctl — skipping");
             }
         }
     }
