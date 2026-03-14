@@ -12,9 +12,13 @@
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
+use pact_common::proto::stream::boot_config_service_client::BootConfigServiceClient;
+use pact_common::proto::stream::{config_update, SubscribeRequest};
 use pact_common::types::VClusterPolicy;
+use tonic::transport::Channel;
 
 /// Events emitted by the subscription for the agent to act on.
 #[derive(Debug, Clone)]
@@ -187,6 +191,72 @@ impl ConfigSubscription {
     /// Get the subscription config.
     pub fn config(&self) -> &SubscriptionConfig {
         &self.config
+    }
+
+    /// Run the subscription loop — connects to journal and processes updates.
+    ///
+    /// This is the main entry point, meant to be spawned as a tokio task.
+    /// It connects, processes the stream, and reconnects with backoff on failure.
+    /// Returns only when max reconnect attempts are exceeded or the action channel closes.
+    pub async fn run(&self, mut client: BootConfigServiceClient<Channel>) {
+        loop {
+            let from_seq = self.from_sequence().await;
+            let request = tonic::Request::new(SubscribeRequest {
+                node_id: self.config.node_id.clone(),
+                vcluster_id: self.config.vcluster_id.clone(),
+                from_sequence: from_seq,
+            });
+
+            match client.subscribe_config_updates(request).await {
+                Ok(response) => {
+                    self.on_connected().await;
+                    let mut stream = response.into_inner();
+
+                    while let Some(result) = stream.next().await {
+                        match result {
+                            Ok(update) => {
+                                let payload = match update.update {
+                                    Some(config_update::Update::VclusterChange(data)) => {
+                                        UpdatePayload::VClusterChange(data)
+                                    }
+                                    Some(config_update::Update::NodeChange(data)) => {
+                                        UpdatePayload::NodeChange(data)
+                                    }
+                                    Some(config_update::Update::PolicyChange(data)) => {
+                                        UpdatePayload::PolicyChange(data)
+                                    }
+                                    Some(config_update::Update::BlacklistChange(data)) => {
+                                        UpdatePayload::BlacklistChange(data)
+                                    }
+                                    None => continue,
+                                };
+
+                                if let Err(e) =
+                                    self.process_update(update.sequence, payload).await
+                                {
+                                    error!(error = %e, "Failed to process config update");
+                                }
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Config update stream error");
+                                break; // reconnect
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to subscribe to config updates");
+                }
+            }
+
+            // Disconnected — attempt reconnect with backoff
+            if let Some(delay_ms) = self.on_disconnected().await {
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            } else {
+                error!("Subscription abandoned after max reconnect attempts");
+                return;
+            }
+        }
     }
 }
 

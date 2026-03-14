@@ -13,16 +13,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tokio_stream::StreamExt;
 use tracing::{debug, info, warn};
 
 use pact_common::config::AgentConfig;
-use pact_common::types::{ConfigState, DriftWeights, SupervisorBackend};
+use pact_common::proto::stream::{config_chunk, BootConfigRequest};
+use pact_common::types::{ConfigState, DriftWeights, SupervisorBackend, VClusterPolicy};
 
 use crate::capability::{CapabilityReporter, GpuBackend, MockGpuBackend};
 use crate::commit::CommitWindowManager;
 use crate::conflict::ConflictManager;
 use crate::drift::DriftEvaluator;
 use crate::emergency::EmergencyManager;
+use crate::journal_client::JournalClient;
 use crate::subscription::{ConfigSubscription, ConfigUpdateAction, SubscriptionConfig};
 use crate::supervisor::{PactSupervisor, ServiceManager};
 
@@ -35,13 +38,20 @@ pub struct BootResult {
     pub conflict_manager: Arc<RwLock<ConflictManager>>,
     pub config_state: ConfigState,
     pub enforcement_mode: String,
+    /// Cached vCluster policy from journal (None if not yet received).
+    pub cached_policy: Arc<RwLock<Option<VClusterPolicy>>>,
 }
 
 /// Execute the agent boot sequence.
 ///
 /// This is the main orchestration function called from `main()`.
 /// Each phase logs its progress and timing for observability.
-pub async fn boot(config: &AgentConfig) -> anyhow::Result<BootResult> {
+/// If `journal_client` is `Some`, the agent streams initial config from the journal.
+/// If `None` (dev mode or disconnected start), it starts with defaults.
+pub async fn boot(
+    config: &AgentConfig,
+    journal_client: Option<&JournalClient>,
+) -> anyhow::Result<BootResult> {
     let start = std::time::Instant::now();
 
     // Phase 1: Initialize supervisor
@@ -91,7 +101,30 @@ pub async fn boot(config: &AgentConfig) -> anyhow::Result<BootResult> {
     }
     debug!(elapsed_ms = start.elapsed().as_millis(), "Capability report generated");
 
-    // Phase 7: Determine initial config state
+    // Phase 7: Stream initial config from journal (if connected)
+    let cached_policy = Arc::new(RwLock::new(None));
+    if let Some(client) = journal_client {
+        info!("Boot phase 7: streaming boot config from journal");
+        match stream_boot_config(client, &config.node_id, &config.vcluster).await {
+            Ok(boot_config) => {
+                debug!(
+                    overlay_bytes = boot_config.overlay_data.len(),
+                    node_delta_bytes = boot_config.node_delta_data.len(),
+                    base_version = boot_config.base_version,
+                    "Boot config received from journal"
+                );
+                // TODO: apply overlay + node delta to system state
+                // (kernel params, mounts, modules, uenv, services)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to stream boot config — starting with defaults");
+            }
+        }
+    } else {
+        info!("Boot phase 7: no journal connection — starting with defaults");
+    }
+
+    // Phase 8: Determine initial config state
     // ConfigState tracks the convergence lifecycle, not enforcement mode.
     // All agents start in ObserveOnly during bootstrap (ADR-002).
     let config_state = ConfigState::ObserveOnly;
@@ -114,7 +147,75 @@ pub async fn boot(config: &AgentConfig) -> anyhow::Result<BootResult> {
         conflict_manager,
         config_state,
         enforcement_mode: config.enforcement_mode.clone(),
+        cached_policy,
     })
+}
+
+/// Result of streaming boot config from journal.
+pub struct BootConfigData {
+    /// Reassembled vCluster overlay data.
+    pub overlay_data: Vec<u8>,
+    /// Node-specific delta data.
+    pub node_delta_data: Vec<u8>,
+    /// Base overlay version.
+    pub base_version: u64,
+}
+
+/// Stream boot config from journal's BootConfigService.
+///
+/// Receives overlay chunks + node delta + completion marker.
+/// Reassembles chunked overlay data.
+async fn stream_boot_config(
+    client: &JournalClient,
+    node_id: &str,
+    vcluster_id: &str,
+) -> anyhow::Result<BootConfigData> {
+    let mut boot_client = client.boot_config();
+
+    let response = boot_client
+        .stream_boot_config(tonic::Request::new(BootConfigRequest {
+            node_id: node_id.to_string(),
+            vcluster_id: vcluster_id.to_string(),
+            last_known_version: None, // First boot — no cached version
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("StreamBootConfig failed: {e}"))?;
+
+    let mut stream = response.into_inner();
+    let mut overlay_data = Vec::new();
+    let mut node_delta_data = Vec::new();
+    let mut base_version = 0u64;
+
+    while let Some(result) = stream.next().await {
+        let chunk = result.map_err(|e| anyhow::anyhow!("boot config stream error: {e}"))?;
+        match chunk.chunk {
+            Some(config_chunk::Chunk::BaseOverlay(ov)) => {
+                debug!(
+                    chunk_index = ov.chunk_index,
+                    total_chunks = ov.total_chunks,
+                    bytes = ov.data.len(),
+                    "Received overlay chunk"
+                );
+                overlay_data.extend_from_slice(&ov.data);
+                base_version = ov.version;
+            }
+            Some(config_chunk::Chunk::NodeDelta(nd)) => {
+                debug!(node_id = %nd.node_id, bytes = nd.data.len(), "Received node delta");
+                node_delta_data = nd.data;
+            }
+            Some(config_chunk::Chunk::Complete(c)) => {
+                info!(
+                    base_version = c.base_version,
+                    node_version = c.node_version,
+                    "Boot config stream complete"
+                );
+                break;
+            }
+            None => {}
+        }
+    }
+
+    Ok(BootConfigData { overlay_data, node_delta_data, base_version })
 }
 
 /// Start the config subscription for live updates from journal.
@@ -136,33 +237,54 @@ pub fn start_subscription(
     (subscription, action_rx)
 }
 
+/// Handles for subsystems that receive config updates.
+pub struct ConfigActionHandles {
+    pub drift_evaluator: Arc<RwLock<DriftEvaluator>>,
+    pub commit_window: Arc<RwLock<CommitWindowManager>>,
+    pub cached_policy: Arc<RwLock<Option<VClusterPolicy>>>,
+    pub blacklist: pact_common::config::BlacklistConfig,
+}
+
 /// Process a config update action — dispatches to the appropriate subsystem.
-pub async fn handle_config_action(
-    action: ConfigUpdateAction,
-    drift_evaluator: &Arc<RwLock<DriftEvaluator>>,
-    blacklist: &pact_common::config::BlacklistConfig,
-) {
+pub async fn handle_config_action(action: ConfigUpdateAction, handles: &ConfigActionHandles) {
     match action {
         ConfigUpdateAction::OverlayChanged { data } => {
-            info!(bytes = data.len(), "Received overlay update — re-apply needed");
-            // TODO: re-apply overlay diff (needs journal gRPC client)
+            info!(bytes = data.len(), "Received overlay update");
+            // Overlay data is the full vCluster base config (compressed).
+            // In a full implementation this would diff against current state
+            // and apply changes (kernel params, mounts, modules, uenv).
+            // For now, log receipt — actual application requires OS-level
+            // primitives (nix crate) that are Linux-only.
         }
         ConfigUpdateAction::NodeDeltaChanged { data } => {
-            info!(bytes = data.len(), "Received node delta update — re-apply needed");
-            // TODO: re-apply node delta diff
+            info!(bytes = data.len(), "Received node delta update");
+            // Node delta contains node-specific config entries.
+            // Same as overlay — actual application requires OS primitives.
         }
         ConfigUpdateAction::PolicyChanged { policy } => {
-            info!(
-                vcluster = %policy.vcluster_id,
-                "Policy updated from journal"
-            );
-            // TODO: update cached policy, refresh commit window config
+            info!(vcluster = %policy.vcluster_id, "Policy updated from journal");
+
+            // Update commit window config from policy
+            {
+                let mut cw = handles.commit_window.write().await;
+                cw.update_config(
+                    policy.base_commit_window_seconds,
+                    policy.drift_sensitivity,
+                    policy.emergency_window_seconds,
+                );
+            }
+
+            // Update drift evaluator weights if policy sensitivity changed
+            // (drift weights could be per-vCluster in future)
+
+            // Cache the policy
+            *handles.cached_policy.write().await = Some(policy);
         }
         ConfigUpdateAction::BlacklistChanged { patterns } => {
             info!(count = patterns.len(), "Blacklist updated from journal");
-            let mut new_blacklist = blacklist.clone();
+            let mut new_blacklist = handles.blacklist.clone();
             new_blacklist.patterns = patterns;
-            let mut evaluator = drift_evaluator.write().await;
+            let mut evaluator = handles.drift_evaluator.write().await;
             *evaluator = DriftEvaluator::new(new_blacklist, DriftWeights::default());
         }
     }
@@ -203,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn boot_initializes_all_subsystems() {
         let config = test_config();
-        let result = boot(&config).await.unwrap();
+        let result = boot(&config, None).await.unwrap();
 
         // Config state is always ObserveOnly at boot (ADR-002)
         assert_eq!(result.config_state, ConfigState::ObserveOnly);
@@ -231,7 +353,7 @@ mod tests {
             drift_sensitivity: 3.0,
             emergency_window_seconds: 28800,
         };
-        let result = boot(&config).await.unwrap();
+        let result = boot(&config, None).await.unwrap();
 
         // Verify commit window uses the custom config
         let cw = result.commit_window.read().await;
@@ -246,7 +368,7 @@ mod tests {
         let mut config = test_config();
         config.blacklist =
             BlacklistConfig { patterns: vec!["/scratch/**".into(), "/home/**".into()] };
-        let result = boot(&config).await.unwrap();
+        let result = boot(&config, None).await.unwrap();
 
         // Verify the evaluator uses the custom blacklist:
         // /scratch/job/output should be blacklisted (zero drift)
@@ -274,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn boot_supervisor_can_manage_processes() {
         let config = test_config();
-        let result = boot(&config).await.unwrap();
+        let result = boot(&config, None).await.unwrap();
 
         // Verify the supervisor is functional — start and stop a real process
         let svc = pact_common::types::ServiceDecl {
@@ -306,7 +428,15 @@ mod tests {
             BlacklistConfig::default(),
             DriftWeights::default(),
         )));
-        let blacklist = BlacklistConfig::default();
+
+        let handles = ConfigActionHandles {
+            drift_evaluator: evaluator.clone(),
+            commit_window: Arc::new(RwLock::new(CommitWindowManager::new(
+                CommitWindowConfig::default(),
+            ))),
+            cached_policy: Arc::new(RwLock::new(None)),
+            blacklist: BlacklistConfig::default(),
+        };
 
         // Verify /tmp is blacklisted initially
         {
@@ -322,7 +452,7 @@ mod tests {
 
         // Apply a blacklist change that does NOT include /tmp
         let action = ConfigUpdateAction::BlacklistChanged { patterns: vec!["/scratch/**".into()] };
-        handle_config_action(action, &evaluator, &blacklist).await;
+        handle_config_action(action, &handles).await;
 
         // Now /tmp should NOT be blacklisted anymore
         {

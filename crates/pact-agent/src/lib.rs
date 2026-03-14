@@ -17,6 +17,7 @@ pub mod commit;
 pub mod conflict;
 pub mod drift;
 pub mod emergency;
+pub mod journal_client;
 pub mod observer;
 pub mod shell;
 pub mod subscription;

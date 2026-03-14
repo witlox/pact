@@ -34,6 +34,18 @@ impl CommitWindowManager {
         Self { config, state: WindowState::Idle, emergency: false }
     }
 
+    /// Update config from a policy change (live reconfiguration).
+    pub fn update_config(
+        &mut self,
+        base_window_seconds: u32,
+        drift_sensitivity: f64,
+        emergency_window_seconds: u32,
+    ) {
+        self.config.base_window_seconds = base_window_seconds;
+        self.config.drift_sensitivity = drift_sensitivity;
+        self.config.emergency_window_seconds = emergency_window_seconds;
+    }
+
     /// Calculate window duration based on drift magnitude.
     ///
     /// `window = base_window / (1 + magnitude * sensitivity)`

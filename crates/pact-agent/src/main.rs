@@ -63,22 +63,39 @@ async fn main() -> anyhow::Result<()> {
         "Agent configured"
     );
 
+    // Connect to journal (optional — agent can start without it)
+    let journal_client =
+        pact_agent::journal_client::try_connect(&agent_config.journal).await;
+
     // Execute boot sequence — initializes all subsystems
-    let boot_result = boot::boot(&agent_config).await?;
+    let boot_result = boot::boot(&agent_config, journal_client.as_ref()).await?;
 
     // Start config subscription for live updates from journal
-    let (_subscription, mut action_rx) = boot::start_subscription(&agent_config);
+    let (subscription, mut action_rx) = boot::start_subscription(&agent_config);
+
+    // Spawn subscription streaming loop (if connected to journal)
+    if let Some(ref client) = journal_client {
+        let sub = subscription.clone();
+        let boot_client = client.boot_config();
+        tokio::spawn(async move {
+            sub.run(boot_client).await;
+        });
+    }
 
     // Spawn config update handler
-    let drift_evaluator = boot_result.drift_evaluator.clone();
-    let blacklist = agent_config.blacklist.clone();
+    let handles = boot::ConfigActionHandles {
+        drift_evaluator: boot_result.drift_evaluator.clone(),
+        commit_window: boot_result.commit_window.clone(),
+        cached_policy: boot_result.cached_policy.clone(),
+        blacklist: agent_config.blacklist.clone(),
+    };
     tokio::spawn(async move {
         while let Some(action) = action_rx.recv().await {
-            boot::handle_config_action(action, &drift_evaluator, &blacklist).await;
+            boot::handle_config_action(action, &handles).await;
         }
     });
 
-    // TODO Phase 3: Start shell server
+    // TODO Phase 3: Start shell gRPC server
     info!(
         config_state = ?boot_result.config_state,
         "Agent ready — steady state"
@@ -87,6 +104,12 @@ async fn main() -> anyhow::Result<()> {
     // Run until interrupted
     tokio::signal::ctrl_c().await?;
 
-    info!("Shutting down");
+    // Graceful shutdown — stop all supervised services
+    info!("Shutting down — stopping supervised services");
+    if let Err(e) = boot_result.supervisor.stop_all(&[]).await {
+        error!(error = %e, "Error stopping services during shutdown");
+    }
+
+    info!("Shutdown complete");
     Ok(())
 }
