@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
             issuer: String::new(), // TODO: from OIDC config
             audience: String::new(),
             hmac_secret: Some(b"dev-secret-key-for-pact-development".to_vec()),
+            jwks_url: None, // TODO: from OIDC discovery
         },
         ExecConfig::default(),
         agent_config.node_id.clone(),

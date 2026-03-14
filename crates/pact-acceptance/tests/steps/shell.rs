@@ -27,6 +27,7 @@ fn test_auth_config() -> AuthConfig {
         issuer: TEST_ISSUER.into(),
         audience: TEST_AUDIENCE.into(),
         hmac_secret: Some(TEST_SECRET.to_vec()),
+        jwks_url: None,
     }
 }
 

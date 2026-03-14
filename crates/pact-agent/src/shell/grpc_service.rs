@@ -173,6 +173,7 @@ mod tests {
                 issuer: "https://auth.test.example.com".into(),
                 audience: "pact-agent".into(),
                 hmac_secret: Some(TEST_SECRET.to_vec()),
+                jwks_url: None,
             },
             ExecConfig::default(),
             "node-001".into(),

@@ -3,7 +3,7 @@
 //! Each function connects to the journal, executes the request,
 //! and returns the formatted result.
 
-use tonic::transport::Channel;
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::debug;
 
 use pact_common::proto::config::{
@@ -44,17 +44,78 @@ pub fn resolve_identity_from_token(token: &str) -> (String, String) {
     }
 }
 
+/// TLS configuration for CLI connections.
+#[derive(Debug, Clone, Default)]
+pub struct TlsOptions {
+    /// Path to CA certificate PEM file.
+    pub ca_cert: Option<std::path::PathBuf>,
+    /// Path to client certificate PEM file.
+    pub client_cert: Option<std::path::PathBuf>,
+    /// Path to client key PEM file.
+    pub client_key: Option<std::path::PathBuf>,
+}
+
+impl TlsOptions {
+    /// Build a `ClientTlsConfig` from these options.
+    pub fn to_tls_config(&self) -> anyhow::Result<ClientTlsConfig> {
+        let mut tls = ClientTlsConfig::new();
+
+        if let Some(ca_path) = &self.ca_cert {
+            let ca_pem = std::fs::read_to_string(ca_path)
+                .map_err(|e| anyhow::anyhow!("cannot read CA cert {}: {e}", ca_path.display()))?;
+            tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
+        }
+
+        if let (Some(cert_path), Some(key_path)) = (&self.client_cert, &self.client_key) {
+            let cert_pem = std::fs::read_to_string(cert_path).map_err(|e| {
+                anyhow::anyhow!("cannot read client cert {}: {e}", cert_path.display())
+            })?;
+            let key_pem = std::fs::read_to_string(key_path).map_err(|e| {
+                anyhow::anyhow!("cannot read client key {}: {e}", key_path.display())
+            })?;
+            tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
+        }
+
+        Ok(tls)
+    }
+}
+
 /// Create a gRPC channel to the journal endpoint.
+///
+/// If the endpoint starts with `https`, TLS is configured automatically.
+/// Provide `tls_options` for mTLS (client certificate authentication).
 pub async fn connect(config: &CliConfig) -> anyhow::Result<Channel> {
+    connect_with_tls(config, None).await
+}
+
+/// Create a gRPC channel with optional TLS configuration.
+pub async fn connect_with_tls(
+    config: &CliConfig,
+    tls_options: Option<&TlsOptions>,
+) -> anyhow::Result<Channel> {
     let uri = if config.endpoint.starts_with("http") {
         config.endpoint.clone()
     } else {
         format!("http://{}", config.endpoint)
     };
 
-    let channel = Channel::from_shared(uri.clone())
+    let mut channel_builder = Channel::from_shared(uri.clone())
         .map_err(|e| anyhow::anyhow!("invalid endpoint {uri}: {e}"))?
-        .timeout(std::time::Duration::from_secs(u64::from(config.timeout_seconds)))
+        .timeout(std::time::Duration::from_secs(u64::from(config.timeout_seconds)));
+
+    // Configure TLS if the endpoint is https or explicit TLS options are provided
+    if uri.starts_with("https") || tls_options.is_some() {
+        let tls_config = if let Some(opts) = tls_options {
+            opts.to_tls_config()?
+        } else {
+            ClientTlsConfig::new()
+        };
+        channel_builder = channel_builder
+            .tls_config(tls_config)
+            .map_err(|e| anyhow::anyhow!("TLS config error for {uri}: {e}"))?;
+    }
+
+    let channel = channel_builder
         .connect()
         .await
         .map_err(|e| anyhow::anyhow!("cannot connect to journal at {uri}: {e}"))?;
@@ -190,6 +251,32 @@ pub async fn connect_agent(agent_addr: &str) -> anyhow::Result<Channel> {
         .connect()
         .await
         .map_err(|e| anyhow::anyhow!("cannot connect to agent at {uri}: {e}"))
+}
+
+/// Default agent gRPC port.
+const AGENT_DEFAULT_PORT: u16 = 9445;
+
+/// Resolve the agent address for a given node ID.
+///
+/// Queries the journal `ConfigService.GetNodeState` to verify the node exists,
+/// then returns `http://{node_id}:9445` (DNS-based discovery).
+/// Falls back to `http://127.0.0.1:9445` for the "local" node ID.
+pub async fn resolve_agent_address(
+    node_id: &str,
+    journal_channel: &Channel,
+) -> anyhow::Result<String> {
+    if node_id == "local" || node_id == "localhost" {
+        return Ok(format!("http://127.0.0.1:{AGENT_DEFAULT_PORT}"));
+    }
+
+    // Verify the node exists by querying journal
+    let mut client = ConfigServiceClient::new(journal_channel.clone());
+    let _resp = client
+        .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node_id.to_string() }))
+        .await
+        .map_err(|e| anyhow::anyhow!("cannot resolve node '{node_id}': {e}"))?;
+
+    Ok(format!("http://{node_id}:{AGENT_DEFAULT_PORT}"))
 }
 
 /// Execute `pact exec` — run a command on a remote node via ShellService.
@@ -706,5 +793,61 @@ mod tests {
         let (principal, role) = resolve_identity_from_token("");
         assert_eq!(principal, "cli-user");
         assert_eq!(role, "pact-platform-admin");
+    }
+
+    #[test]
+    fn tls_options_default_is_empty() {
+        let opts = TlsOptions::default();
+        assert!(opts.ca_cert.is_none());
+        assert!(opts.client_cert.is_none());
+        assert!(opts.client_key.is_none());
+    }
+
+    #[test]
+    fn tls_options_nonexistent_ca_cert_returns_error() {
+        let opts = TlsOptions {
+            ca_cert: Some("/nonexistent/ca.pem".into()),
+            client_cert: None,
+            client_key: None,
+        };
+        let result = opts.to_tls_config();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot read CA cert"));
+    }
+
+    #[test]
+    fn tls_options_nonexistent_client_cert_returns_error() {
+        let opts = TlsOptions {
+            ca_cert: None,
+            client_cert: Some("/nonexistent/cert.pem".into()),
+            client_key: Some("/nonexistent/key.pem".into()),
+        };
+        let result = opts.to_tls_config();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot read client cert"));
+    }
+
+    #[test]
+    fn resolve_agent_address_local_returns_localhost() {
+        // resolve_agent_address is async but for "local" it doesn't use the channel
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // We need a dummy channel — but for "local" it short-circuits
+        // Use a simple blocking check
+        rt.block_on(async {
+            // Create a dummy channel (won't be used for "local")
+            let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
+            let addr = resolve_agent_address("local", &channel).await.unwrap();
+            assert_eq!(addr, "http://127.0.0.1:9445");
+        });
+    }
+
+    #[test]
+    fn resolve_agent_address_localhost_returns_localhost() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
+            let addr = resolve_agent_address("localhost", &channel).await.unwrap();
+            assert_eq!(addr, "http://127.0.0.1:9445");
+        });
     }
 }

@@ -290,6 +290,222 @@ impl Observer for NetlinkObserver {
     }
 }
 
+// ---------------------------------------------------------------------------
+// EbpfObserver — eBPF probe loader (Linux only, feature = "ebpf")
+// ---------------------------------------------------------------------------
+
+/// Loads compiled eBPF programs (`.o` files) and attaches them as tracepoints
+/// to detect system state changes (mounts, hostname changes, sysctl writes).
+///
+/// Program-to-tracepoint mapping is by filename convention:
+/// - `mount.o`       → `syscalls/sys_enter_mount`
+/// - `sethostname.o` → `syscalls/sys_enter_sethostname`
+/// - `sysctl.o`      → `syscalls/sys_enter_sysctl`
+///
+/// Events are read from perf event arrays and forwarded as `ObserverEvent`.
+#[cfg(feature = "ebpf")]
+pub struct EbpfObserver {
+    programs_dir: PathBuf,
+    running: Arc<AtomicBool>,
+}
+
+#[cfg(feature = "ebpf")]
+impl EbpfObserver {
+    /// Create a new eBPF observer that loads programs from the given directory.
+    pub fn new(programs_dir: PathBuf) -> Self {
+        Self {
+            programs_dir,
+            running: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Map a BPF object filename to the tracepoint it should attach to.
+    fn tracepoint_for_file(filename: &str) -> Option<(&'static str, &'static str)> {
+        match filename {
+            "mount.o" => Some(("syscalls", "sys_enter_mount")),
+            "sethostname.o" => Some(("syscalls", "sys_enter_sethostname")),
+            "sysctl.o" => Some(("syscalls", "sys_enter_sysctl")),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "ebpf")]
+#[async_trait::async_trait]
+impl Observer for EbpfObserver {
+    async fn start(&self, tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
+        use aya::programs::TracePoint;
+        use aya::Ebpf;
+
+        self.running.store(true, Ordering::SeqCst);
+        let running = Arc::clone(&self.running);
+
+        // Scan the programs directory for .o files.
+        let entries = match std::fs::read_dir(&self.programs_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                tracing::error!(
+                    dir = %self.programs_dir.display(),
+                    error = %e,
+                    "EbpfObserver: failed to read programs directory"
+                );
+                return Err(e.into());
+            }
+        };
+
+        let mut loaded_count = 0u32;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let filename = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) if name.ends_with(".o") => name.to_string(),
+                _ => continue,
+            };
+
+            let (category, tracepoint_name) = match Self::tracepoint_for_file(&filename) {
+                Some(tp) => tp,
+                None => {
+                    tracing::warn!(
+                        file = %filename,
+                        "EbpfObserver: no tracepoint mapping for BPF object, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            // Load the BPF program from the .o file.
+            let mut bpf = match Ebpf::load_file(&path) {
+                Ok(bpf) => bpf,
+                Err(e) => {
+                    tracing::warn!(
+                        file = %filename,
+                        error = %e,
+                        "EbpfObserver: failed to load BPF program, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            // Find the tracepoint program inside the loaded BPF object.
+            // Convention: the BPF program function name matches the tracepoint name.
+            let prog_name = tracepoint_name.to_string();
+            let program = match bpf.program_mut(&prog_name) {
+                Some(prog) => prog,
+                None => {
+                    tracing::warn!(
+                        file = %filename,
+                        program = %prog_name,
+                        "EbpfObserver: program not found in BPF object, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            // Load and attach the tracepoint.
+            let tp: &mut TracePoint = match program.try_into() {
+                Ok(tp) => tp,
+                Err(e) => {
+                    tracing::warn!(
+                        file = %filename,
+                        error = %e,
+                        "EbpfObserver: program is not a tracepoint, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            if let Err(e) = tp.load() {
+                tracing::warn!(
+                    file = %filename,
+                    error = %e,
+                    "EbpfObserver: failed to load tracepoint program, skipping"
+                );
+                continue;
+            }
+
+            if let Err(e) = tp.attach(category, tracepoint_name) {
+                tracing::warn!(
+                    file = %filename,
+                    tracepoint = %tracepoint_name,
+                    error = %e,
+                    "EbpfObserver: failed to attach tracepoint, skipping"
+                );
+                continue;
+            }
+
+            tracing::info!(
+                file = %filename,
+                tracepoint = format!("{category}/{tracepoint_name}"),
+                "EbpfObserver: loaded and attached BPF program"
+            );
+            loaded_count += 1;
+        }
+
+        tracing::info!(
+            count = loaded_count,
+            "EbpfObserver: finished loading BPF programs"
+        );
+
+        // Spawn a task that reads perf events (skeleton — real implementation
+        // would read from perf event arrays defined in the BPF programs).
+        tokio::spawn(async move {
+            while running.load(Ordering::SeqCst) {
+                // In a full implementation, this would poll aya's
+                // AsyncPerfEventArray for events from the BPF programs
+                // and forward them as ObserverEvents via tx.
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                // Placeholder: the actual event reading loop would do:
+                // let events = perf_array.read_events(...);
+                // for event in events { tx.send(ObserverEvent { ... }).await; }
+                let _ = &tx; // suppress unused warning
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EbpfObserver stub — when the "ebpf" feature is not compiled in
+// ---------------------------------------------------------------------------
+
+/// Stub eBPF observer when the `ebpf` feature is not enabled.
+///
+/// Returns an error on `start()` indicating eBPF support is not compiled in.
+#[cfg(not(feature = "ebpf"))]
+pub struct EbpfObserver {
+    programs_dir: std::path::PathBuf,
+}
+
+#[cfg(not(feature = "ebpf"))]
+impl EbpfObserver {
+    /// Create a new (stub) eBPF observer.
+    pub fn new(programs_dir: std::path::PathBuf) -> Self {
+        Self { programs_dir }
+    }
+}
+
+#[cfg(not(feature = "ebpf"))]
+#[async_trait::async_trait]
+impl Observer for EbpfObserver {
+    async fn start(&self, _tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "eBPF support is not compiled in (enable the 'ebpf' feature). programs_dir={:?}",
+            self.programs_dir
+        ))
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
 /// Mock observer for development and testing on macOS.
 pub struct MockObserver {
     events: Vec<ObserverEvent>,
@@ -500,6 +716,102 @@ mod tests {
         let observer = MockObserver::new();
         observer.stop().await.unwrap();
         observer.stop().await.unwrap(); // double stop should not fail
+    }
+
+    // -----------------------------------------------------------------------
+    // EbpfObserver tests (stub — no ebpf feature)
+    // -----------------------------------------------------------------------
+
+    #[cfg(not(feature = "ebpf"))]
+    mod ebpf_stub_tests {
+        use super::*;
+        use std::path::PathBuf;
+
+        #[test]
+        fn ebpf_observer_stub_constructs() {
+            let observer = EbpfObserver::new(PathBuf::from("/usr/lib/pact/bpf"));
+            assert_eq!(observer.programs_dir, PathBuf::from("/usr/lib/pact/bpf"));
+        }
+
+        #[tokio::test]
+        async fn ebpf_observer_stub_start_returns_error() {
+            let observer = EbpfObserver::new(PathBuf::from("/nonexistent"));
+            let (tx, _rx) = mpsc::channel(8);
+
+            let result = observer.start(tx).await;
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("eBPF support is not compiled in"),
+                "unexpected error: {err_msg}"
+            );
+        }
+
+        #[tokio::test]
+        async fn ebpf_observer_stub_stop_is_ok() {
+            let observer = EbpfObserver::new(PathBuf::from("/nonexistent"));
+            assert!(observer.stop().await.is_ok());
+        }
+    }
+
+    #[cfg(feature = "ebpf")]
+    mod ebpf_tests {
+        use super::*;
+        use std::path::PathBuf;
+
+        #[test]
+        fn ebpf_observer_constructs() {
+            let observer = EbpfObserver::new(PathBuf::from("/usr/lib/pact/bpf"));
+            assert_eq!(observer.programs_dir, PathBuf::from("/usr/lib/pact/bpf"));
+            assert!(!observer.running.load(std::sync::atomic::Ordering::SeqCst));
+        }
+
+        #[test]
+        fn ebpf_tracepoint_mapping() {
+            assert_eq!(
+                EbpfObserver::tracepoint_for_file("mount.o"),
+                Some(("syscalls", "sys_enter_mount"))
+            );
+            assert_eq!(
+                EbpfObserver::tracepoint_for_file("sethostname.o"),
+                Some(("syscalls", "sys_enter_sethostname"))
+            );
+            assert_eq!(
+                EbpfObserver::tracepoint_for_file("sysctl.o"),
+                Some(("syscalls", "sys_enter_sysctl"))
+            );
+            assert_eq!(EbpfObserver::tracepoint_for_file("unknown.o"), None);
+            assert_eq!(EbpfObserver::tracepoint_for_file("mount.c"), None);
+        }
+
+        #[tokio::test]
+        async fn ebpf_observer_start_with_empty_dir() {
+            let dir = tempfile::tempdir().unwrap();
+            let observer = EbpfObserver::new(dir.path().to_path_buf());
+            let (tx, _rx) = mpsc::channel(8);
+
+            // Empty directory — should succeed with 0 programs loaded.
+            let result = observer.start(tx).await;
+            assert!(result.is_ok());
+            observer.stop().await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn ebpf_observer_start_with_nonexistent_dir() {
+            let observer = EbpfObserver::new(PathBuf::from("/nonexistent/bpf/programs"));
+            let (tx, _rx) = mpsc::channel(8);
+
+            let result = observer.start(tx).await;
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn ebpf_observer_stop_is_idempotent() {
+            let dir = tempfile::tempdir().unwrap();
+            let observer = EbpfObserver::new(dir.path().to_path_buf());
+            observer.stop().await.unwrap();
+            observer.stop().await.unwrap();
+        }
     }
 
     // -----------------------------------------------------------------------

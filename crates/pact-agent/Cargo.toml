@@ -34,6 +34,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
 jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
 prometheus = { workspace = true }
 
 # Optional: eBPF observers

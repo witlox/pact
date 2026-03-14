@@ -204,6 +204,7 @@ mod tests {
             issuer: TEST_ISSUER.into(),
             audience: TEST_AUDIENCE.into(),
             hmac_secret: Some(TEST_SECRET.to_vec()),
+            jwks_url: None,
         }
     }
 

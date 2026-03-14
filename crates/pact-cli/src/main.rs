@@ -227,6 +227,10 @@ async fn main() {
             | Commands::Approve { .. }
             | Commands::Watch { .. }
             | Commands::Apply { .. }
+            | Commands::Exec { .. }
+            | Commands::Service { .. }
+            | Commands::Cap { .. }
+            | Commands::Extend { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -272,13 +276,23 @@ async fn main() {
         }
 
         // Commands that need agent gRPC
-        Commands::Exec { node: _, command } => {
+        Commands::Exec { node, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
                 Ok((cmd, args)) => {
-                    // TODO: resolve agent address from node_id (for now, assume localhost:9445)
-                    let agent_addr = "http://127.0.0.1:9445";
-                    match execute::connect_agent(agent_addr).await {
-                        Ok(channel) => execute::exec_remote(channel, &token, &cmd, &args).await,
+                    match execute::resolve_agent_address(
+                        &node,
+                        journal_channel.as_ref().unwrap(),
+                    )
+                    .await
+                    {
+                        Ok(agent_addr) => {
+                            match execute::connect_agent(&agent_addr).await {
+                                Ok(channel) => {
+                                    execute::exec_remote(channel, &token, &cmd, &args).await
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
                         Err(e) => Err(e),
                     }
                 }
@@ -340,8 +354,19 @@ async fn main() {
         }
         Commands::Service { action } => {
             // Service commands delegate to agent exec with systemctl/journalctl
-            let agent_addr = "http://127.0.0.1:9445";
-            match execute::connect_agent(agent_addr).await {
+            let agent_addr = match execute::resolve_agent_address(
+                "local",
+                journal_channel.as_ref().unwrap(),
+            )
+            .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => match action {
                     ServiceSubcommand::Status { name } => {
                         let svc = name.as_deref().unwrap_or("--all");
@@ -375,10 +400,22 @@ async fn main() {
                 Err(e) => Err(e),
             }
         }
-        Commands::Cap { node: _ } => {
+        Commands::Cap { node } => {
             // Cap queries agent's list of capabilities via ListCommands
-            let agent_addr = "http://127.0.0.1:9445";
-            match execute::connect_agent(agent_addr).await {
+            let node_id = node.as_deref().unwrap_or("local");
+            let agent_addr = match execute::resolve_agent_address(
+                node_id,
+                journal_channel.as_ref().unwrap(),
+            )
+            .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::list_agent_commands(channel).await,
                 Err(e) => Err(e),
             }
@@ -392,8 +429,19 @@ async fn main() {
             execute::apply(journal_client.as_mut().unwrap(), &spec, &principal, &role).await
         }
         Commands::Extend { mins } => {
-            let agent_addr = "http://127.0.0.1:9445";
-            match execute::connect_agent(agent_addr).await {
+            let agent_addr = match execute::resolve_agent_address(
+                "local",
+                journal_channel.as_ref().unwrap(),
+            )
+            .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::extend(channel, mins).await,
                 Err(e) => Err(e),
             }
