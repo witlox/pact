@@ -69,6 +69,16 @@ jobs:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  acceptance:
+    name: BDD Acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p pact-acceptance -- --test-threads=1
+
   e2e:
     name: E2E Integration
     runs-on: ubuntu-latest
