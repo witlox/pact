@@ -72,12 +72,14 @@ jobs:
   acceptance:
     name: BDD Acceptance
     runs-on: ubuntu-latest
+    needs: clippy
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p pact-acceptance -- --test-threads=1
+      - name: Run acceptance tests (cucumber, custom harness)
+        run: cargo test -p pact-acceptance
 
   e2e:
     name: E2E Integration
