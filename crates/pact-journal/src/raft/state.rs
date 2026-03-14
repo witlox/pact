@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use pact_common::types::{
-    AdminOperation, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId, Scope, VClusterId,
-    VClusterPolicy,
+    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId,
+    PendingApproval, Scope, VClusterId, VClusterPolicy,
 };
 use raft_hpc_core::StateMachineState;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,8 @@ pub struct JournalState {
     pub audit_log: Vec<AdminOperation>,
     /// Node-to-vCluster assignment mapping.
     pub node_assignments: HashMap<NodeId, VClusterId>,
+    /// Pending two-person approval requests.
+    pub pending_approvals: HashMap<String, PendingApproval>,
 }
 
 /// A conflict between a local entry and journal state on the same config key.
@@ -200,6 +202,31 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
             JournalCommand::AssignNode { node_id, vcluster_id } => {
                 self.node_assignments.insert(node_id, vcluster_id);
                 JournalResponse::Ok
+            }
+            JournalCommand::CreateApproval(approval) => {
+                let id = approval.approval_id.clone();
+                self.pending_approvals.insert(id, approval);
+                JournalResponse::Ok
+            }
+            JournalCommand::DecideApproval { approval_id, approver, decision } => {
+                match self.pending_approvals.get_mut(&approval_id) {
+                    Some(approval) => {
+                        if approval.status != ApprovalStatus::Pending {
+                            return JournalResponse::ValidationError {
+                                reason: format!(
+                                    "approval {} already {:?}",
+                                    approval_id, approval.status
+                                ),
+                            };
+                        }
+                        approval.status = decision;
+                        approval.approver = Some(approver);
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("approval {approval_id} not found"),
+                    },
+                }
             }
         }
     }
@@ -577,6 +604,98 @@ mod tests {
 
         let warnings = state.check_homogeneity("ml-training");
         assert!(warnings.is_empty());
+    }
+
+    // --- Approval persistence ---
+
+    #[test]
+    fn create_and_decide_approval() {
+        use pact_common::types::{ApprovalStatus, PendingApproval};
+
+        let mut state = JournalState::default();
+        let approval = PendingApproval {
+            approval_id: "apr-001".into(),
+            original_request: "commit".into(),
+            action: "commit".into(),
+            scope: Scope::VCluster("ml-training".into()),
+            requester: test_identity(),
+            approver: None,
+            status: ApprovalStatus::Pending,
+            created_at: Utc::now(),
+            expires_at: Utc::now() + chrono::Duration::hours(24),
+        };
+        let resp = state.apply(JournalCommand::CreateApproval(approval));
+        assert!(matches!(resp, JournalResponse::Ok));
+        assert_eq!(state.pending_approvals.len(), 1);
+        assert!(matches!(
+            state.pending_approvals["apr-001"].status,
+            ApprovalStatus::Pending
+        ));
+
+        // Approve it
+        let resp = state.apply(JournalCommand::DecideApproval {
+            approval_id: "apr-001".into(),
+            approver: Identity {
+                principal: "approver@example.com".into(),
+                principal_type: PrincipalType::Human,
+                role: "pact-platform-admin".into(),
+            },
+            decision: ApprovalStatus::Approved,
+        });
+        assert!(matches!(resp, JournalResponse::Ok));
+        assert!(matches!(
+            state.pending_approvals["apr-001"].status,
+            ApprovalStatus::Approved
+        ));
+        assert_eq!(
+            state.pending_approvals["apr-001"].approver.as_ref().unwrap().principal,
+            "approver@example.com"
+        );
+    }
+
+    #[test]
+    fn reject_decide_on_already_decided_approval() {
+        use pact_common::types::{ApprovalStatus, PendingApproval};
+
+        let mut state = JournalState::default();
+        let approval = PendingApproval {
+            approval_id: "apr-002".into(),
+            original_request: "exec".into(),
+            action: "exec".into(),
+            scope: Scope::Global,
+            requester: test_identity(),
+            approver: None,
+            status: ApprovalStatus::Pending,
+            created_at: Utc::now(),
+            expires_at: Utc::now() + chrono::Duration::hours(24),
+        };
+        state.apply(JournalCommand::CreateApproval(approval));
+
+        // Reject it
+        state.apply(JournalCommand::DecideApproval {
+            approval_id: "apr-002".into(),
+            approver: test_identity(),
+            decision: ApprovalStatus::Rejected,
+        });
+
+        // Try to approve already-rejected — should fail
+        let resp = state.apply(JournalCommand::DecideApproval {
+            approval_id: "apr-002".into(),
+            approver: test_identity(),
+            decision: ApprovalStatus::Approved,
+        });
+        assert!(matches!(resp, JournalResponse::ValidationError { .. }));
+    }
+
+    #[test]
+    fn reject_decide_on_nonexistent_approval() {
+        let mut state = JournalState::default();
+        let resp = state.apply(JournalCommand::DecideApproval {
+            approval_id: "nonexistent".into(),
+            approver: test_identity(),
+            decision: ApprovalStatus::Approved,
+        });
+        assert!(matches!(resp, JournalResponse::ValidationError { .. }));
     }
 
     // --- Existing tests ---

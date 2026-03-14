@@ -16,7 +16,7 @@ use tracing::{error, info};
 use pact_common::proto::journal::config_service_server::ConfigServiceServer;
 use pact_common::proto::policy::policy_service_server::PolicyServiceServer;
 use pact_common::proto::stream::boot_config_service_server::BootConfigServiceServer;
-use pact_journal::boot_service::BootConfigServiceImpl;
+use pact_journal::boot_service::{BootConfigServiceImpl, ConfigUpdateNotifier};
 use pact_journal::policy_service::PolicyServiceImpl;
 use pact_journal::service::ConfigServiceImpl;
 use pact_journal::telemetry::{telemetry_router, JournalMetrics, TelemetryState};
@@ -140,11 +140,14 @@ async fn main() -> anyhow::Result<()> {
             .ok();
     });
 
+    // Shared notifier for live config push to subscribers
+    let notifier = ConfigUpdateNotifier::default();
+
     // Start gRPC transport server with application services
     let raft_server = RaftTransportServer::new(raft.clone());
-    let config_service = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state));
+    let config_service = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
     let policy_service = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
-    let boot_service = BootConfigServiceImpl::new(Arc::clone(&state));
+    let boot_service = BootConfigServiceImpl::new(Arc::clone(&state), notifier);
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     let addr = listener.local_addr()?;
     info!(%addr, "gRPC server listening");

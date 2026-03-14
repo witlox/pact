@@ -17,7 +17,7 @@ use openraft::Raft;
 use pact_common::proto::journal::config_service_server::ConfigServiceServer;
 use pact_common::proto::policy::policy_service_server::PolicyServiceServer;
 use pact_common::proto::stream::boot_config_service_server::BootConfigServiceServer;
-use pact_journal::boot_service::BootConfigServiceImpl;
+use pact_journal::boot_service::{BootConfigServiceImpl, ConfigUpdateNotifier};
 use pact_journal::policy_service::PolicyServiceImpl;
 use pact_journal::service::ConfigServiceImpl;
 use pact_journal::telemetry::{telemetry_router, JournalMetrics, TelemetryState};
@@ -109,9 +109,11 @@ impl RaftCluster {
                 raft.initialize(members.clone()).await?;
             }
 
-            let config_svc = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state));
+            let notifier = ConfigUpdateNotifier::default();
+            let config_svc =
+                ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
             let policy_svc = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
-            let boot_svc = BootConfigServiceImpl::new(Arc::clone(&state));
+            let boot_svc = BootConfigServiceImpl::new(Arc::clone(&state), notifier.clone());
 
             // Start gRPC server
             let grpc_addr = grpc_addrs[i as usize].clone();
@@ -119,9 +121,10 @@ impl RaftCluster {
             let actual_grpc_addr = grpc_listener.local_addr()?.to_string();
 
             let raft_server = raft_hpc_core::RaftTransportServer::new(raft.clone());
-            let cs = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state));
+            let cs =
+                ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
             let ps = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
-            let bs = BootConfigServiceImpl::new(Arc::clone(&state));
+            let bs = BootConfigServiceImpl::new(Arc::clone(&state), notifier);
 
             let grpc_handle = tokio::spawn(async move {
                 let incoming = tokio_stream::wrappers::TcpListenerStream::new(grpc_listener);

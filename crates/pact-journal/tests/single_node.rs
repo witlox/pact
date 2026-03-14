@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tonic::Request;
 
-use pact_journal::boot_service::BootConfigServiceImpl;
+use pact_journal::boot_service::{BootConfigServiceImpl, ConfigUpdateNotifier};
 use pact_journal::policy_service::PolicyServiceImpl;
 use pact_journal::raft::types::{JournalCommand, JournalTypeConfig};
 use pact_journal::service::ConfigServiceImpl;
@@ -62,9 +62,10 @@ async fn bootstrap_single_node() -> (
     // Wait for leader election
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    let config_svc = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state));
+    let notifier = ConfigUpdateNotifier::default();
+    let config_svc = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
     let policy_svc = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
-    let boot_svc = BootConfigServiceImpl::new(Arc::clone(&state));
+    let boot_svc = BootConfigServiceImpl::new(Arc::clone(&state), notifier);
 
     (config_svc, policy_svc, boot_svc, state, temp)
 }
@@ -323,12 +324,54 @@ async fn subscribe_receives_raft_written_entries() {
         .await
         .unwrap();
 
+    // Stream stays open for live push, so collect with a timeout
     let mut stream = resp.into_inner();
     let mut updates = vec![];
-    while let Some(Ok(update)) = stream.next().await {
-        updates.push(update);
+    loop {
+        match tokio::time::timeout(tokio::time::Duration::from_millis(200), stream.next()).await {
+            Ok(Some(Ok(update))) => updates.push(update),
+            _ => break,
+        }
     }
     assert_eq!(updates.len(), 2);
     assert_eq!(updates[0].sequence, 0);
     assert_eq!(updates[1].sequence, 1);
+}
+
+#[tokio::test]
+async fn subscribe_receives_live_updates() {
+    let (config_svc, _, boot_svc, _, _tmp) = bootstrap_single_node().await;
+
+    // Write one entry before subscribing
+    config_svc.append_entry(Request::new(make_append_request(1))).await.unwrap();
+
+    // Subscribe from sequence 0 — should get catch-up entry
+    let resp = boot_svc
+        .subscribe_config_updates(Request::new(SubscribeRequest {
+            node_id: "node-001".into(),
+            vcluster_id: "ml-training".into(),
+            from_sequence: 0,
+        }))
+        .await
+        .unwrap();
+
+    let mut stream = resp.into_inner();
+
+    // Receive catch-up entry
+    let catchup = tokio::time::timeout(tokio::time::Duration::from_secs(1), stream.next())
+        .await
+        .expect("timeout waiting for catch-up")
+        .expect("stream ended")
+        .expect("stream error");
+    assert_eq!(catchup.sequence, 0);
+
+    // Write another entry — should arrive as live push
+    config_svc.append_entry(Request::new(make_append_request(2))).await.unwrap();
+
+    let live = tokio::time::timeout(tokio::time::Duration::from_secs(1), stream.next())
+        .await
+        .expect("timeout waiting for live update")
+        .expect("stream ended")
+        .expect("stream error");
+    assert_eq!(live.sequence, 1);
 }

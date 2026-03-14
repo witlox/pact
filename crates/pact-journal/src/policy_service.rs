@@ -16,7 +16,7 @@ use pact_common::proto::policy::{
     GetPolicyRequest, PolicyEvalRequest, PolicyEvalResponse, UpdatePolicyRequest,
     UpdatePolicyResponse, VClusterPolicy as ProtoVClusterPolicy,
 };
-use pact_common::types::{Identity, PrincipalType, Scope};
+use pact_common::types::{ApprovalStatus, Identity, PendingApproval, PrincipalType, Scope};
 use pact_policy::rbac::{RbacDecision, RbacEngine};
 
 use crate::raft::types::{JournalCommand, JournalResponse, JournalTypeConfig};
@@ -118,8 +118,26 @@ impl PolicyService for PolicyServiceImpl {
                 approval: None,
             })),
             RbacDecision::Defer => {
-                // Defer = two-person approval needed
+                // Defer = two-person approval needed — persist through Raft
                 let approval_id = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now();
+                let approval = PendingApproval {
+                    approval_id: approval_id.clone(),
+                    original_request: req.command.clone().unwrap_or_else(|| req.action.clone()),
+                    action: req.action.clone(),
+                    scope: scope.clone(),
+                    requester: identity,
+                    approver: None,
+                    status: ApprovalStatus::Pending,
+                    created_at: now,
+                    expires_at: now + chrono::Duration::hours(24),
+                };
+                let cmd = JournalCommand::CreateApproval(approval);
+                self.raft
+                    .client_write(cmd)
+                    .await
+                    .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
+
                 Ok(Response::new(PolicyEvalResponse {
                     authorized: false,
                     policy_ref: format!("rbac:deferred:{}", req.action),
@@ -273,6 +291,7 @@ mod tests {
         scope::Scope as ProtoScopeInner, Identity as ProtoIdentity, Scope as ProtoScope,
     };
     use pact_common::types::{RoleBinding, VClusterPolicy};
+    use openraft::impls::BasicNode;
     use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, StateMachineState};
 
     use crate::raft::types::JournalCommand;
@@ -313,6 +332,13 @@ mod tests {
         let sm = HpcStateMachine::with_snapshot_dir(Arc::clone(&state), snapshot_dir).unwrap();
         let network = GrpcNetworkFactory::new();
         let raft = Raft::new(1, config, network, log_store, sm).await.unwrap();
+
+        // Bootstrap as single-node cluster so Raft can elect a leader
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(1, BasicNode::new("127.0.0.1:0".to_string()));
+        raft.initialize(members).await.unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
         let svc = PolicyServiceImpl::new(raft, state);
         (svc, temp)
     }

@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+use tracing::debug;
 
 use pact_common::proto::stream::{
     boot_config_service_server::BootConfigService, BootConfigRequest, ConfigChunk, ConfigComplete,
@@ -20,14 +21,48 @@ use crate::JournalState;
 /// Maximum chunk size for overlay streaming (64 KB).
 const CHUNK_SIZE: usize = 64 * 1024;
 
+/// Notifier for broadcasting new config entries to subscribers.
+///
+/// Shared between ConfigServiceImpl (produces notifications after Raft writes)
+/// and BootConfigServiceImpl (consumes notifications for live push).
+#[derive(Clone)]
+pub struct ConfigUpdateNotifier {
+    sender: broadcast::Sender<ConfigUpdate>,
+}
+
+impl ConfigUpdateNotifier {
+    /// Create a new notifier with the given channel capacity.
+    pub fn new(capacity: usize) -> Self {
+        let (sender, _) = broadcast::channel(capacity);
+        Self { sender }
+    }
+
+    /// Send a config update notification. Returns the number of receivers.
+    pub fn notify(&self, update: ConfigUpdate) -> usize {
+        self.sender.send(update).unwrap_or(0)
+    }
+
+    /// Subscribe to receive config update notifications.
+    pub fn subscribe(&self) -> broadcast::Receiver<ConfigUpdate> {
+        self.sender.subscribe()
+    }
+}
+
+impl Default for ConfigUpdateNotifier {
+    fn default() -> Self {
+        Self::new(1024)
+    }
+}
+
 /// gRPC BootConfigService — serves boot config from local state.
 pub struct BootConfigServiceImpl {
     state: Arc<RwLock<JournalState>>,
+    notifier: ConfigUpdateNotifier,
 }
 
 impl BootConfigServiceImpl {
-    pub fn new(state: Arc<RwLock<JournalState>>) -> Self {
-        Self { state }
+    pub fn new(state: Arc<RwLock<JournalState>>, notifier: ConfigUpdateNotifier) -> Self {
+        Self { state, notifier }
     }
 }
 
@@ -158,9 +193,9 @@ impl BootConfigService for BootConfigServiceImpl {
 
     /// Subscribe to live config updates after boot.
     ///
-    /// Phase 1 implementation: serves existing entries >= from_sequence as a
-    /// catch-up stream, then closes. Full live push requires a broadcast channel
-    /// (added in Phase 2 when agents consume this).
+    /// Sends existing entries >= from_sequence as catch-up, then keeps the stream
+    /// open for live updates via broadcast channel. Stream closes when the client
+    /// disconnects.
     async fn subscribe_config_updates(
         &self,
         request: Request<SubscribeRequest>,
@@ -168,8 +203,8 @@ impl BootConfigService for BootConfigServiceImpl {
         let req = request.into_inner();
         let state = self.state.read().await;
 
-        // Catch-up: send entries from from_sequence onwards as vcluster_change updates
-        let updates: Vec<ConfigUpdate> = state
+        // Catch-up: send entries from from_sequence onwards
+        let catchup: Vec<ConfigUpdate> = state
             .entries
             .range(req.from_sequence..)
             .map(|(seq, entry)| {
@@ -189,11 +224,46 @@ impl BootConfigService for BootConfigServiceImpl {
             })
             .collect();
 
-        let (tx, rx) = tokio::sync::mpsc::channel(updates.len().max(1));
+        // Track highest sequence sent during catch-up to avoid duplicates
+        let mut last_sent_seq = catchup
+            .last()
+            .map_or_else(|| req.from_sequence.saturating_sub(1), |u| u.sequence);
+
+        drop(state);
+
+        // Subscribe to live updates before sending catch-up to avoid race
+        let mut live_rx = self.notifier.subscribe();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(catchup.len().max(64));
         tokio::spawn(async move {
-            for update in updates {
+            // Phase 1: catch-up
+            for update in catchup {
                 if tx.send(Ok(update)).await.is_err() {
-                    break;
+                    return; // client disconnected
+                }
+            }
+
+            // Phase 2: live push
+            loop {
+                match live_rx.recv().await {
+                    Ok(update) => {
+                        // Skip duplicates from catch-up window
+                        if update.sequence <= last_sent_seq {
+                            continue;
+                        }
+                        last_sent_seq = update.sequence;
+                        debug!(sequence = update.sequence, "Sending live config update");
+                        if tx.send(Ok(update)).await.is_err() {
+                            break; // client disconnected
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        debug!(skipped = n, "Subscriber lagged, some updates were lost");
+                        // Continue receiving — subscriber will need to re-sync
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        break; // journal shutting down
+                    }
                 }
             }
         });
@@ -285,7 +355,7 @@ mod tests {
     }
 
     fn test_service() -> BootConfigServiceImpl {
-        BootConfigServiceImpl::new(Arc::new(RwLock::new(boot_state())))
+        BootConfigServiceImpl::new(Arc::new(RwLock::new(boot_state())), ConfigUpdateNotifier::default())
     }
 
     #[tokio::test]
@@ -407,10 +477,15 @@ mod tests {
             .await
             .unwrap();
 
+        // Stream stays open for live push, collect with timeout
         let mut stream = resp.into_inner();
         let mut updates = vec![];
-        while let Some(Ok(update)) = stream.next().await {
-            updates.push(update);
+        loop {
+            match tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
+            {
+                Ok(Some(Ok(update))) => updates.push(update),
+                _ => break,
+            }
         }
 
         assert_eq!(updates.len(), 2);
@@ -430,10 +505,15 @@ mod tests {
             .await
             .unwrap();
 
+        // Stream stays open for live push, collect with timeout
         let mut stream = resp.into_inner();
         let mut updates = vec![];
-        while let Some(Ok(update)) = stream.next().await {
-            updates.push(update);
+        loop {
+            match tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await
+            {
+                Ok(Some(Ok(update))) => updates.push(update),
+                _ => break,
+            }
         }
 
         assert_eq!(updates.len(), 3); // all 3 entries
@@ -454,7 +534,7 @@ mod tests {
             },
         });
 
-        let svc = BootConfigServiceImpl::new(Arc::new(RwLock::new(state)));
+        let svc = BootConfigServiceImpl::new(Arc::new(RwLock::new(state)), ConfigUpdateNotifier::default());
         let resp = svc
             .stream_boot_config(Request::new(BootConfigRequest {
                 node_id: "node-x".into(),

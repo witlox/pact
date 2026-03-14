@@ -4,7 +4,8 @@ use std::fmt;
 use std::io::Cursor;
 
 use pact_common::types::{
-    AdminOperation, BootOverlay, ConfigEntry, ConfigState, NodeId, VClusterId, VClusterPolicy,
+    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, Identity, NodeId,
+    PendingApproval, VClusterId, VClusterPolicy,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +27,14 @@ pub enum JournalCommand {
     RecordOperation(AdminOperation),
     /// Assign a node to a vCluster.
     AssignNode { node_id: NodeId, vcluster_id: VClusterId },
+    /// Create a pending two-person approval request.
+    CreateApproval(PendingApproval),
+    /// Decide on a pending approval (approve or reject).
+    DecideApproval {
+        approval_id: String,
+        approver: Identity,
+        decision: ApprovalStatus,
+    },
 }
 
 impl fmt::Display for JournalCommand {
@@ -40,6 +49,10 @@ impl fmt::Display for JournalCommand {
             Self::RecordOperation(op) => write!(f, "RecordOperation({})", op.operation_id),
             Self::AssignNode { node_id, vcluster_id } => {
                 write!(f, "AssignNode({node_id} → {vcluster_id})")
+            }
+            Self::CreateApproval(a) => write!(f, "CreateApproval({})", a.approval_id),
+            Self::DecideApproval { approval_id, decision, .. } => {
+                write!(f, "DecideApproval({approval_id}, {decision:?})")
             }
         }
     }

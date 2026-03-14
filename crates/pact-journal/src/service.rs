@@ -17,6 +17,7 @@ use pact_common::proto::journal::{
     GetNodeStateRequest, GetOverlayRequest, ListEntriesRequest, NodeStateResponse, OverlayResponse,
 };
 
+use crate::boot_service::ConfigUpdateNotifier;
 use crate::raft::types::{JournalCommand, JournalResponse, JournalTypeConfig};
 use crate::JournalState;
 
@@ -24,11 +25,16 @@ use crate::JournalState;
 pub struct ConfigServiceImpl {
     raft: Raft<JournalTypeConfig>,
     state: Arc<RwLock<JournalState>>,
+    notifier: ConfigUpdateNotifier,
 }
 
 impl ConfigServiceImpl {
-    pub fn new(raft: Raft<JournalTypeConfig>, state: Arc<RwLock<JournalState>>) -> Self {
-        Self { raft, state }
+    pub fn new(
+        raft: Raft<JournalTypeConfig>,
+        state: Arc<RwLock<JournalState>>,
+        notifier: ConfigUpdateNotifier,
+    ) -> Self {
+        Self { raft, state, notifier }
     }
 }
 
@@ -55,6 +61,25 @@ impl ConfigService for ConfigServiceImpl {
 
         match resp.data {
             JournalResponse::EntryAppended { sequence } => {
+                // Notify subscribers of the new entry
+                let state = self.state.read().await;
+                if let Some(entry) = state.entries.get(&sequence) {
+                    let serialized = serde_json::to_vec(entry).unwrap_or_default();
+                    let update = pact_common::proto::stream::ConfigUpdate {
+                        sequence,
+                        timestamp: Some(prost_types::Timestamp {
+                            seconds: entry.timestamp.timestamp(),
+                            nanos: entry.timestamp.timestamp_subsec_nanos() as i32,
+                        }),
+                        update: Some(
+                            pact_common::proto::stream::config_update::Update::VclusterChange(
+                                serialized,
+                            ),
+                        ),
+                    };
+                    drop(state);
+                    self.notifier.notify(update);
+                }
                 Ok(Response::new(AppendEntryResponse { sequence }))
             }
             JournalResponse::ValidationError { reason } => Err(Status::failed_precondition(reason)),
@@ -177,22 +202,113 @@ fn proto_to_config_entry(
 
     let ttl_seconds = proto.ttl.map(|d| d.seconds as u32);
 
+    let principal_type = match author.principal_type.as_str() {
+        "agent" | "Agent" => PrincipalType::Agent,
+        "service" | "Service" => PrincipalType::Service,
+        _ => PrincipalType::Human,
+    };
+
+    let state_delta = proto.state_delta.map(proto_to_state_delta);
+
     Ok(pact_common::types::ConfigEntry {
         sequence: proto.sequence,
         timestamp: chrono::Utc::now(), // Server assigns timestamp
         entry_type,
         scope,
-        author: Identity {
-            principal: author.principal,
-            principal_type: PrincipalType::Human, // TODO: derive from author.principal_type
-            role: author.role,
-        },
+        author: Identity { principal: author.principal, principal_type, role: author.role },
         parent: proto.parent,
-        state_delta: None, // TODO: convert proto StateDelta when needed
+        state_delta,
         policy_ref: if proto.policy_ref.is_empty() { None } else { Some(proto.policy_ref) },
         ttl_seconds,
         emergency_reason: proto.emergency_reason,
     })
+}
+
+/// Convert proto StateDelta to domain StateDelta.
+fn proto_to_state_delta(proto: pact_common::proto::config::StateDelta) -> pact_common::types::StateDelta {
+    use pact_common::types::{DeltaAction, DeltaItem, StateDelta};
+
+    fn proto_action(a: i32) -> DeltaAction {
+        match a {
+            1 => DeltaAction::Add,
+            2 => DeltaAction::Remove,
+            3 => DeltaAction::Modify,
+            _ => DeltaAction::Modify, // UNSPECIFIED → Modify as safe default
+        }
+    }
+
+    StateDelta {
+        mounts: proto
+            .mounts
+            .into_iter()
+            .map(|m| DeltaItem {
+                action: proto_action(m.action),
+                key: m.path,
+                value: m.declared.map(|s| format!("{}:{} ({})", s.fs_type, s.source, s.options)),
+                previous: m.actual.map(|s| format!("{}:{} ({})", s.fs_type, s.source, s.options)),
+            })
+            .collect(),
+        files: proto
+            .files
+            .into_iter()
+            .map(|f| DeltaItem {
+                action: proto_action(f.action),
+                key: f.path,
+                value: f.content_hash,
+                previous: f.owner,
+            })
+            .collect(),
+        network: proto
+            .network
+            .into_iter()
+            .map(|n| DeltaItem {
+                action: proto_action(n.action),
+                key: n.interface,
+                value: n.detail,
+                previous: None,
+            })
+            .collect(),
+        services: proto
+            .services
+            .into_iter()
+            .map(|s| DeltaItem {
+                action: proto_action(s.action),
+                key: s.name,
+                value: s.declared_state,
+                previous: s.actual_state,
+            })
+            .collect(),
+        kernel: proto
+            .kernel
+            .into_iter()
+            .map(|k| DeltaItem {
+                action: proto_action(k.action),
+                key: k.key,
+                value: k.declared_value,
+                previous: k.actual_value,
+            })
+            .collect(),
+        packages: proto
+            .packages
+            .into_iter()
+            .map(|p| DeltaItem {
+                action: proto_action(p.action),
+                key: p.name,
+                value: p.version,
+                previous: None,
+            })
+            .collect(),
+        gpu: proto
+            .gpu
+            .into_iter()
+            .map(|g| DeltaItem {
+                action: proto_action(g.action),
+                key: g.gpu_index.to_string(),
+                value: g.detail,
+                previous: None,
+            })
+            .collect(),
+    }
 }
 
 /// Convert a domain ConfigEntry to the proto ConfigEntry type.
@@ -229,6 +345,14 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
 
     let ttl = entry.ttl_seconds.map(|s| prost_types::Duration { seconds: i64::from(s), nanos: 0 });
 
+    let principal_type = match entry.author.principal_type {
+        pact_common::types::PrincipalType::Human => "Human",
+        pact_common::types::PrincipalType::Agent => "Agent",
+        pact_common::types::PrincipalType::Service => "Service",
+    };
+
+    let state_delta = entry.state_delta.as_ref().map(state_delta_to_proto);
+
     ProtoConfigEntry {
         sequence: entry.sequence,
         timestamp: Some(prost_types::Timestamp {
@@ -239,14 +363,101 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
         scope,
         author: Some(ProtoIdentity {
             principal: entry.author.principal.clone(),
-            principal_type: format!("{:?}", entry.author.principal_type),
+            principal_type: principal_type.to_string(),
             role: entry.author.role.clone(),
         }),
         parent: entry.parent,
-        state_delta: None, // TODO: convert StateDelta when needed
+        state_delta,
         policy_ref: entry.policy_ref.clone().unwrap_or_default(),
         ttl,
         emergency_reason: entry.emergency_reason.clone(),
+    }
+}
+
+/// Convert domain StateDelta to proto StateDelta.
+fn state_delta_to_proto(delta: &pact_common::types::StateDelta) -> pact_common::proto::config::StateDelta {
+    use pact_common::proto::config::{
+        FileDelta, GpuDelta, KernelDelta, MountDelta, NetworkDelta, PackageDelta, ServiceDelta,
+    };
+    use pact_common::types::DeltaAction;
+
+    fn domain_action(a: &DeltaAction) -> i32 {
+        match a {
+            DeltaAction::Add => 1,
+            DeltaAction::Remove => 2,
+            DeltaAction::Modify => 3,
+        }
+    }
+
+    pact_common::proto::config::StateDelta {
+        mounts: delta
+            .mounts
+            .iter()
+            .map(|m| MountDelta {
+                path: m.key.clone(),
+                action: domain_action(&m.action),
+                declared: None, // DeltaItem uses flat key/value; mount specs not round-trippable
+                actual: None,
+            })
+            .collect(),
+        files: delta
+            .files
+            .iter()
+            .map(|f| FileDelta {
+                path: f.key.clone(),
+                action: domain_action(&f.action),
+                content_hash: f.value.clone(),
+                mode: None,
+                owner: f.previous.clone(),
+            })
+            .collect(),
+        network: delta
+            .network
+            .iter()
+            .map(|n| NetworkDelta {
+                interface: n.key.clone(),
+                action: domain_action(&n.action),
+                detail: n.value.clone(),
+            })
+            .collect(),
+        services: delta
+            .services
+            .iter()
+            .map(|s| ServiceDelta {
+                name: s.key.clone(),
+                action: domain_action(&s.action),
+                declared_state: s.value.clone(),
+                actual_state: s.previous.clone(),
+            })
+            .collect(),
+        kernel: delta
+            .kernel
+            .iter()
+            .map(|k| KernelDelta {
+                key: k.key.clone(),
+                action: domain_action(&k.action),
+                declared_value: k.value.clone(),
+                actual_value: k.previous.clone(),
+            })
+            .collect(),
+        packages: delta
+            .packages
+            .iter()
+            .map(|p| PackageDelta {
+                name: p.key.clone(),
+                action: domain_action(&p.action),
+                version: p.value.clone(),
+            })
+            .collect(),
+        gpu: delta
+            .gpu
+            .iter()
+            .map(|g| GpuDelta {
+                gpu_index: g.key.parse().unwrap_or(0),
+                action: domain_action(&g.action),
+                detail: g.value.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -364,6 +575,102 @@ mod tests {
     }
 
     #[test]
+    fn state_delta_roundtrip() {
+        use pact_common::types::{DeltaAction, DeltaItem, StateDelta};
+
+        let delta = StateDelta {
+            mounts: vec![DeltaItem {
+                action: DeltaAction::Add,
+                key: "/data/scratch".into(),
+                value: Some("tmpfs:none (size=1G)".into()),
+                previous: None,
+            }],
+            files: vec![DeltaItem {
+                action: DeltaAction::Modify,
+                key: "/etc/ntp.conf".into(),
+                value: Some("abc123".into()),
+                previous: Some("root".into()),
+            }],
+            network: vec![],
+            services: vec![DeltaItem {
+                action: DeltaAction::Add,
+                key: "nvidia-persistenced".into(),
+                value: Some("running".into()),
+                previous: None,
+            }],
+            kernel: vec![DeltaItem {
+                action: DeltaAction::Modify,
+                key: "vm.swappiness".into(),
+                value: Some("10".into()),
+                previous: Some("60".into()),
+            }],
+            packages: vec![],
+            gpu: vec![DeltaItem {
+                action: DeltaAction::Add,
+                key: "0".into(),
+                value: Some("GH200 healthy".into()),
+                previous: None,
+            }],
+        };
+
+        let mut entry = test_entry(0, EntryType::Commit);
+        entry.state_delta = Some(delta);
+
+        // Domain → proto
+        let proto = config_entry_to_proto(&entry);
+        assert!(proto.state_delta.is_some());
+        let proto_delta = proto.state_delta.as_ref().unwrap();
+        assert_eq!(proto_delta.mounts.len(), 1);
+        assert_eq!(proto_delta.mounts[0].path, "/data/scratch");
+        assert_eq!(proto_delta.mounts[0].action, 1); // Add
+        assert_eq!(proto_delta.files.len(), 1);
+        assert_eq!(proto_delta.services.len(), 1);
+        assert_eq!(proto_delta.kernel.len(), 1);
+        assert_eq!(proto_delta.gpu.len(), 1);
+        assert_eq!(proto_delta.gpu[0].gpu_index, 0);
+
+        // Proto → domain (via proto_to_config_entry)
+        let back = proto_to_config_entry(proto).unwrap();
+        let back_delta = back.state_delta.unwrap();
+        assert_eq!(back_delta.mounts.len(), 1);
+        assert_eq!(back_delta.mounts[0].key, "/data/scratch");
+        assert!(matches!(back_delta.mounts[0].action, DeltaAction::Add));
+        assert_eq!(back_delta.services.len(), 1);
+        assert_eq!(back_delta.services[0].key, "nvidia-persistenced");
+        assert_eq!(back_delta.kernel.len(), 1);
+        assert_eq!(back_delta.kernel[0].value, Some("10".into()));
+        assert_eq!(back_delta.kernel[0].previous, Some("60".into()));
+        assert_eq!(back_delta.gpu.len(), 1);
+        assert_eq!(back_delta.gpu[0].key, "0");
+    }
+
+    #[test]
+    fn principal_type_conversion() {
+        let proto = ProtoConfigEntry {
+            sequence: 0,
+            timestamp: None,
+            entry_type: 1,
+            scope: None,
+            author: Some(pact_common::proto::config::Identity {
+                principal: "mcp-agent@pact".into(),
+                principal_type: "Agent".into(),
+                role: "pact-service-ai".into(),
+            }),
+            parent: None,
+            state_delta: None,
+            policy_ref: String::new(),
+            ttl: None,
+            emergency_reason: None,
+        };
+        let entry = proto_to_config_entry(proto).unwrap();
+        assert!(matches!(entry.author.principal_type, PrincipalType::Agent));
+
+        // Roundtrip: domain → proto should preserve "Agent"
+        let back = config_entry_to_proto(&entry);
+        assert_eq!(back.author.unwrap().principal_type, "Agent");
+    }
+
+    #[test]
     fn proto_ttl_conversion() {
         let mut entry = test_entry(0, EntryType::Commit);
         entry.ttl_seconds = Some(3600);
@@ -394,7 +701,8 @@ mod tests {
         let sm = HpcStateMachine::with_snapshot_dir(Arc::clone(&state), snapshot_dir).unwrap();
         let network = GrpcNetworkFactory::new();
         let raft = Raft::new(1, config, network, log_store, sm).await.unwrap();
-        let svc = ConfigServiceImpl::new(raft, state);
+        let notifier = crate::boot_service::ConfigUpdateNotifier::default();
+        let svc = ConfigServiceImpl::new(raft, state, notifier);
         (svc, temp)
     }
 
