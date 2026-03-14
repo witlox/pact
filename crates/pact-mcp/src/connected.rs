@@ -1,6 +1,6 @@
-//! Connected MCP dispatch — wires tool calls to journal gRPC.
+//! Connected MCP dispatch — wires tool calls to journal and agent gRPC.
 //!
-//! When the MCP server has a journal connection, tool calls go through
+//! When the MCP server has connections, tool calls go through
 //! real gRPC instead of returning stubs.
 
 use tokio_stream::StreamExt;
@@ -14,28 +14,88 @@ use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 use pact_common::proto::journal::{
     AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest,
 };
+use pact_common::proto::shell::{
+    exec_output, shell_service_client::ShellServiceClient, ExecRequest, ListCommandsRequest,
+};
 
 use crate::protocol::{tool_result, ToolCallResult};
 
-/// Dispatch a tool call using a real journal gRPC connection.
+/// Holds optional connections to journal and agent.
+pub struct Connections {
+    pub journal: Option<Channel>,
+    pub agent: Option<Channel>,
+}
+
+/// Dispatch a tool call using available gRPC connections.
 ///
-/// Returns `None` if the tool is not journal-connected (agent tools),
-/// in which case the caller should fall back to the stub dispatch.
+/// Returns `None` only if the tool name is unknown.
+pub async fn dispatch_connected(
+    name: &str,
+    arguments: &serde_json::Value,
+    connections: &Connections,
+) -> Option<ToolCallResult> {
+    let no_journal = || tool_result("Error: not connected to journal".to_string(), true);
+    let no_agent = || tool_result("Error: not connected to agent".to_string(), true);
+
+    match name {
+        // Journal-targeted tools
+        "pact_status" => Some(match &connections.journal {
+            Some(ch) => handle_status(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_log" => Some(match &connections.journal {
+            Some(ch) => handle_log(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_commit" => Some(match &connections.journal {
+            Some(ch) => handle_commit(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_rollback" => Some(match &connections.journal {
+            Some(ch) => handle_rollback(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_diff" => Some(match &connections.journal {
+            Some(ch) => handle_diff(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_emergency" => Some(match &connections.journal {
+            Some(ch) => handle_emergency(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_apply" => Some(match &connections.journal {
+            Some(ch) => handle_apply(arguments, ch).await,
+            None => no_journal(),
+        }),
+        "pact_query_fleet" => Some(match &connections.journal {
+            Some(ch) => handle_query_fleet(arguments, ch).await,
+            None => no_journal(),
+        }),
+        // Agent-targeted tools
+        "pact_exec" => Some(match &connections.agent {
+            Some(ch) => handle_exec(arguments, ch).await,
+            None => no_agent(),
+        }),
+        "pact_cap" => Some(match &connections.agent {
+            Some(ch) => handle_cap(arguments, ch).await,
+            None => no_agent(),
+        }),
+        "pact_service_status" => Some(match &connections.agent {
+            Some(ch) => handle_service_status(arguments, ch).await,
+            None => no_agent(),
+        }),
+        _ => None,
+    }
+}
+
+/// Keep the old function for backwards compatibility with e2e tests.
 pub async fn dispatch_tool_connected(
     name: &str,
     arguments: &serde_json::Value,
     channel: &Channel,
 ) -> Option<ToolCallResult> {
-    match name {
-        "pact_status" => Some(handle_status(arguments, channel).await),
-        "pact_log" => Some(handle_log(arguments, channel).await),
-        "pact_commit" => Some(handle_commit(arguments, channel).await),
-        "pact_rollback" => Some(handle_rollback(arguments, channel).await),
-        "pact_diff" => Some(handle_diff(arguments, channel).await),
-        "pact_emergency" => Some(handle_emergency(arguments, channel).await),
-        // Agent-targeted tools fall through to stub
-        _ => None,
-    }
+    let connections = Connections { journal: Some(channel.clone()), agent: None };
+    dispatch_connected(name, arguments, &connections).await
 }
 
 async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
@@ -232,6 +292,211 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
             tool_result(format!("Emergency mode ENDED (seq:{seq})"), false)
         }
         Err(e) => tool_result(format!("Emergency end failed: {e}"), true),
+    }
+}
+
+// --- Agent-targeted tool handlers ---
+
+async fn handle_exec(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+    let node = match args.get("node").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return tool_result("Error: node ID required".to_string(), true),
+    };
+    let command = match args.get("command").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return tool_result("Error: command required".to_string(), true),
+    };
+
+    // Split command into binary + args
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    let (cmd, cmd_args) = match parts.split_first() {
+        Some((first, rest)) => (*first, rest.iter().map(ToString::to_string).collect::<Vec<_>>()),
+        None => return tool_result("Error: empty command".to_string(), true),
+    };
+
+    let mut client = ShellServiceClient::new(channel.clone());
+    let mut request = tonic::Request::new(ExecRequest {
+        command: cmd.to_string(),
+        args: cmd_args,
+    });
+    // MCP server authenticates as pact-service-ai
+    if let Ok(val) = "Bearer mcp-service-token".parse() {
+        request.metadata_mut().insert("authorization", val);
+    }
+
+    match client.exec(request).await {
+        Ok(resp) => {
+            let mut stream = resp.into_inner();
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let mut exit_code = 0i32;
+
+            while let Some(Ok(o)) = stream.next().await {
+                match o.output {
+                    Some(exec_output::Output::Stdout(data)) => stdout.extend_from_slice(&data),
+                    Some(exec_output::Output::Stderr(data)) => stderr.extend_from_slice(&data),
+                    Some(exec_output::Output::ExitCode(code)) => exit_code = code,
+                    Some(exec_output::Output::Error(e)) => {
+                        return tool_result(format!("Exec error: {e}"), true);
+                    }
+                    None => {}
+                }
+            }
+
+            let mut output = format!("[{node}] {command}\n");
+            if !stdout.is_empty() {
+                output.push_str(&String::from_utf8_lossy(&stdout));
+            }
+            if !stderr.is_empty() {
+                output.push_str(&format!("\nstderr: {}", String::from_utf8_lossy(&stderr)));
+            }
+            if exit_code != 0 {
+                output.push_str(&format!("\n(exit code: {exit_code})"));
+            }
+            tool_result(output, exit_code != 0)
+        }
+        Err(e) => tool_result(format!("Exec failed: {e}"), true),
+    }
+}
+
+async fn handle_cap(_args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+    let mut client = ShellServiceClient::new(channel.clone());
+    match client
+        .list_commands(tonic::Request::new(ListCommandsRequest {}))
+        .await
+    {
+        Ok(resp) => {
+            let commands = resp.into_inner().commands;
+            if commands.is_empty() {
+                return tool_result("No commands available.".to_string(), false);
+            }
+            let mut output = format!("{} whitelisted commands:\n", commands.len());
+            for cmd in &commands {
+                let state = if cmd.state_changing { "[state-changing]" } else { "" };
+                output.push_str(&format!("  {} {state} {}\n", cmd.command, cmd.description));
+            }
+            tool_result(output, false)
+        }
+        Err(e) => tool_result(format!("Cap query failed: {e}"), true),
+    }
+}
+
+async fn handle_service_status(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+    let service = args.get("service").and_then(|v| v.as_str()).unwrap_or("--all");
+    let mut client = ShellServiceClient::new(channel.clone());
+
+    let mut request = tonic::Request::new(ExecRequest {
+        command: "systemctl".to_string(),
+        args: vec!["status".to_string(), service.to_string()],
+    });
+    if let Ok(val) = "Bearer mcp-service-token".parse() {
+        request.metadata_mut().insert("authorization", val);
+    }
+
+    match client.exec(request).await {
+        Ok(resp) => {
+            let mut stream = resp.into_inner();
+            let mut output = String::new();
+            while let Some(Ok(o)) = stream.next().await {
+                match o.output {
+                    Some(exec_output::Output::Stdout(data)) => {
+                        output.push_str(&String::from_utf8_lossy(&data));
+                    }
+                    Some(exec_output::Output::Error(e)) => {
+                        return tool_result(format!("Service status error: {e}"), true);
+                    }
+                    _ => {}
+                }
+            }
+            tool_result(output, false)
+        }
+        Err(e) => tool_result(format!("Service status failed: {e}"), true),
+    }
+}
+
+async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+    let scope = match args.get("scope").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return tool_result("Error: scope required".to_string(), true),
+    };
+    let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("mcp-apply");
+    let config = match args.get("config") {
+        Some(c) => c,
+        None => return tool_result("Error: config required".to_string(), true),
+    };
+
+    // Serialize config as the policy_ref for the entry
+    let config_str = serde_json::to_string(config).unwrap_or_default();
+
+    let mut client = ConfigServiceClient::new(channel.clone());
+    let entry = ProtoConfigEntry {
+        sequence: 0,
+        timestamp: None,
+        entry_type: 1, // Commit
+        scope: Some(ProtoScopeMsg {
+            scope: Some(ProtoScope::VclusterId(scope.to_string())),
+        }),
+        author: Some(ProtoIdentity {
+            principal: "mcp-agent".to_string(),
+            principal_type: "Agent".to_string(),
+            role: "pact-service-ai".to_string(),
+        }),
+        parent: None,
+        state_delta: None,
+        policy_ref: format!("{message}: {config_str}"),
+        ttl: None,
+        emergency_reason: None,
+    };
+
+    match client
+        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+        .await
+    {
+        Ok(resp) => {
+            let seq = resp.into_inner().sequence;
+            tool_result(format!("Applied to {scope} (seq:{seq}): {message}"), false)
+        }
+        Err(e) => tool_result(format!("Apply failed: {e}"), true),
+    }
+}
+
+async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+    // Query fleet by listing all entries and filtering by vCluster
+    let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("all");
+    let scope = if vcluster == "all" {
+        None
+    } else {
+        Some(ProtoScopeMsg {
+            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
+        })
+    };
+
+    let mut client = ConfigServiceClient::new(channel.clone());
+    match client
+        .list_entries(tonic::Request::new(ListEntriesRequest {
+            scope,
+            from_sequence: None,
+            to_sequence: None,
+            limit: Some(100),
+        }))
+        .await
+    {
+        Ok(resp) => {
+            let mut stream = resp.into_inner();
+            let mut entries = Vec::new();
+            while let Some(Ok(entry)) = stream.next().await {
+                entries.push(format_entry(&entry));
+            }
+            if entries.is_empty() {
+                tool_result(format!("No entries for vCluster: {vcluster}"), false)
+            } else {
+                tool_result(
+                    format!("Fleet query ({vcluster}): {} entries\n{}", entries.len(), entries.join("\n")),
+                    false,
+                )
+            }
+        }
+        Err(e) => tool_result(format!("Fleet query failed: {e}"), true),
     }
 }
 

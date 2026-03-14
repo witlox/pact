@@ -29,23 +29,16 @@ async fn main() {
     // Try to connect to journal (from PACT_ENDPOINT env or default)
     let endpoint =
         std::env::var("PACT_ENDPOINT").unwrap_or_else(|_| "http://localhost:9443".to_string());
-    let channel = match Channel::from_shared(endpoint.clone()) {
-        Ok(ch) => match ch.connect().await {
-            Ok(channel) => {
-                eprintln!("pact-mcp: connected to journal at {endpoint}");
-                Some(channel)
-            }
-            Err(e) => {
-                warn!(error = %e, "Journal unreachable — running in stub mode");
-                eprintln!("pact-mcp: journal unreachable, running in stub mode");
-                None
-            }
-        },
-        Err(e) => {
-            warn!(error = %e, "Invalid endpoint — running in stub mode");
-            eprintln!("pact-mcp: invalid endpoint, running in stub mode");
-            None
-        }
+    let channel = try_connect(&endpoint, "journal").await;
+
+    // Try to connect to agent (from PACT_AGENT_ENDPOINT env or default)
+    let agent_endpoint =
+        std::env::var("PACT_AGENT_ENDPOINT").unwrap_or_else(|_| "http://localhost:9445".to_string());
+    let agent_channel = try_connect(&agent_endpoint, "agent").await;
+
+    let connections = connected::Connections {
+        journal: channel,
+        agent: agent_channel,
     };
 
     eprintln!("pact-mcp: starting MCP server on stdio");
@@ -79,15 +72,35 @@ async fn main() {
             }
         };
 
-        let response = handle_request(&request, channel.as_ref()).await;
+        let response = handle_request(&request, &connections).await;
         let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
         let _ = stdout.flush();
     }
 }
 
+async fn try_connect(endpoint: &str, label: &str) -> Option<Channel> {
+    match Channel::from_shared(endpoint.to_string()) {
+        Ok(ch) => match ch.connect().await {
+            Ok(channel) => {
+                eprintln!("pact-mcp: connected to {label} at {endpoint}");
+                Some(channel)
+            }
+            Err(e) => {
+                warn!(error = %e, label, "Endpoint unreachable");
+                eprintln!("pact-mcp: {label} unreachable at {endpoint}");
+                None
+            }
+        },
+        Err(e) => {
+            warn!(error = %e, label, "Invalid endpoint");
+            None
+        }
+    }
+}
+
 async fn handle_request(
     request: &JsonRpcRequest,
-    channel: Option<&Channel>,
+    connections: &connected::Connections,
 ) -> protocol::JsonRpcResponse {
     match request.method.as_str() {
         "initialize" => {
@@ -122,15 +135,13 @@ async fn handle_request(
             };
 
             // Try connected dispatch first, fall back to stubs
-            let result = if let Some(ch) = channel {
-                match connected::dispatch_tool_connected(&params.name, &params.arguments, ch).await
+            let result =
+                match connected::dispatch_connected(&params.name, &params.arguments, connections)
+                    .await
                 {
                     Some(r) => r,
                     None => tools::dispatch_tool(&params.name, &params.arguments),
-                }
-            } else {
-                tools::dispatch_tool(&params.name, &params.arguments)
-            };
+                };
 
             success_response(request.id.clone(), serde_json::to_value(result).unwrap())
         }

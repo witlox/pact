@@ -366,12 +366,22 @@ async fn mcp_connected_dispatch() {
     let result = result.expect("pact_emergency should be handled");
     assert!(result.is_error, "P8: AI agents cannot start emergency");
 
-    // Unknown tool — should return None (not handled by connected dispatch)
+    // Agent tool without agent connection — should return error (no agent)
     let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
         "pact_exec",
+        &serde_json::json!({"node": "n1", "command": "ps"}),
+        &channel,
+    )
+    .await;
+    let result = result.expect("pact_exec should be handled");
+    assert!(result.is_error, "exec without agent should error");
+
+    // Unknown tool — should return None
+    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
+        "unknown_tool",
         &serde_json::json!({}),
         &channel,
     )
     .await;
-    assert!(result.is_none(), "agent tools should fall through");
+    assert!(result.is_none(), "unknown tools should fall through");
 }
