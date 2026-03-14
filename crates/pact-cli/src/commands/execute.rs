@@ -399,6 +399,54 @@ pub async fn approve_decide(
     }
 }
 
+/// Execute `pact watch` — live event stream from journal.
+pub async fn watch(channel: &Channel, vcluster: &str) -> anyhow::Result<String> {
+    use pact_common::proto::stream::{
+        boot_config_service_client::BootConfigServiceClient, config_update, SubscribeRequest,
+    };
+
+    let mut client = BootConfigServiceClient::new(channel.clone());
+    let resp = client
+        .subscribe_config_updates(tonic::Request::new(SubscribeRequest {
+            node_id: String::new(), // watch all nodes
+            vcluster_id: vcluster.to_string(),
+            from_sequence: 0,
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("watch subscribe failed: {e}"))?;
+
+    let mut stream = resp.into_inner();
+    println!("Watching config updates for vCluster: {vcluster} (Ctrl-C to stop)\n");
+
+    while let Some(result) = tokio_stream::StreamExt::next(&mut stream).await {
+        match result {
+            Ok(update) => {
+                let ts = update.timestamp.as_ref().map_or_else(
+                    || "---".to_string(),
+                    |t| {
+                        chrono::DateTime::from_timestamp(t.seconds, 0)
+                            .map_or_else(|| "---".to_string(), |dt| dt.format("%H:%M:%S").to_string())
+                    },
+                );
+                let kind = match &update.update {
+                    Some(config_update::Update::VclusterChange(_)) => "OVERLAY",
+                    Some(config_update::Update::NodeChange(_)) => "NODE_DELTA",
+                    Some(config_update::Update::PolicyChange(_)) => "POLICY",
+                    Some(config_update::Update::BlacklistChange(_)) => "BLACKLIST",
+                    None => "UNKNOWN",
+                };
+                println!("[{ts}] seq:{:<6} {kind}", update.sequence);
+            }
+            Err(e) => {
+                eprintln!("Stream error: {e}");
+                break;
+            }
+        }
+    }
+
+    Ok("Watch ended.".to_string())
+}
+
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.
 fn parse_scope_filter(s: &str) -> ProtoScopeMsg {
     if let Some(node) = s.strip_prefix("node:") {

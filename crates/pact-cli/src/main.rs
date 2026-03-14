@@ -225,6 +225,7 @@ async fn main() {
             | Commands::Diff { .. }
             | Commands::Emergency { .. }
             | Commands::Approve { .. }
+            | Commands::Watch { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -364,24 +365,68 @@ async fn main() {
                 }
             }
         }
-        Commands::Service { action } => match action {
-            ServiceSubcommand::Status { name } => {
-                Ok(format!("service status {name:?} (not yet wired)"))
+        Commands::Service { action } => {
+            // Service commands delegate to agent exec with systemctl/journalctl
+            let agent_addr = "http://127.0.0.1:9445";
+            match execute::connect_agent(agent_addr).await {
+                Ok(channel) => {
+                    let token = config
+                        .resolve_token()
+                        .unwrap_or_else(|_| "dev-token".to_string());
+                    match action {
+                        ServiceSubcommand::Status { name } => {
+                            let svc = name.as_deref().unwrap_or("--all");
+                            execute::exec_remote(
+                                channel,
+                                &token,
+                                "systemctl",
+                                &["status".into(), svc.into()],
+                            )
+                            .await
+                        }
+                        ServiceSubcommand::Restart { name } => {
+                            execute::exec_remote(
+                                channel,
+                                &token,
+                                "systemctl",
+                                &["restart".into(), name],
+                            )
+                            .await
+                        }
+                        ServiceSubcommand::Logs { name } => {
+                            execute::exec_remote(
+                                channel,
+                                &token,
+                                "journalctl",
+                                &["-u".into(), name, "-n".into(), "50".into()],
+                            )
+                            .await
+                        }
+                    }
+                }
+                Err(e) => Err(e),
             }
-            ServiceSubcommand::Restart { name } => {
-                Ok(format!("service restart {name} (not yet wired)"))
-            }
-            ServiceSubcommand::Logs { name } => {
-                Ok(format!("service logs {name} (not yet wired)"))
-            }
-        },
-        Commands::Cap { node } => Ok(format!("cap {node:?} (not yet wired)")),
-        Commands::Watch { vcluster } => {
-            Ok(format!("watch {vcluster:?} (not yet wired)"))
         }
-        Commands::Apply { spec } => Ok(format!("apply {spec} (not yet wired)")),
+        Commands::Cap { node: _ } => {
+            // Cap queries agent's list of capabilities via ListCommands
+            let agent_addr = "http://127.0.0.1:9445";
+            match execute::connect_agent(agent_addr).await {
+                Ok(channel) => execute::list_agent_commands(channel).await,
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Watch { vcluster } => {
+            let vc = vcluster
+                .as_deref()
+                .or(config.default_vcluster.as_deref())
+                .unwrap_or("default");
+            execute::watch(journal_channel.as_ref().unwrap(), vc).await
+        }
+        Commands::Apply { spec } => {
+            Ok(format!("apply {spec} (spec format not yet defined)"))
+        }
         Commands::Extend { mins } => {
-            Ok(format!("extend {mins} min (not yet wired)"))
+            Ok(format!("extend {mins} min (agent commit window RPC not yet defined)"))
         }
     };
 
