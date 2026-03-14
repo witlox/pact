@@ -360,6 +360,73 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F15: IdP unreachable
+
+**Trigger:** Keycloak or other OIDC provider is down or unreachable from user's client machine.
+
+**Impact:**
+- No new logins possible (no token issuance)
+- No token refresh when current tokens expire
+- After last valid access token expires, no authenticated CLI access
+
+**Degradation:**
+- Existing valid access tokens continue to work until expiry (server validates JWT offline via cached JWKS)
+- Cached OIDC discovery document used for flow selection
+- PACT admins use break-glass (pact emergency)
+- Lattice users cannot authenticate; scheduling commands fail
+
+**Recovery:**
+- IdP restored → users run login again
+- No data loss, no state corruption
+
+**Detection:**
+- Login command reports IdP connection failure
+- Token refresh failures logged as warnings
+
+---
+
+## F16: Token cache deleted or corrupted
+
+**Trigger:** User's local token cache file is removed, corrupted, or has wrong permissions.
+
+**Impact:**
+- All authenticated commands fail until re-login
+- No data loss (cache is derived state, re-creatable via login)
+
+**Degradation:**
+- Fail closed: no attempt to use corrupted tokens
+- Clear error message directing user to run login
+
+**Recovery:**
+- User runs login again
+- Cache recreated with correct permissions
+
+**Detection:**
+- CLI reports authentication required with reason (missing/corrupt/permissions)
+
+---
+
+## F17: IdP discovery document stale
+
+**Trigger:** Cached OIDC discovery document contains outdated endpoint URLs or signing key references after IdP reconfiguration.
+
+**Impact:**
+- Login may fail (wrong token endpoint)
+- Token refresh may fail (wrong token endpoint)
+
+**Degradation:**
+- On any auth failure: clear cached discovery, report error, suggest retry
+- Manual IdP config override available as fallback
+
+**Recovery:**
+- IdP reachable → fresh discovery document fetched on next attempt
+- Manual config override bypasses discovery entirely
+
+**Detection:**
+- Auth failure after previously successful login suggests stale discovery
+
+---
+
 ## Severity Classification
 
 | Failure | Severity | Auto-Recovery | Human Required |
@@ -378,3 +445,6 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 | F12: GPU failure | Medium | Partial (detect + report) | If hardware |
 | F13: Merge conflict on reconnect | Medium | Partial (grace period fallback) | If conflict |
 | F14: Promote conflicts | Low | No (blocks until resolved) | Yes (acknowledge) |
+| F15: IdP unreachable | High | Yes (when IdP returns) | No (break-glass for admins) |
+| F16: Cache deleted/corrupted | Low | Yes (re-login) | No |
+| F17: Stale discovery doc | Low | Yes (clear + refetch) | No |

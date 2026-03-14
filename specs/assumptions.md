@@ -59,6 +59,21 @@ rbash with PATH restriction, PROMPT_COMMAND audit, and optional mount namespace 
 ### A-Sec5: Whitelist maintenance is operational [Accepted]
 The default whitelist covers common diagnostics. Per-vCluster additions are an operational concern. Learning mode helps identify needed additions.
 
+### A-Sec6: IdP supports OIDC discovery [Accepted — with fallback]
+The IdP exposes `/.well-known/openid-configuration`. The hpc-auth crate uses this to discover supported grant types and endpoints. If discovery is unavailable, the crate falls back to a cached discovery document, then to manual configuration. Stale cached documents are cleared on auth failure.
+
+### A-Sec7: Public client registration possible [Accepted — with fallback]
+Authorization Code + PKCE requires a public client (no client_secret). If the IdP only supports confidential clients, the crate falls back to embedded client_secret, then Device Code, then manual paste. See cascading fallback chain in auth_login.feature.
+
+### A-Sec8: Device Code grant available [Accepted — with fallback]
+Headless environments need Device Code flow. If the IdP doesn't support it, the crate falls back to manual paste (user copies authorization code from browser). Degraded UX but functional.
+
+### A-Sec9: Refresh tokens issued by IdP [Accepted — with fallback]
+Silent token refresh depends on the IdP issuing refresh tokens. If not issued, every access token expiry requires full re-authentication. Browser session may still be active, making re-auth a single click.
+
+### A-Sec10: Token cache on user's local workstation [Validated]
+Token cache is stored on the user's client machine (workstation/laptop), not on HPC nodes. No shared filesystem concerns. Cache is per-IdP-endpoint to support multiple deployments.
+
 ---
 
 ## Consistency Assumptions

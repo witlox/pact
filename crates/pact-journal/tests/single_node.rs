@@ -327,11 +327,10 @@ async fn subscribe_receives_raft_written_entries() {
     // Stream stays open for live push, so collect with a timeout
     let mut stream = resp.into_inner();
     let mut updates = vec![];
-    loop {
-        match tokio::time::timeout(tokio::time::Duration::from_millis(200), stream.next()).await {
-            Ok(Some(Ok(update))) => updates.push(update),
-            _ => break,
-        }
+    while let Ok(Some(Ok(update))) =
+        tokio::time::timeout(tokio::time::Duration::from_millis(200), stream.next()).await
+    {
+        updates.push(update);
     }
     assert_eq!(updates.len(), 2);
     assert_eq!(updates[0].sequence, 0);

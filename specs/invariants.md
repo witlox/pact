@@ -209,3 +209,31 @@ In co-located mode, pact journal quorum is running before lattice starts. Pact d
 
 ### R3: Quorum ports
 Pact Raft port: 9444. Pact gRPC port: 9443. These are separate from lattice ports (9000/50051/8080).
+
+---
+
+## Authentication Invariants (hpc-auth crate)
+
+### Auth1: No unauthenticated commands
+No authenticated command executes without a valid, non-expired access token. Only `login`, `logout`, `version`, and `--help` are exempt.
+
+### Auth2: Fail closed on cache corruption
+Corrupted or unreadable token cache is rejected. The user must re-login. The system never attempts to use a token from a corrupt cache.
+
+### Auth3: Concurrent refresh safety
+Multiple processes may refresh the same token concurrently. This is safe because refresh is idempotent at the IdP. Last writer wins on the cache file.
+
+### Auth4: Logout always clears local state
+Logout always deletes the local cached tokens, regardless of whether the IdP revocation succeeds.
+
+### Auth5: Cache file permissions
+Token cache files must have 0600 permissions. In strict mode (PACT default): reject cache with wrong permissions. In lenient mode (Lattice default): warn, fix, proceed.
+
+### Auth6: Per-server token isolation
+Token cache is keyed by server URL. Tokens for different servers never collide or cross-contaminate.
+
+### Auth7: Refresh tokens never logged
+Refresh tokens and client secrets are never included in log output, error messages, or diagnostics.
+
+### Auth8: Cascading flow fallback
+The auth crate selects the best available OAuth2 flow: Auth Code + PKCE → Confidential Client → Device Code → Manual Paste. The cascade is driven by IdP discovery, not hardcoded.

@@ -707,7 +707,7 @@ mod tests {
     fn format_proto_entry_commit() {
         let entry = ProtoConfigEntry {
             sequence: 42,
-            timestamp: Some(prost_types::Timestamp { seconds: 1741622400, nanos: 0 }),
+            timestamp: Some(prost_types::Timestamp { seconds: 1_741_622_400, nanos: 0 }),
             entry_type: 1,
             scope: Some(ProtoScopeMsg {
                 scope: Some(ProtoScope::VclusterId("ml-training".into())),
@@ -770,7 +770,7 @@ mod tests {
             &Claims {
                 sub: "alice@example.com".into(),
                 pact_role: "pact-ops-ml-training".into(),
-                exp: 9999999999,
+                exp: 9_999_999_999,
             },
             &EncodingKey::from_secret(b"test-secret"),
         )
