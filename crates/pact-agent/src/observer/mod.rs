@@ -306,10 +306,7 @@ pub struct EbpfObserver {
 impl EbpfObserver {
     /// Create a new eBPF observer that loads programs from the given directory.
     pub fn new(programs_dir: PathBuf) -> Self {
-        Self {
-            programs_dir,
-            running: Arc::new(AtomicBool::new(false)),
-        }
+        Self { programs_dir, running: Arc::new(AtomicBool::new(false)) }
     }
 
     /// Map a BPF object filename to the tracepoint it should attach to.
@@ -434,10 +431,7 @@ impl Observer for EbpfObserver {
             loaded_count += 1;
         }
 
-        tracing::info!(
-            count = loaded_count,
-            "EbpfObserver: finished loading BPF programs"
-        );
+        tracing::info!(count = loaded_count, "EbpfObserver: finished loading BPF programs");
 
         // Spawn a task that reads perf events (skeleton — real implementation
         // would read from perf event arrays defined in the BPF programs).

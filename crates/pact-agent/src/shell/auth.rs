@@ -126,10 +126,7 @@ impl JwksCache {
     /// Create a new JWKS cache with the default TTL of 1 hour.
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(JwksCacheInner {
-                keys: Vec::new(),
-                fetched_at: None,
-            })),
+            inner: Arc::new(RwLock::new(JwksCacheInner { keys: Vec::new(), fetched_at: None })),
             ttl: Duration::from_secs(3600),
         }
     }
@@ -137,10 +134,7 @@ impl JwksCache {
     /// Create a JWKS cache with a custom TTL (useful for testing).
     pub fn with_ttl(ttl: Duration) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(JwksCacheInner {
-                keys: Vec::new(),
-                fetched_at: None,
-            })),
+            inner: Arc::new(RwLock::new(JwksCacheInner { keys: Vec::new(), fetched_at: None })),
             ttl,
         }
     }
@@ -216,10 +210,8 @@ impl JwksCache {
             )));
         }
 
-        let jwks: JwksResponse = resp
-            .json()
-            .await
-            .map_err(|e| AuthError::JwksFetchError(e.to_string()))?;
+        let jwks: JwksResponse =
+            resp.json().await.map_err(|e| AuthError::JwksFetchError(e.to_string()))?;
 
         Ok(jwks.keys)
     }
@@ -290,8 +282,8 @@ pub async fn validate_token_with_jwks(
     }
 
     // Decode the JWT header to find the kid.
-    let header = jsonwebtoken::decode_header(token)
-        .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
+    let header =
+        jsonwebtoken::decode_header(token).map_err(|e| AuthError::InvalidToken(e.to_string()))?;
 
     let token_kid = header.kid.as_deref();
 
@@ -311,9 +303,7 @@ pub async fn validate_token_with_jwks(
         .collect();
 
     if matching_keys.is_empty() {
-        return Err(AuthError::InvalidToken(format!(
-            "no matching JWKS key for kid {token_kid:?}"
-        )));
+        return Err(AuthError::InvalidToken(format!("no matching JWKS key for kid {token_kid:?}")));
     }
 
     let mut last_err = AuthError::NoSigningKey;

@@ -28,11 +28,7 @@ pub struct JournalClient {
 impl JournalClient {
     /// Connect to the first reachable journal endpoint.
     pub async fn connect(config: &JournalConnectionConfig) -> anyhow::Result<Self> {
-        let tls = if config.tls_enabled {
-            Some(load_tls_config(config)?)
-        } else {
-            None
-        };
+        let tls = if config.tls_enabled { Some(load_tls_config(config)?) } else { None };
         let channel = Self::connect_channel(&config.endpoints, tls.as_ref()).await?;
         Ok(Self {
             config: ConfigServiceClient::new(channel.clone()),

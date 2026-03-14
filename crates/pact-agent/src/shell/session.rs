@@ -312,22 +312,26 @@ impl PtyHandle {
     pub fn write(&self, data: &[u8]) -> Result<usize, SessionError> {
         use std::io::Write;
         use std::os::fd::AsFd;
-        let mut file = std::fs::File::from(self.master_fd.as_fd().try_clone_to_owned().map_err(
-            |e| SessionError::PtyFailed(format!("clone master fd: {e}")),
-        )?);
-        file.write(data)
-            .map_err(|e| SessionError::PtyFailed(format!("write to master fd: {e}")))
+        let mut file = std::fs::File::from(
+            self.master_fd
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(|e| SessionError::PtyFailed(format!("clone master fd: {e}")))?,
+        );
+        file.write(data).map_err(|e| SessionError::PtyFailed(format!("write to master fd: {e}")))
     }
 
     /// Read data from the master side of the PTY (receives output from the shell).
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SessionError> {
         use std::io::Read;
         use std::os::fd::AsFd;
-        let mut file = std::fs::File::from(self.master_fd.as_fd().try_clone_to_owned().map_err(
-            |e| SessionError::PtyFailed(format!("clone master fd: {e}")),
-        )?);
-        file.read(buf)
-            .map_err(|e| SessionError::PtyFailed(format!("read from master fd: {e}")))
+        let mut file = std::fs::File::from(
+            self.master_fd
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(|e| SessionError::PtyFailed(format!("clone master fd: {e}")))?,
+        );
+        file.read(buf).map_err(|e| SessionError::PtyFailed(format!("read from master fd: {e}")))
     }
 
     /// Resize the PTY terminal window via TIOCSWINSZ ioctl.
@@ -415,8 +419,7 @@ pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     #[allow(unsafe_code)]
     unsafe {
         cmd.pre_exec(move || {
-            nix::unistd::setsid()
-                .map_err(|e| std::io::Error::other(e))?;
+            nix::unistd::setsid().map_err(std::io::Error::other)?;
             if nix::libc::dup2(slave_raw_fd, 0) < 0 {
                 return Err(std::io::Error::last_os_error());
             }

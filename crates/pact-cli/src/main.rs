@@ -279,20 +279,13 @@ async fn main() {
         Commands::Exec { node, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
                 Ok((cmd, args)) => {
-                    match execute::resolve_agent_address(
-                        &node,
-                        journal_channel.as_ref().unwrap(),
-                    )
-                    .await
+                    match execute::resolve_agent_address(&node, journal_channel.as_ref().unwrap())
+                        .await
                     {
-                        Ok(agent_addr) => {
-                            match execute::connect_agent(&agent_addr).await {
-                                Ok(channel) => {
-                                    execute::exec_remote(channel, &token, &cmd, &args).await
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
+                        Ok(agent_addr) => match execute::connect_agent(&agent_addr).await {
+                            Ok(channel) => execute::exec_remote(channel, &token, &cmd, &args).await,
+                            Err(e) => Err(e),
+                        },
                         Err(e) => Err(e),
                     }
                 }
@@ -354,18 +347,16 @@ async fn main() {
         }
         Commands::Service { action } => {
             // Service commands delegate to agent exec with systemctl/journalctl
-            let agent_addr = match execute::resolve_agent_address(
-                "local",
-                journal_channel.as_ref().unwrap(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address("local", journal_channel.as_ref().unwrap())
+                    .await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => match action {
                     ServiceSubcommand::Status { name } => {
@@ -403,18 +394,16 @@ async fn main() {
         Commands::Cap { node } => {
             // Cap queries agent's list of capabilities via ListCommands
             let node_id = node.as_deref().unwrap_or("local");
-            let agent_addr = match execute::resolve_agent_address(
-                node_id,
-                journal_channel.as_ref().unwrap(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address(node_id, journal_channel.as_ref().unwrap())
+                    .await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::list_agent_commands(channel).await,
                 Err(e) => Err(e),
@@ -429,18 +418,16 @@ async fn main() {
             execute::apply(journal_client.as_mut().unwrap(), &spec, &principal, &role).await
         }
         Commands::Extend { mins } => {
-            let agent_addr = match execute::resolve_agent_address(
-                "local",
-                journal_channel.as_ref().unwrap(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address("local", journal_channel.as_ref().unwrap())
+                    .await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::extend(channel, mins).await,
                 Err(e) => Err(e),
