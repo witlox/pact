@@ -3,7 +3,10 @@
 //! See `docs/architecture/cli-design.md` for command reference.
 
 use clap::{Parser, Subcommand};
-use pact_cli::commands::CliConfig;
+use pact_cli::commands::config::CliConfig;
+use pact_cli::commands::execute;
+
+use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 
 /// pact — promise-based config management for HPC/AI infrastructure.
 #[derive(Parser, Debug)]
@@ -186,7 +189,9 @@ enum ServiceSubcommand {
     },
 }
 
-fn main() {
+#[tokio::main]
+#[allow(clippy::too_many_lines)]
+async fn main() {
     let cli = Cli::parse();
 
     // Load config with precedence: CLI args > env vars > config file > defaults
@@ -202,7 +207,7 @@ fn main() {
         config.default_vcluster = Some(vcluster);
     }
 
-    // Initialize tracing
+    // Initialize tracing (only WARN+ unless RUST_LOG is set)
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -210,85 +215,128 @@ fn main() {
         )
         .init();
 
-    // Dispatch to command handlers.
-    // Each handler will create a gRPC client and execute the request.
-    // For now, print the parsed command for verification.
-    match cli.command {
-        Commands::Status { node, vcluster } => {
-            let vc = vcluster.as_deref().or(config.default_vcluster.as_deref());
-            eprintln!(
-                "pact status: node={:?}, vcluster={:?}, endpoint={}",
-                node, vc, config.endpoint,
-            );
-            eprintln!("(gRPC client not yet connected — journal endpoint needed)");
+    // Commands that need the journal gRPC client
+    let needs_journal = matches!(
+        cli.command,
+        Commands::Status { .. }
+            | Commands::Log { .. }
+            | Commands::Commit { .. }
+            | Commands::Rollback { .. }
+            | Commands::Diff { .. }
+    );
+
+    let mut journal_client = if needs_journal {
+        match execute::connect(&config).await {
+            Ok(channel) => Some(ConfigServiceClient::new(channel)),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
-        Commands::Diff { node, committed } => {
-            eprintln!("pact diff: node={node:?}, committed={committed}");
+    } else {
+        None
+    };
+
+    let result = match cli.command {
+        Commands::Status { node, .. } => {
+            let node_id = node.unwrap_or_else(|| "local".to_string());
+            execute::status(journal_client.as_mut().unwrap(), &node_id).await
         }
         Commands::Log { n, scope } => {
-            eprintln!("pact log: n={n}, scope={scope:?}");
+            execute::log(journal_client.as_mut().unwrap(), n, scope.as_deref()).await
         }
         Commands::Commit { m } => {
-            eprintln!("pact commit: message={m:?}");
+            let vcluster = config
+                .default_vcluster
+                .as_deref()
+                .unwrap_or("default")
+                .to_string();
+            // TODO: resolve principal/role from OIDC token
+            execute::commit(
+                journal_client.as_mut().unwrap(),
+                &m,
+                &vcluster,
+                "cli-user",
+                "pact-platform-admin",
+            )
+            .await
         }
         Commands::Rollback { seq } => {
-            eprintln!("pact rollback: target_seq={seq}");
+            let vcluster = config
+                .default_vcluster
+                .as_deref()
+                .unwrap_or("default")
+                .to_string();
+            execute::rollback(
+                journal_client.as_mut().unwrap(),
+                seq,
+                &vcluster,
+                "cli-user",
+                "pact-platform-admin",
+            )
+            .await
         }
+        Commands::Diff { node, committed: _ } => {
+            // Diff queries entries, not a dedicated RPC
+            let scope_filter = node.as_deref().map(|n| format!("node:{n}"));
+            execute::log(journal_client.as_mut().unwrap(), 50, scope_filter.as_deref()).await
+        }
+
+        // Commands that need agent gRPC (not yet wired)
         Commands::Exec { node, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
-                Ok((cmd, args)) => {
-                    eprintln!("pact exec {node}: {cmd} {args:?}");
+                Ok((cmd, _args)) => {
+                    Ok(format!("exec on {node}: {cmd} (agent gRPC not yet wired)"))
                 }
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => Err(anyhow::anyhow!("{e}")),
             }
         }
         Commands::Shell { node } => {
-            eprintln!("pact shell: node={node}");
+            Ok(format!("shell on {node} (agent gRPC not yet wired)"))
         }
         Commands::Emergency { action } => match action {
             EmergencySubcommand::Start { reason } => {
-                eprintln!("pact emergency start: reason={reason:?}");
+                Ok(format!("emergency start: {reason} (not yet wired)"))
             }
             EmergencySubcommand::End { force } => {
-                eprintln!("pact emergency end: force={force}");
+                Ok(format!("emergency end (force={force}) (not yet wired)"))
             }
         },
         Commands::Approve { action } => match action {
-            ApproveSubcommand::List => {
-                eprintln!("pact approve list");
-            }
+            ApproveSubcommand::List => Ok("approve list (not yet wired)".to_string()),
             ApproveSubcommand::Accept { id } => {
-                eprintln!("pact approve accept: id={id}");
+                Ok(format!("approve accept {id} (not yet wired)"))
             }
             ApproveSubcommand::Deny { id, m } => {
-                eprintln!("pact approve deny: id={id}, reason={m:?}");
+                Ok(format!("approve deny {id}: {m} (not yet wired)"))
             }
         },
         Commands::Service { action } => match action {
             ServiceSubcommand::Status { name } => {
-                eprintln!("pact service status: name={name:?}");
+                Ok(format!("service status {name:?} (not yet wired)"))
             }
             ServiceSubcommand::Restart { name } => {
-                eprintln!("pact service restart: name={name}");
+                Ok(format!("service restart {name} (not yet wired)"))
             }
             ServiceSubcommand::Logs { name } => {
-                eprintln!("pact service logs: name={name}");
+                Ok(format!("service logs {name} (not yet wired)"))
             }
         },
-        Commands::Cap { node } => {
-            eprintln!("pact cap: node={node:?}");
-        }
+        Commands::Cap { node } => Ok(format!("cap {node:?} (not yet wired)")),
         Commands::Watch { vcluster } => {
-            eprintln!("pact watch: vcluster={vcluster:?}");
+            Ok(format!("watch {vcluster:?} (not yet wired)"))
         }
-        Commands::Apply { spec } => {
-            eprintln!("pact apply: spec={spec}");
-        }
+        Commands::Apply { spec } => Ok(format!("apply {spec} (not yet wired)")),
         Commands::Extend { mins } => {
-            eprintln!("pact extend: mins={mins}");
+            Ok(format!("extend {mins} min (not yet wired)"))
+        }
+    };
+
+    match result {
+        Ok(output) => println!("{output}"),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
         }
     }
 }

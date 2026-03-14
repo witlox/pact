@@ -10,6 +10,7 @@ pub mod config;
 pub mod diff;
 pub mod emergency;
 pub mod exec;
+pub mod execute;
 pub mod log;
 pub mod rollback;
 pub mod service;
