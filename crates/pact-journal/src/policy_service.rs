@@ -13,8 +13,9 @@ use tracing::debug;
 
 use pact_common::proto::policy::{
     policy_service_server::PolicyService, ApprovalRequired as ProtoApprovalRequired,
-    GetPolicyRequest, PolicyEvalRequest, PolicyEvalResponse, UpdatePolicyRequest,
-    UpdatePolicyResponse, VClusterPolicy as ProtoVClusterPolicy,
+    DecideApprovalRequest, DecideApprovalResponse, GetPolicyRequest, ListApprovalsRequest,
+    ListApprovalsResponse, PendingApprovalEntry, PolicyEvalRequest, PolicyEvalResponse,
+    UpdatePolicyRequest, UpdatePolicyResponse, VClusterPolicy as ProtoVClusterPolicy,
 };
 use pact_common::types::{ApprovalStatus, Identity, PendingApproval, PrincipalType, Scope};
 use pact_policy::rbac::{RbacDecision, RbacEngine};
@@ -197,6 +198,103 @@ impl PolicyService for PolicyServiceImpl {
                 }))
             }
             _ => Err(Status::internal("unexpected response for UpdatePolicy")),
+        }
+    }
+
+    /// List pending approval requests from local state (J8).
+    async fn list_pending_approvals(
+        &self,
+        request: Request<ListApprovalsRequest>,
+    ) -> Result<Response<ListApprovalsResponse>, Status> {
+        let req = request.into_inner();
+        let state = self.state.read().await;
+
+        let approvals: Vec<PendingApprovalEntry> = state
+            .pending_approvals
+            .values()
+            .filter(|a| {
+                // Optionally filter by scope
+                if let Some(ref filter) = req.scope_filter {
+                    match &a.scope {
+                        Scope::VCluster(vc) => vc == filter,
+                        _ => filter.is_empty(),
+                    }
+                } else {
+                    true
+                }
+            })
+            .map(|a| {
+                let scope_str = match &a.scope {
+                    Scope::Global => "global".to_string(),
+                    Scope::VCluster(vc) => format!("vc:{vc}"),
+                    Scope::Node(n) => format!("node:{n}"),
+                };
+                PendingApprovalEntry {
+                    approval_id: a.approval_id.clone(),
+                    action: a.action.clone(),
+                    scope: scope_str,
+                    requester: a.requester.principal.clone(),
+                    status: format!("{:?}", a.status),
+                    created_at: Some(prost_types::Timestamp {
+                        seconds: a.created_at.timestamp(),
+                        nanos: 0,
+                    }),
+                    expires_at: Some(prost_types::Timestamp {
+                        seconds: a.expires_at.timestamp(),
+                        nanos: 0,
+                    }),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(ListApprovalsResponse { approvals }))
+    }
+
+    /// Decide on a pending approval through Raft (J7).
+    async fn decide_approval(
+        &self,
+        request: Request<DecideApprovalRequest>,
+    ) -> Result<Response<DecideApprovalResponse>, Status> {
+        let req = request.into_inner();
+
+        let approver_proto = req.approver.ok_or_else(|| {
+            Status::invalid_argument("approver identity required")
+        })?;
+        let approver = Self::proto_to_identity(&approver_proto);
+
+        let decision = match req.decision.as_str() {
+            "approved" => ApprovalStatus::Approved,
+            "rejected" => ApprovalStatus::Rejected,
+            other => {
+                return Err(Status::invalid_argument(
+                    format!("invalid decision '{other}', must be 'approved' or 'rejected'"),
+                ))
+            }
+        };
+
+        let cmd = JournalCommand::DecideApproval {
+            approval_id: req.approval_id.clone(),
+            approver,
+            decision,
+        };
+        let resp = self
+            .raft
+            .client_write(cmd)
+            .await
+            .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
+
+        match resp.data {
+            JournalResponse::Ok => Ok(Response::new(DecideApprovalResponse {
+                success: true,
+                error: None,
+            })),
+            JournalResponse::ValidationError { reason } => {
+                Ok(Response::new(DecideApprovalResponse {
+                    success: false,
+                    error: Some(reason),
+                }))
+            }
+            _ => Err(Status::internal("unexpected response for DecideApproval")),
         }
     }
 }

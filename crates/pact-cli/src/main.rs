@@ -223,11 +223,13 @@ async fn main() {
             | Commands::Commit { .. }
             | Commands::Rollback { .. }
             | Commands::Diff { .. }
+            | Commands::Emergency { .. }
+            | Commands::Approve { .. }
     );
 
-    let mut journal_client = if needs_journal {
+    let journal_channel = if needs_journal {
         match execute::connect(&config).await {
-            Ok(channel) => Some(ConfigServiceClient::new(channel)),
+            Ok(channel) => Some(channel),
             Err(e) => {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
@@ -236,6 +238,8 @@ async fn main() {
     } else {
         None
     };
+    let mut journal_client =
+        journal_channel.as_ref().map(|ch| ConfigServiceClient::new(ch.clone()));
 
     let result = match cli.command {
         Commands::Status { node, .. } => {
@@ -304,23 +308,62 @@ async fn main() {
         Commands::Shell { node } => {
             Ok(format!("shell on {node} (agent gRPC not yet wired)"))
         }
-        Commands::Emergency { action } => match action {
-            EmergencySubcommand::Start { reason } => {
-                Ok(format!("emergency start: {reason} (not yet wired)"))
+        Commands::Emergency { action } => {
+            let vcluster = config
+                .default_vcluster
+                .as_deref()
+                .unwrap_or("default")
+                .to_string();
+            match action {
+                EmergencySubcommand::Start { reason } => {
+                    execute::emergency_start(
+                        journal_client.as_mut().unwrap(),
+                        &reason,
+                        &vcluster,
+                        "cli-user",
+                        "pact-platform-admin",
+                    )
+                    .await
+                }
+                EmergencySubcommand::End { force: _ } => {
+                    execute::emergency_end(
+                        journal_client.as_mut().unwrap(),
+                        &vcluster,
+                        "cli-user",
+                        "pact-platform-admin",
+                    )
+                    .await
+                }
             }
-            EmergencySubcommand::End { force } => {
-                Ok(format!("emergency end (force={force}) (not yet wired)"))
+        }
+        Commands::Approve { action } => {
+            let channel = journal_channel.as_ref().unwrap();
+            match action {
+                ApproveSubcommand::List => execute::approve_list(channel, None).await,
+                ApproveSubcommand::Accept { id } => {
+                    execute::approve_decide(
+                        channel,
+                        &id,
+                        "approved",
+                        "cli-user",
+                        "pact-platform-admin",
+                        None,
+                    )
+                    .await
+                }
+                ApproveSubcommand::Deny { id, m } => {
+                    execute::approve_decide(
+                        channel,
+                        &id,
+                        "rejected",
+                        "cli-user",
+                        "pact-platform-admin",
+                        Some(&m),
+                    )
+                    .await
+                }
             }
-        },
-        Commands::Approve { action } => match action {
-            ApproveSubcommand::List => Ok("approve list (not yet wired)".to_string()),
-            ApproveSubcommand::Accept { id } => {
-                Ok(format!("approve accept {id} (not yet wired)"))
-            }
-            ApproveSubcommand::Deny { id, m } => {
-                Ok(format!("approve deny {id}: {m} (not yet wired)"))
-            }
-        },
+        }
         Commands::Service { action } => match action {
             ServiceSubcommand::Status { name } => {
                 Ok(format!("service status {name:?} (not yet wired)"))

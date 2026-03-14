@@ -8,6 +8,8 @@ service PolicyService {
   rpc Evaluate(PolicyEvalRequest) returns (PolicyEvalResponse);
   rpc GetEffectivePolicy(GetPolicyRequest) returns (VClusterPolicy);
   rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);
+  rpc ListPendingApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+  rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse);
 }
 
 message PolicyEvalRequest {
@@ -72,4 +74,34 @@ message UpdatePolicyResponse {
   bool success = 1;
   string policy_ref = 2;
   optional string error = 3;
+}
+
+message ListApprovalsRequest {
+  optional string scope_filter = 1;  // vCluster filter, or empty for all
+}
+
+message ListApprovalsResponse {
+  repeated PendingApprovalEntry approvals = 1;
+}
+
+message PendingApprovalEntry {
+  string approval_id = 1;
+  string action = 2;
+  string scope = 3;
+  string requester = 4;
+  string status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}
+
+message DecideApprovalRequest {
+  string approval_id = 1;
+  pact.config.Identity approver = 2;
+  string decision = 3;  // "approved" or "rejected"
+  optional string reason = 4;
+}
+
+message DecideApprovalResponse {
+  bool success = 1;
+  optional string error = 2;
 }

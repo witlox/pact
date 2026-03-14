@@ -252,6 +252,153 @@ pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
     Ok(output)
 }
 
+/// Execute `pact emergency start` — append EmergencyStart entry through Raft.
+pub async fn emergency_start(
+    client: &mut ConfigServiceClient<Channel>,
+    reason: &str,
+    vcluster: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    let entry = ProtoConfigEntry {
+        sequence: 0,
+        timestamp: None,
+        entry_type: 8, // EmergencyStart
+        scope: Some(ProtoScopeMsg {
+            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
+        }),
+        author: Some(ProtoIdentity {
+            principal: principal.to_string(),
+            principal_type: "Human".to_string(),
+            role: role.to_string(),
+        }),
+        parent: None,
+        state_delta: None,
+        policy_ref: String::new(),
+        ttl: None,
+        emergency_reason: Some(reason.to_string()),
+    };
+
+    let resp = client
+        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+        .await
+        .map_err(|e| anyhow::anyhow!("emergency start failed: {e}"))?;
+
+    let seq = resp.into_inner().sequence;
+    Ok(format!("Emergency mode ACTIVE (seq:{seq}) on vCluster: {vcluster}\nReason: {reason}"))
+}
+
+/// Execute `pact emergency end` — append EmergencyEnd entry through Raft.
+pub async fn emergency_end(
+    client: &mut ConfigServiceClient<Channel>,
+    vcluster: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    let entry = ProtoConfigEntry {
+        sequence: 0,
+        timestamp: None,
+        entry_type: 9, // EmergencyEnd
+        scope: Some(ProtoScopeMsg {
+            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
+        }),
+        author: Some(ProtoIdentity {
+            principal: principal.to_string(),
+            principal_type: "Human".to_string(),
+            role: role.to_string(),
+        }),
+        parent: None,
+        state_delta: None,
+        policy_ref: String::new(),
+        ttl: None,
+        emergency_reason: None,
+    };
+
+    let resp = client
+        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+        .await
+        .map_err(|e| anyhow::anyhow!("emergency end failed: {e}"))?;
+
+    let seq = resp.into_inner().sequence;
+    Ok(format!("Emergency mode ENDED (seq:{seq}) on vCluster: {vcluster}"))
+}
+
+/// Execute `pact approve list` — list pending approvals from PolicyService.
+pub async fn approve_list(channel: &Channel, scope: Option<&str>) -> anyhow::Result<String> {
+    use pact_common::proto::policy::{
+        policy_service_client::PolicyServiceClient, ListApprovalsRequest,
+    };
+
+    let mut client = PolicyServiceClient::new(channel.clone());
+    let resp = client
+        .list_pending_approvals(tonic::Request::new(ListApprovalsRequest {
+            scope_filter: scope.map(str::to_string),
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("list approvals failed: {e}"))?;
+
+    let approvals = resp.into_inner().approvals;
+    if approvals.is_empty() {
+        return Ok("No pending approvals.".to_string());
+    }
+
+    let mut output = format!(
+        "{:<12} {:<20} {:<10} {:<24} {}\n",
+        "ID", "SCOPE", "ACTION", "REQUESTER", "STATUS"
+    );
+    for a in &approvals {
+        let id = if a.approval_id.len() > 10 {
+            &a.approval_id[..10]
+        } else {
+            &a.approval_id
+        };
+        output.push_str(&format!(
+            "{:<12} {:<20} {:<10} {:<24} {}\n",
+            id, a.scope, a.action, a.requester, a.status,
+        ));
+    }
+    Ok(output)
+}
+
+/// Execute `pact approve accept/deny` — decide on a pending approval.
+pub async fn approve_decide(
+    channel: &Channel,
+    approval_id: &str,
+    decision: &str,
+    principal: &str,
+    role: &str,
+    reason: Option<&str>,
+) -> anyhow::Result<String> {
+    use pact_common::proto::policy::{
+        policy_service_client::PolicyServiceClient, DecideApprovalRequest,
+    };
+
+    let mut client = PolicyServiceClient::new(channel.clone());
+    let resp = client
+        .decide_approval(tonic::Request::new(DecideApprovalRequest {
+            approval_id: approval_id.to_string(),
+            approver: Some(ProtoIdentity {
+                principal: principal.to_string(),
+                principal_type: "Human".to_string(),
+                role: role.to_string(),
+            }),
+            decision: decision.to_string(),
+            reason: reason.map(str::to_string),
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("decide approval failed: {e}"))?;
+
+    let result = resp.into_inner();
+    if result.success {
+        Ok(format!("Approval {approval_id}: {decision}"))
+    } else {
+        Err(anyhow::anyhow!(
+            "approval decision failed: {}",
+            result.error.unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+}
+
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.
 fn parse_scope_filter(s: &str) -> ProtoScopeMsg {
     if let Some(node) = s.strip_prefix("node:") {
