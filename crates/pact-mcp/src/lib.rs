@@ -5,5 +5,6 @@
 //!
 //! See `docs/architecture/agentic-api.md` for design documentation.
 
+pub mod connected;
 pub mod protocol;
 pub mod tools;
