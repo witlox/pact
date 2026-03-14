@@ -11,9 +11,7 @@ use pact_common::proto::config::{
     Scope as ProtoScopeMsg,
 };
 use pact_common::proto::journal::config_service_client::ConfigServiceClient;
-use pact_common::proto::journal::{
-    AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest,
-};
+use pact_common::proto::journal::{AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest};
 
 use super::config::CliConfig;
 
@@ -39,10 +37,7 @@ pub fn resolve_identity_from_token(token: &str) -> (String, String) {
     match decode::<Claims>(token, &DecodingKey::from_secret(b""), &validation) {
         Ok(data) => {
             let principal = data.claims.sub.unwrap_or_else(|| "cli-user".to_string());
-            let role = data
-                .claims
-                .pact_role
-                .unwrap_or_else(|| "pact-platform-admin".to_string());
+            let role = data.claims.pact_role.unwrap_or_else(|| "pact-platform-admin".to_string());
             (principal, role)
         }
         Err(_) => ("cli-user".to_string(), "pact-platform-admin".to_string()),
@@ -126,9 +121,7 @@ pub async fn commit(
         sequence: 0, // assigned by journal
         timestamp: None,
         entry_type: 1, // Commit
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: principal.to_string(),
             principal_type: "Human".to_string(),
@@ -162,9 +155,7 @@ pub async fn rollback(
         sequence: 0,
         timestamp: None,
         entry_type: 2, // Rollback
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: principal.to_string(),
             principal_type: "Human".to_string(),
@@ -208,23 +199,20 @@ pub async fn exec_remote(
     command: &str,
     args: &[String],
 ) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{exec_output, shell_service_client::ShellServiceClient, ExecRequest};
+    use pact_common::proto::shell::{
+        exec_output, shell_service_client::ShellServiceClient, ExecRequest,
+    };
 
     let mut client = ShellServiceClient::new(channel);
 
-    let mut request = tonic::Request::new(ExecRequest {
-        command: command.to_string(),
-        args: args.to_vec(),
-    });
-    request
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {token}").parse()
-            .map_err(|_| anyhow::anyhow!("invalid token format"))?);
+    let mut request =
+        tonic::Request::new(ExecRequest { command: command.to_string(), args: args.to_vec() });
+    request.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {token}").parse().map_err(|_| anyhow::anyhow!("invalid token format"))?,
+    );
 
-    let resp = client
-        .exec(request)
-        .await
-        .map_err(|e| anyhow::anyhow!("exec failed: {e}"))?;
+    let resp = client.exec(request).await.map_err(|e| anyhow::anyhow!("exec failed: {e}"))?;
 
     let mut stream = resp.into_inner();
     let mut stdout = Vec::new();
@@ -263,7 +251,9 @@ pub async fn exec_remote(
 
 /// Execute `pact service status` — list commands via ShellService.
 pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{shell_service_client::ShellServiceClient, ListCommandsRequest};
+    use pact_common::proto::shell::{
+        shell_service_client::ShellServiceClient, ListCommandsRequest,
+    };
 
     let mut client = ShellServiceClient::new(channel);
     let resp = client
@@ -311,9 +301,7 @@ pub async fn apply(
             sequence: 0,
             timestamp: None,
             entry_type: 1, // Commit
-            scope: Some(ProtoScopeMsg {
-                scope: Some(ProtoScope::VclusterId(vc_name.clone())),
-            }),
+            scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vc_name.clone())) }),
             author: Some(ProtoIdentity {
                 principal: principal.to_string(),
                 principal_type: "Human".to_string(),
@@ -350,9 +338,7 @@ pub async fn emergency_start(
         sequence: 0,
         timestamp: None,
         entry_type: 8, // EmergencyStart
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: principal.to_string(),
             principal_type: "Human".to_string(),
@@ -385,9 +371,7 @@ pub async fn emergency_end(
         sequence: 0,
         timestamp: None,
         entry_type: 9, // EmergencyEnd
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: principal.to_string(),
             principal_type: "Human".to_string(),
@@ -428,16 +412,10 @@ pub async fn approve_list(channel: &Channel, scope: Option<&str>) -> anyhow::Res
         return Ok("No pending approvals.".to_string());
     }
 
-    let mut output = format!(
-        "{:<12} {:<20} {:<10} {:<24} {}\n",
-        "ID", "SCOPE", "ACTION", "REQUESTER", "STATUS"
-    );
+    let mut output =
+        format!("{:<12} {:<20} {:<10} {:<24} {}\n", "ID", "SCOPE", "ACTION", "REQUESTER", "STATUS");
     for a in &approvals {
-        let id = if a.approval_id.len() > 10 {
-            &a.approval_id[..10]
-        } else {
-            &a.approval_id
-        };
+        let id = if a.approval_id.len() > 10 { &a.approval_id[..10] } else { &a.approval_id };
         output.push_str(&format!(
             "{:<12} {:<20} {:<10} {:<24} {}\n",
             id, a.scope, a.action, a.requester, a.status,
@@ -510,8 +488,10 @@ pub async fn watch(channel: &Channel, vcluster: &str) -> anyhow::Result<String> 
                 let ts = update.timestamp.as_ref().map_or_else(
                     || "---".to_string(),
                     |t| {
-                        chrono::DateTime::from_timestamp(t.seconds, 0)
-                            .map_or_else(|| "---".to_string(), |dt| dt.format("%H:%M:%S").to_string())
+                        chrono::DateTime::from_timestamp(t.seconds, 0).map_or_else(
+                            || "---".to_string(),
+                            |dt| dt.format("%H:%M:%S").to_string(),
+                        )
                     },
                 );
                 let kind = match &update.update {
@@ -541,9 +521,7 @@ pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
 
     let mut client = ShellServiceClient::new(channel);
     let resp = client
-        .extend_commit_window(tonic::Request::new(ExtendWindowRequest {
-            additional_minutes: mins,
-        }))
+        .extend_commit_window(tonic::Request::new(ExtendWindowRequest { additional_minutes: mins }))
         .await
         .map_err(|e| anyhow::anyhow!("extend failed: {e}"))?;
 
@@ -551,9 +529,7 @@ pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
     if result.success {
         let secs = result.new_deadline_seconds;
         let mins_remaining = secs / 60;
-        Ok(format!(
-            "Commit window extended by {mins} minutes ({mins_remaining} minutes remaining)"
-        ))
+        Ok(format!("Commit window extended by {mins} minutes ({mins_remaining} minutes remaining)"))
     } else {
         Err(anyhow::anyhow!(
             "extend failed: {}",
@@ -601,10 +577,8 @@ fn format_proto_entry(entry: &ProtoConfigEntry) -> String {
         },
     );
 
-    let author = entry
-        .author
-        .as_ref()
-        .map_or_else(|| "unknown".to_string(), |a| a.principal.clone());
+    let author =
+        entry.author.as_ref().map_or_else(|| "unknown".to_string(), |a| a.principal.clone());
 
     let timestamp = entry.timestamp.as_ref().map_or_else(
         || "---".to_string(),

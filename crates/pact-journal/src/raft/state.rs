@@ -627,10 +627,7 @@ mod tests {
         let resp = state.apply(JournalCommand::CreateApproval(approval));
         assert!(matches!(resp, JournalResponse::Ok));
         assert_eq!(state.pending_approvals.len(), 1);
-        assert!(matches!(
-            state.pending_approvals["apr-001"].status,
-            ApprovalStatus::Pending
-        ));
+        assert!(matches!(state.pending_approvals["apr-001"].status, ApprovalStatus::Pending));
 
         // Approve it
         let resp = state.apply(JournalCommand::DecideApproval {
@@ -643,10 +640,7 @@ mod tests {
             decision: ApprovalStatus::Approved,
         });
         assert!(matches!(resp, JournalResponse::Ok));
-        assert!(matches!(
-            state.pending_approvals["apr-001"].status,
-            ApprovalStatus::Approved
-        ));
+        assert!(matches!(state.pending_approvals["apr-001"].status, ApprovalStatus::Approved));
         assert_eq!(
             state.pending_approvals["apr-001"].approver.as_ref().unwrap().principal,
             "approver@example.com"

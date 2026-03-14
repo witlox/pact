@@ -70,8 +70,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Connect to journal (optional — agent can start without it)
-    let journal_client =
-        pact_agent::journal_client::try_connect(&agent_config.journal).await;
+    let journal_client = pact_agent::journal_client::try_connect(&agent_config.journal).await;
 
     // Execute boot sequence — initializes all subsystems
     let boot_result = boot::boot(&agent_config, journal_client.as_ref()).await?;

@@ -225,9 +225,8 @@ impl BootConfigService for BootConfigServiceImpl {
             .collect();
 
         // Track highest sequence sent during catch-up to avoid duplicates
-        let mut last_sent_seq = catchup
-            .last()
-            .map_or_else(|| req.from_sequence.saturating_sub(1), |u| u.sequence);
+        let mut last_sent_seq =
+            catchup.last().map_or_else(|| req.from_sequence.saturating_sub(1), |u| u.sequence);
 
         drop(state);
 
@@ -355,7 +354,10 @@ mod tests {
     }
 
     fn test_service() -> BootConfigServiceImpl {
-        BootConfigServiceImpl::new(Arc::new(RwLock::new(boot_state())), ConfigUpdateNotifier::default())
+        BootConfigServiceImpl::new(
+            Arc::new(RwLock::new(boot_state())),
+            ConfigUpdateNotifier::default(),
+        )
     }
 
     #[tokio::test]
@@ -534,7 +536,10 @@ mod tests {
             },
         });
 
-        let svc = BootConfigServiceImpl::new(Arc::new(RwLock::new(state)), ConfigUpdateNotifier::default());
+        let svc = BootConfigServiceImpl::new(
+            Arc::new(RwLock::new(state)),
+            ConfigUpdateNotifier::default(),
+        );
         let resp = svc
             .stream_boot_config(Request::new(BootConfigRequest {
                 node_id: "node-x".into(),

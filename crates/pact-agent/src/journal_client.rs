@@ -59,10 +59,7 @@ impl JournalClient {
                 }
             }
         }
-        Err(anyhow::anyhow!(
-            "no reachable journal endpoint (tried {})",
-            endpoints.join(", ")
-        ))
+        Err(anyhow::anyhow!("no reachable journal endpoint (tried {})", endpoints.join(", ")))
     }
 
     /// Get the ConfigService client.

@@ -256,34 +256,14 @@ async fn main() {
             execute::log(journal_client.as_mut().unwrap(), n, scope.as_deref()).await
         }
         Commands::Commit { m } => {
-            let vcluster = config
-                .default_vcluster
-                .as_deref()
-                .unwrap_or("default")
-                .to_string();
-            execute::commit(
-                journal_client.as_mut().unwrap(),
-                &m,
-                &vcluster,
-                &principal,
-                &role,
-            )
-            .await
+            let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
+            execute::commit(journal_client.as_mut().unwrap(), &m, &vcluster, &principal, &role)
+                .await
         }
         Commands::Rollback { seq } => {
-            let vcluster = config
-                .default_vcluster
-                .as_deref()
-                .unwrap_or("default")
-                .to_string();
-            execute::rollback(
-                journal_client.as_mut().unwrap(),
-                seq,
-                &vcluster,
-                &principal,
-                &role,
-            )
-            .await
+            let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
+            execute::rollback(journal_client.as_mut().unwrap(), seq, &vcluster, &principal, &role)
+                .await
         }
         Commands::Diff { node, committed: _ } => {
             // Diff queries entries, not a dedicated RPC
@@ -298,24 +278,16 @@ async fn main() {
                     // TODO: resolve agent address from node_id (for now, assume localhost:9445)
                     let agent_addr = "http://127.0.0.1:9445";
                     match execute::connect_agent(agent_addr).await {
-                        Ok(channel) => {
-                            execute::exec_remote(channel, &token, &cmd, &args).await
-                        }
+                        Ok(channel) => execute::exec_remote(channel, &token, &cmd, &args).await,
                         Err(e) => Err(e),
                     }
                 }
                 Err(e) => Err(anyhow::anyhow!("{e}")),
             }
         }
-        Commands::Shell { node } => {
-            Ok(format!("shell on {node} (agent gRPC not yet wired)"))
-        }
+        Commands::Shell { node } => Ok(format!("shell on {node} (agent gRPC not yet wired)")),
         Commands::Emergency { action } => {
-            let vcluster = config
-                .default_vcluster
-                .as_deref()
-                .unwrap_or("default")
-                .to_string();
+            let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
             match action {
                 EmergencySubcommand::Start { reason } => {
                     execute::emergency_start(
@@ -370,38 +342,36 @@ async fn main() {
             // Service commands delegate to agent exec with systemctl/journalctl
             let agent_addr = "http://127.0.0.1:9445";
             match execute::connect_agent(agent_addr).await {
-                Ok(channel) => {
-                    match action {
-                        ServiceSubcommand::Status { name } => {
-                            let svc = name.as_deref().unwrap_or("--all");
-                            execute::exec_remote(
-                                channel,
-                                &token,
-                                "systemctl",
-                                &["status".into(), svc.into()],
-                            )
-                            .await
-                        }
-                        ServiceSubcommand::Restart { name } => {
-                            execute::exec_remote(
-                                channel,
-                                &token,
-                                "systemctl",
-                                &["restart".into(), name],
-                            )
-                            .await
-                        }
-                        ServiceSubcommand::Logs { name } => {
-                            execute::exec_remote(
-                                channel,
-                                &token,
-                                "journalctl",
-                                &["-u".into(), name, "-n".into(), "50".into()],
-                            )
-                            .await
-                        }
+                Ok(channel) => match action {
+                    ServiceSubcommand::Status { name } => {
+                        let svc = name.as_deref().unwrap_or("--all");
+                        execute::exec_remote(
+                            channel,
+                            &token,
+                            "systemctl",
+                            &["status".into(), svc.into()],
+                        )
+                        .await
                     }
-                }
+                    ServiceSubcommand::Restart { name } => {
+                        execute::exec_remote(
+                            channel,
+                            &token,
+                            "systemctl",
+                            &["restart".into(), name],
+                        )
+                        .await
+                    }
+                    ServiceSubcommand::Logs { name } => {
+                        execute::exec_remote(
+                            channel,
+                            &token,
+                            "journalctl",
+                            &["-u".into(), name, "-n".into(), "50".into()],
+                        )
+                        .await
+                    }
+                },
                 Err(e) => Err(e),
             }
         }
@@ -414,20 +384,12 @@ async fn main() {
             }
         }
         Commands::Watch { vcluster } => {
-            let vc = vcluster
-                .as_deref()
-                .or(config.default_vcluster.as_deref())
-                .unwrap_or("default");
+            let vc =
+                vcluster.as_deref().or(config.default_vcluster.as_deref()).unwrap_or("default");
             execute::watch(journal_channel.as_ref().unwrap(), vc).await
         }
         Commands::Apply { spec } => {
-            execute::apply(
-                journal_client.as_mut().unwrap(),
-                &spec,
-                &principal,
-                &role,
-            )
-            .await
+            execute::apply(journal_client.as_mut().unwrap(), &spec, &principal, &role).await
         }
         Commands::Extend { mins } => {
             let agent_addr = "http://127.0.0.1:9445";

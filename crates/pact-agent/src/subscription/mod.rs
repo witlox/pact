@@ -231,8 +231,7 @@ impl ConfigSubscription {
                                     None => continue,
                                 };
 
-                                if let Err(e) =
-                                    self.process_update(update.sequence, payload).await
+                                if let Err(e) = self.process_update(update.sequence, payload).await
                                 {
                                     error!(error = %e, "Failed to process config update");
                                 }

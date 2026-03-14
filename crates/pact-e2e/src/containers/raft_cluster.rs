@@ -121,8 +121,7 @@ impl RaftCluster {
             let actual_grpc_addr = grpc_listener.local_addr()?.to_string();
 
             let raft_server = raft_hpc_core::RaftTransportServer::new(raft.clone());
-            let cs =
-                ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
+            let cs = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
             let ps = PolicyServiceImpl::new(raft.clone(), Arc::clone(&state));
             let bs = BootConfigServiceImpl::new(Arc::clone(&state), notifier);
 

@@ -57,10 +57,7 @@ pub struct InotifyObserver {
 impl InotifyObserver {
     /// Create a new inotify observer watching the given paths.
     pub fn new(paths: Vec<PathBuf>) -> Self {
-        Self {
-            paths,
-            running: Arc::new(AtomicBool::new(false)),
-        }
+        Self { paths, running: Arc::new(AtomicBool::new(false)) }
     }
 }
 
@@ -68,7 +65,7 @@ impl InotifyObserver {
 #[async_trait::async_trait]
 impl Observer for InotifyObserver {
     async fn start(&self, tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
-        use nix::sys::inotify::{AddWatchFlags, Inotify, InitFlags};
+        use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 
         let inotify = Inotify::init(InitFlags::IN_NONBLOCK)?;
         let watch_flags = AddWatchFlags::IN_MODIFY
@@ -201,9 +198,7 @@ pub struct NetlinkObserver {
 impl NetlinkObserver {
     /// Create a new netlink observer.
     pub fn new() -> Self {
-        Self {
-            running: Arc::new(AtomicBool::new(false)),
-        }
+        Self { running: Arc::new(AtomicBool::new(false)) }
     }
 }
 
@@ -218,9 +213,7 @@ impl Default for NetlinkObserver {
 #[async_trait::async_trait]
 impl Observer for NetlinkObserver {
     async fn start(&self, tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
-        use nix::sys::socket::{
-            bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockType,
-        };
+        use nix::sys::socket::{bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockType};
 
         // RTMGRP_LINK = 1 — subscribe to link notifications.
         const RTMGRP_LINK: u32 = 1;
@@ -541,7 +534,11 @@ mod tests {
                 .expect("channel closed unexpectedly");
 
             assert_eq!(event.category, "file");
-            assert!(event.path.contains("test.txt"), "path should contain filename: {}", event.path);
+            assert!(
+                event.path.contains("test.txt"),
+                "path should contain filename: {}",
+                event.path
+            );
 
             observer.stop().await.unwrap();
         }
@@ -613,8 +610,7 @@ mod tests {
         #[test]
         fn describe_inotify_mask_unknown() {
             use nix::sys::inotify::AddWatchFlags;
-            let desc =
-                super::super::describe_inotify_mask(AddWatchFlags::IN_CLOSE_WRITE);
+            let desc = super::super::describe_inotify_mask(AddWatchFlags::IN_CLOSE_WRITE);
             assert!(desc.starts_with("inotify event 0x"), "got: {desc}");
         }
     }

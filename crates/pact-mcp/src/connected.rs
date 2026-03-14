@@ -11,9 +11,7 @@ use pact_common::proto::config::{
     Scope as ProtoScopeMsg,
 };
 use pact_common::proto::journal::config_service_client::ConfigServiceClient;
-use pact_common::proto::journal::{
-    AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest,
-};
+use pact_common::proto::journal::{AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest};
 use pact_common::proto::shell::{
     exec_output, shell_service_client::ShellServiceClient, ExecRequest, ListCommandsRequest,
 };
@@ -103,9 +101,7 @@ async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallR
     let mut client = ConfigServiceClient::new(channel.clone());
 
     match client
-        .get_node_state(tonic::Request::new(GetNodeStateRequest {
-            node_id: node.to_string(),
-        }))
+        .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node.to_string() }))
         .await
     {
         Ok(resp) => {
@@ -168,9 +164,7 @@ async fn handle_commit(args: &serde_json::Value, channel: &Channel) -> ToolCallR
         sequence: 0,
         timestamp: None,
         entry_type: 1, // Commit
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: "mcp-agent".to_string(),
             principal_type: "Agent".to_string(),
@@ -183,9 +177,7 @@ async fn handle_commit(args: &serde_json::Value, channel: &Channel) -> ToolCallR
         emergency_reason: None,
     };
 
-    match client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await
+    match client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await
     {
         Ok(resp) => {
             let seq = resp.into_inner().sequence;
@@ -207,9 +199,7 @@ async fn handle_rollback(args: &serde_json::Value, channel: &Channel) -> ToolCal
         sequence: 0,
         timestamp: None,
         entry_type: 2, // Rollback
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: "mcp-agent".to_string(),
             principal_type: "Agent".to_string(),
@@ -222,16 +212,11 @@ async fn handle_rollback(args: &serde_json::Value, channel: &Channel) -> ToolCal
         emergency_reason: None,
     };
 
-    match client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await
+    match client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await
     {
         Ok(resp) => {
             let new_seq = resp.into_inner().sequence;
-            tool_result(
-                format!("Rolled back to seq:{seq} (new seq:{new_seq})"),
-                false,
-            )
+            tool_result(format!("Rolled back to seq:{seq} (new seq:{new_seq})"), false)
         }
         Err(e) => tool_result(format!("Rollback failed: {e}"), true),
     }
@@ -268,9 +253,7 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
         sequence: 0,
         timestamp: None,
         entry_type: 9, // EmergencyEnd
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
         author: Some(ProtoIdentity {
             principal: "mcp-agent".to_string(),
             principal_type: "Agent".to_string(),
@@ -283,9 +266,7 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
         emergency_reason: None,
     };
 
-    match client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await
+    match client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await
     {
         Ok(resp) => {
             let seq = resp.into_inner().sequence;
@@ -315,10 +296,7 @@ async fn handle_exec(args: &serde_json::Value, channel: &Channel) -> ToolCallRes
     };
 
     let mut client = ShellServiceClient::new(channel.clone());
-    let mut request = tonic::Request::new(ExecRequest {
-        command: cmd.to_string(),
-        args: cmd_args,
-    });
+    let mut request = tonic::Request::new(ExecRequest { command: cmd.to_string(), args: cmd_args });
     // MCP server authenticates as pact-service-ai
     if let Ok(val) = "Bearer mcp-service-token".parse() {
         request.metadata_mut().insert("authorization", val);
@@ -361,10 +339,7 @@ async fn handle_exec(args: &serde_json::Value, channel: &Channel) -> ToolCallRes
 
 async fn handle_cap(_args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
     let mut client = ShellServiceClient::new(channel.clone());
-    match client
-        .list_commands(tonic::Request::new(ListCommandsRequest {}))
-        .await
-    {
+    match client.list_commands(tonic::Request::new(ListCommandsRequest {})).await {
         Ok(resp) => {
             let commands = resp.into_inner().commands;
             if commands.is_empty() {
@@ -433,9 +408,7 @@ async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallRe
         sequence: 0,
         timestamp: None,
         entry_type: 1, // Commit
-        scope: Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(scope.to_string())),
-        }),
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(scope.to_string())) }),
         author: Some(ProtoIdentity {
             principal: "mcp-agent".to_string(),
             principal_type: "Agent".to_string(),
@@ -448,9 +421,7 @@ async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallRe
         emergency_reason: None,
     };
 
-    match client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await
+    match client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await
     {
         Ok(resp) => {
             let seq = resp.into_inner().sequence;
@@ -466,9 +437,7 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
     let scope = if vcluster == "all" {
         None
     } else {
-        Some(ProtoScopeMsg {
-            scope: Some(ProtoScope::VclusterId(vcluster.to_string())),
-        })
+        Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) })
     };
 
     let mut client = ConfigServiceClient::new(channel.clone());
@@ -491,7 +460,11 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
                 tool_result(format!("No entries for vCluster: {vcluster}"), false)
             } else {
                 tool_result(
-                    format!("Fleet query ({vcluster}): {} entries\n{}", entries.len(), entries.join("\n")),
+                    format!(
+                        "Fleet query ({vcluster}): {} entries\n{}",
+                        entries.len(),
+                        entries.join("\n")
+                    ),
                     false,
                 )
             }
@@ -527,10 +500,8 @@ fn format_entry(entry: &ProtoConfigEntry) -> String {
         },
     );
 
-    let author = entry
-        .author
-        .as_ref()
-        .map_or_else(|| "unknown".to_string(), |a| a.principal.clone());
+    let author =
+        entry.author.as_ref().map_or_else(|| "unknown".to_string(), |a| a.principal.clone());
 
     format!("#{} {} {} by {}", entry.sequence, entry_type_name, scope, author)
 }

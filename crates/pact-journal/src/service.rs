@@ -146,9 +146,7 @@ impl ConfigService for ConfigServiceImpl {
         let entries: Vec<ProtoConfigEntry> = state
             .entries
             .range(from..=to)
-            .filter(|(_, e)| {
-                scope_filter.as_ref().is_none_or(|filter| e.scope == *filter)
-            })
+            .filter(|(_, e)| scope_filter.as_ref().is_none_or(|filter| e.scope == *filter))
             .take(limit)
             .map(|(_, e)| config_entry_to_proto(e))
             .collect();
@@ -241,7 +239,9 @@ fn proto_to_config_entry(
 }
 
 /// Convert proto StateDelta to domain StateDelta.
-fn proto_to_state_delta(proto: pact_common::proto::config::StateDelta) -> pact_common::types::StateDelta {
+fn proto_to_state_delta(
+    proto: pact_common::proto::config::StateDelta,
+) -> pact_common::types::StateDelta {
     use pact_common::types::{DeltaAction, DeltaItem, StateDelta};
 
     fn proto_action(a: i32) -> DeltaAction {
@@ -391,7 +391,9 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
 }
 
 /// Convert domain StateDelta to proto StateDelta.
-pub fn state_delta_to_proto(delta: &pact_common::types::StateDelta) -> pact_common::proto::config::StateDelta {
+pub fn state_delta_to_proto(
+    delta: &pact_common::types::StateDelta,
+) -> pact_common::proto::config::StateDelta {
     use pact_common::proto::config::{
         FileDelta, GpuDelta, KernelDelta, MountDelta, NetworkDelta, PackageDelta, ServiceDelta,
     };

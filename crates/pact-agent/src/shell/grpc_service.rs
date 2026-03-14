@@ -204,13 +204,9 @@ mod tests {
         let svc = ShellServiceImpl::new(server, test_commit_window());
 
         let token = make_token("ops@example.com", "pact-ops-ml-training");
-        let mut request = Request::new(ExecRequest {
-            command: "echo".into(),
-            args: vec!["hello".into()],
-        });
-        request
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+        let mut request =
+            Request::new(ExecRequest { command: "echo".into(), args: vec!["hello".into()] });
+        request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
         let resp = svc.exec(request).await.unwrap();
         let mut stream = resp.into_inner();
@@ -239,10 +235,7 @@ mod tests {
         let server = test_shell_server();
         let svc = ShellServiceImpl::new(server, test_commit_window());
 
-        let request = Request::new(ExecRequest {
-            command: "echo".into(),
-            args: vec![],
-        });
+        let request = Request::new(ExecRequest { command: "echo".into(), args: vec![] });
 
         let result = svc.exec(request).await;
         assert_eq!(result.unwrap_err().code(), tonic::Code::Unauthenticated);
@@ -253,10 +246,7 @@ mod tests {
         let server = test_shell_server();
         let svc = ShellServiceImpl::new(server, test_commit_window());
 
-        let resp = svc
-            .list_commands(Request::new(ListCommandsRequest {}))
-            .await
-            .unwrap();
+        let resp = svc.list_commands(Request::new(ListCommandsRequest {})).await.unwrap();
         let commands = resp.into_inner().commands;
         assert!(!commands.is_empty());
 

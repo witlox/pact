@@ -257,18 +257,17 @@ impl PolicyService for PolicyServiceImpl {
     ) -> Result<Response<DecideApprovalResponse>, Status> {
         let req = request.into_inner();
 
-        let approver_proto = req.approver.ok_or_else(|| {
-            Status::invalid_argument("approver identity required")
-        })?;
+        let approver_proto =
+            req.approver.ok_or_else(|| Status::invalid_argument("approver identity required"))?;
         let approver = Self::proto_to_identity(&approver_proto);
 
         let decision = match req.decision.as_str() {
             "approved" => ApprovalStatus::Approved,
             "rejected" => ApprovalStatus::Rejected,
             other => {
-                return Err(Status::invalid_argument(
-                    format!("invalid decision '{other}', must be 'approved' or 'rejected'"),
-                ))
+                return Err(Status::invalid_argument(format!(
+                    "invalid decision '{other}', must be 'approved' or 'rejected'"
+                )))
             }
         };
 
@@ -284,15 +283,11 @@ impl PolicyService for PolicyServiceImpl {
             .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
         match resp.data {
-            JournalResponse::Ok => Ok(Response::new(DecideApprovalResponse {
-                success: true,
-                error: None,
-            })),
+            JournalResponse::Ok => {
+                Ok(Response::new(DecideApprovalResponse { success: true, error: None }))
+            }
             JournalResponse::ValidationError { reason } => {
-                Ok(Response::new(DecideApprovalResponse {
-                    success: false,
-                    error: Some(reason),
-                }))
+                Ok(Response::new(DecideApprovalResponse { success: false, error: Some(reason) }))
             }
             _ => Err(Status::internal("unexpected response for DecideApproval")),
         }
@@ -384,12 +379,12 @@ pub fn proto_to_vcluster_policy(proto: ProtoVClusterPolicy) -> pact_common::type
 mod tests {
     use super::*;
     use chrono::Utc;
+    use openraft::impls::BasicNode;
     use openraft::Raft;
     use pact_common::proto::config::{
         scope::Scope as ProtoScopeInner, Identity as ProtoIdentity, Scope as ProtoScope,
     };
     use pact_common::types::{RoleBinding, VClusterPolicy};
-    use openraft::impls::BasicNode;
     use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, StateMachineState};
 
     use crate::raft::types::JournalCommand;

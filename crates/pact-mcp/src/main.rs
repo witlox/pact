@@ -32,14 +32,11 @@ async fn main() {
     let channel = try_connect(&endpoint, "journal").await;
 
     // Try to connect to agent (from PACT_AGENT_ENDPOINT env or default)
-    let agent_endpoint =
-        std::env::var("PACT_AGENT_ENDPOINT").unwrap_or_else(|_| "http://localhost:9445".to_string());
+    let agent_endpoint = std::env::var("PACT_AGENT_ENDPOINT")
+        .unwrap_or_else(|_| "http://localhost:9445".to_string());
     let agent_channel = try_connect(&agent_endpoint, "agent").await;
 
-    let connections = connected::Connections {
-        journal: channel,
-        agent: agent_channel,
-    };
+    let connections = connected::Connections { journal: channel, agent: agent_channel };
 
     eprintln!("pact-mcp: starting MCP server on stdio");
 

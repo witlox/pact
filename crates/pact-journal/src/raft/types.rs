@@ -30,11 +30,7 @@ pub enum JournalCommand {
     /// Create a pending two-person approval request.
     CreateApproval(PendingApproval),
     /// Decide on a pending approval (approve or reject).
-    DecideApproval {
-        approval_id: String,
-        approver: Identity,
-        decision: ApprovalStatus,
-    },
+    DecideApproval { approval_id: String, approver: Identity, decision: ApprovalStatus },
 }
 
 impl fmt::Display for JournalCommand {

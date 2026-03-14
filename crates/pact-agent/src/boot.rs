@@ -18,7 +18,9 @@ use tracing::{debug, info, warn};
 
 use pact_common::config::AgentConfig;
 use pact_common::proto::stream::{config_chunk, BootConfigRequest};
-use pact_common::types::{ConfigState, DeltaItem, DriftWeights, StateDelta, SupervisorBackend, VClusterPolicy};
+use pact_common::types::{
+    ConfigState, DeltaItem, DriftWeights, StateDelta, SupervisorBackend, VClusterPolicy,
+};
 
 use crate::capability::{CapabilityReporter, GpuBackend, MockGpuBackend};
 use crate::commit::CommitWindowManager;
@@ -115,7 +117,9 @@ pub async fn boot(
                 );
                 // Apply overlay data as state delta (Linux: sysctl + mounts)
                 if !boot_config.overlay_data.is_empty() {
-                    if let Ok(delta) = serde_json::from_slice::<StateDelta>(&boot_config.overlay_data) {
+                    if let Ok(delta) =
+                        serde_json::from_slice::<StateDelta>(&boot_config.overlay_data)
+                    {
                         apply_state_delta(&delta);
                     }
                 }
@@ -319,7 +323,9 @@ pub fn apply_sysctl(entries: &[DeltaItem]) {
         let path = format!("/proc/sys/{}", entry.key.replace('.', "/"));
         match std::fs::write(&path, value) {
             Ok(()) => info!(key = %entry.key, value = %value, "Applied sysctl"),
-            Err(e) => warn!(key = %entry.key, path = %path, error = %e, "Failed to apply sysctl — skipping"),
+            Err(e) => {
+                warn!(key = %entry.key, path = %path, error = %e, "Failed to apply sysctl — skipping")
+            }
         }
     }
 }
@@ -338,12 +344,10 @@ pub fn apply_mounts(entries: &[DeltaItem]) {
     for entry in entries {
         let mount_path = &entry.key;
         match entry.action {
-            DeltaAction::Remove => {
-                match umount(mount_path.as_str()) {
-                    Ok(()) => info!(path = %mount_path, "Unmounted"),
-                    Err(e) => warn!(path = %mount_path, error = %e, "Failed to unmount — skipping"),
-                }
-            }
+            DeltaAction::Remove => match umount(mount_path.as_str()) {
+                Ok(()) => info!(path = %mount_path, "Unmounted"),
+                Err(e) => warn!(path = %mount_path, error = %e, "Failed to unmount — skipping"),
+            },
             DeltaAction::Add | DeltaAction::Modify => {
                 let Some(ref value) = entry.value else {
                     warn!(path = %mount_path, "Mount entry has no value — skipping");
@@ -385,10 +389,7 @@ pub fn apply_mounts(entries: &[DeltaItem]) {
 fn parse_mount_value(value: &str) -> (String, String, String) {
     // Extract options from parentheses if present
     let (main, options) = if let Some(paren_start) = value.find('(') {
-        let opts = value[paren_start + 1..]
-            .trim_end_matches(')')
-            .trim()
-            .to_string();
+        let opts = value[paren_start + 1..].trim_end_matches(')').trim().to_string();
         (value[..paren_start].trim(), opts)
     } else {
         (value.trim(), String::new())
@@ -421,19 +422,34 @@ pub fn apply_state_delta(delta: &StateDelta) {
 
     // Categories that require additional tooling — log but do not apply
     if !delta.services.is_empty() {
-        info!(count = delta.services.len(), "Service delta received — requires supervisor (not applied here)");
+        info!(
+            count = delta.services.len(),
+            "Service delta received — requires supervisor (not applied here)"
+        );
     }
     if !delta.files.is_empty() {
-        info!(count = delta.files.len(), "File delta received — requires file manager (not applied here)");
+        info!(
+            count = delta.files.len(),
+            "File delta received — requires file manager (not applied here)"
+        );
     }
     if !delta.network.is_empty() {
-        info!(count = delta.network.len(), "Network delta received — requires netlink manager (not applied here)");
+        info!(
+            count = delta.network.len(),
+            "Network delta received — requires netlink manager (not applied here)"
+        );
     }
     if !delta.packages.is_empty() {
-        info!(count = delta.packages.len(), "Package delta received — requires package manager (not applied here)");
+        info!(
+            count = delta.packages.len(),
+            "Package delta received — requires package manager (not applied here)"
+        );
     }
     if !delta.gpu.is_empty() {
-        info!(count = delta.gpu.len(), "GPU delta received — requires GPU manager (not applied here)");
+        info!(
+            count = delta.gpu.len(),
+            "GPU delta received — requires GPU manager (not applied here)"
+        );
     }
 
     let total = delta.kernel.len()
@@ -457,10 +473,7 @@ pub fn apply_state_delta(delta: &StateDelta) {
 #[cfg(not(target_os = "linux"))]
 pub fn apply_sysctl(entries: &[DeltaItem]) {
     if !entries.is_empty() {
-        warn!(
-            count = entries.len(),
-            "apply_sysctl called on non-Linux platform — no-op"
-        );
+        warn!(count = entries.len(), "apply_sysctl called on non-Linux platform — no-op");
     }
 }
 
@@ -468,10 +481,7 @@ pub fn apply_sysctl(entries: &[DeltaItem]) {
 #[cfg(not(target_os = "linux"))]
 pub fn apply_mounts(entries: &[DeltaItem]) {
     if !entries.is_empty() {
-        warn!(
-            count = entries.len(),
-            "apply_mounts called on non-Linux platform — no-op"
-        );
+        warn!(count = entries.len(), "apply_mounts called on non-Linux platform — no-op");
     }
 }
 
@@ -486,10 +496,7 @@ pub fn apply_state_delta(delta: &StateDelta) {
         + delta.packages.len()
         + delta.gpu.len();
     if total > 0 {
-        warn!(
-            total_items = total,
-            "apply_state_delta called on non-Linux platform — no-op"
-        );
+        warn!(total_items = total, "apply_state_delta called on non-Linux platform — no-op");
     }
 }
 

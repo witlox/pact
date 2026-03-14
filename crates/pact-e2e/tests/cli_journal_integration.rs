@@ -58,10 +58,7 @@ async fn cli_commit_log_rollback_flow() {
     assert!(log_output.contains("#0"), "log should contain entry 0: {log_output}");
     assert!(log_output.contains("#1"), "log should contain entry 1: {log_output}");
     assert!(log_output.contains("COMMIT"), "log should show COMMIT type: {log_output}");
-    assert!(
-        log_output.contains("admin@example.com"),
-        "log should show author: {log_output}"
-    );
+    assert!(log_output.contains("admin@example.com"), "log should show author: {log_output}");
 
     // 5. Rollback to seq 0
     let result = execute::rollback(
@@ -100,10 +97,7 @@ async fn cli_emergency_flow() {
     .await
     .unwrap();
     assert!(result.contains("ACTIVE"), "should confirm emergency active: {result}");
-    assert!(
-        result.contains("GPU failure"),
-        "should include reason: {result}"
-    );
+    assert!(result.contains("GPU failure"), "should include reason: {result}");
 
     // End emergency
     let result = execute::emergency_end(
@@ -118,14 +112,8 @@ async fn cli_emergency_flow() {
 
     // Log should show both entries
     let log_output = execute::log(&mut client, 10, None).await.unwrap();
-    assert!(
-        log_output.contains("EMERGENCY_ON"),
-        "should show emergency start: {log_output}"
-    );
-    assert!(
-        log_output.contains("EMERGENCY_OFF"),
-        "should show emergency end: {log_output}"
-    );
+    assert!(log_output.contains("EMERGENCY_ON"), "should show emergency start: {log_output}");
+    assert!(log_output.contains("EMERGENCY_OFF"), "should show emergency end: {log_output}");
 }
 
 /// Approval list/decide flow through CLI execute functions.
@@ -137,48 +125,42 @@ async fn cli_approval_flow() {
     // Set up a regulated policy first
     let mut policy_client = PolicyServiceClient::new(channel.clone());
     policy_client
-        .update_policy(tonic::Request::new(
-            pact_common::proto::policy::UpdatePolicyRequest {
+        .update_policy(tonic::Request::new(pact_common::proto::policy::UpdatePolicyRequest {
+            vcluster_id: "sensitive-compute".into(),
+            policy: Some(pact_common::proto::policy::VClusterPolicy {
                 vcluster_id: "sensitive-compute".into(),
-                policy: Some(pact_common::proto::policy::VClusterPolicy {
-                    vcluster_id: "sensitive-compute".into(),
-                    policy_id: "pol-regulated".into(),
-                    regulated: true,
-                    two_person_approval: true,
-                    ..Default::default()
-                }),
-                author: Some(pact_common::proto::config::Identity {
-                    principal: "admin@example.com".into(),
-                    principal_type: "admin".into(),
-                    role: "pact-platform-admin".into(),
-                }),
-                message: "set up regulated policy".into(),
-            },
-        ))
+                policy_id: "pol-regulated".into(),
+                regulated: true,
+                two_person_approval: true,
+                ..Default::default()
+            }),
+            author: Some(pact_common::proto::config::Identity {
+                principal: "admin@example.com".into(),
+                principal_type: "admin".into(),
+                role: "pact-platform-admin".into(),
+            }),
+            message: "set up regulated policy".into(),
+        }))
         .await
         .expect("set policy");
 
     // Evaluate a regulated action — should get Defer (pending approval)
     let resp = policy_client
-        .evaluate(tonic::Request::new(
-            pact_common::proto::policy::PolicyEvalRequest {
-                author: Some(pact_common::proto::config::Identity {
-                    principal: "regulated-admin@example.com".into(),
-                    principal_type: "admin".into(),
-                    role: "pact-regulated-sensitive-compute".into(),
-                }),
-                scope: Some(pact_common::proto::config::Scope {
-                    scope: Some(
-                        pact_common::proto::config::scope::Scope::VclusterId(
-                            "sensitive-compute".into(),
-                        ),
-                    ),
-                }),
-                action: "commit".into(),
-                proposed_change: None,
-                command: None,
-            },
-        ))
+        .evaluate(tonic::Request::new(pact_common::proto::policy::PolicyEvalRequest {
+            author: Some(pact_common::proto::config::Identity {
+                principal: "regulated-admin@example.com".into(),
+                principal_type: "admin".into(),
+                role: "pact-regulated-sensitive-compute".into(),
+            }),
+            scope: Some(pact_common::proto::config::Scope {
+                scope: Some(pact_common::proto::config::scope::Scope::VclusterId(
+                    "sensitive-compute".into(),
+                )),
+            }),
+            action: "commit".into(),
+            proposed_change: None,
+            command: None,
+        }))
         .await
         .expect("evaluate");
     let eval = resp.into_inner();
@@ -312,9 +294,9 @@ state = "running"
 
     // Read the entry back and verify it has state_delta
     let resp = client
-        .get_entry(tonic::Request::new(
-            pact_common::proto::journal::GetEntryRequest { sequence: 0 },
-        ))
+        .get_entry(tonic::Request::new(pact_common::proto::journal::GetEntryRequest {
+            sequence: 0,
+        }))
         .await
         .unwrap();
     let entry = resp.into_inner();

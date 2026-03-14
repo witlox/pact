@@ -299,9 +299,9 @@ impl RocmSmiBackend {
         // Find column indices from header
         let headers: Vec<&str> = header.split(',').map(str::trim).collect();
         let device_col = headers.iter().position(|h| h.contains("device"));
-        let model_col = headers
-            .iter()
-            .position(|h| h.contains("Card series") || h.contains("Card Series") || h.contains("product"));
+        let model_col = headers.iter().position(|h| {
+            h.contains("Card series") || h.contains("Card Series") || h.contains("product")
+        });
         let vram_col = headers.iter().position(|h| h.contains("VRAM Total") || h.contains("vram"));
         let id_col = headers.iter().position(|h| h.contains("GPU ID") || h.contains("Bus"));
 
@@ -327,10 +327,8 @@ impl RocmSmiBackend {
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(0);
 
-            let pci_bus_id = id_col
-                .and_then(|c| parts.get(c))
-                .map(ToString::to_string)
-                .unwrap_or_default();
+            let pci_bus_id =
+                id_col.and_then(|c| parts.get(c)).map(ToString::to_string).unwrap_or_default();
 
             gpus.push(GpuCapability {
                 index,
