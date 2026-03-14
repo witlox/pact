@@ -284,6 +284,60 @@ pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
     Ok(output)
 }
 
+/// Execute `pact apply` — parse a TOML spec and submit config entries.
+pub async fn apply(
+    client: &mut ConfigServiceClient<Channel>,
+    spec_path: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    use super::apply::{format_spec_summary, load_spec, spec_to_delta};
+    use pact_journal::service::state_delta_to_proto;
+
+    let spec = load_spec(std::path::Path::new(spec_path))?;
+
+    if spec.vcluster.is_empty() {
+        return Ok("No changes in spec file.".to_string());
+    }
+
+    let summary = format_spec_summary(&spec);
+    let mut results = Vec::new();
+
+    for (vc_name, vc_spec) in &spec.vcluster {
+        let delta = spec_to_delta(vc_spec);
+        let proto_delta = state_delta_to_proto(&delta);
+
+        let entry = ProtoConfigEntry {
+            sequence: 0,
+            timestamp: None,
+            entry_type: 1, // Commit
+            scope: Some(ProtoScopeMsg {
+                scope: Some(ProtoScope::VclusterId(vc_name.clone())),
+            }),
+            author: Some(ProtoIdentity {
+                principal: principal.to_string(),
+                principal_type: "Human".to_string(),
+                role: role.to_string(),
+            }),
+            parent: None,
+            state_delta: Some(proto_delta),
+            policy_ref: format!("apply:{spec_path}"),
+            ttl: None,
+            emergency_reason: None,
+        };
+
+        let resp = client
+            .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+            .await
+            .map_err(|e| anyhow::anyhow!("apply failed for {vc_name}: {e}"))?;
+
+        let seq = resp.into_inner().sequence;
+        results.push(format!("Applied to {vc_name} (seq:{seq})"));
+    }
+
+    Ok(format!("{summary}\n\n{}", results.join("\n")))
+}
+
 /// Execute `pact emergency start` — append EmergencyStart entry through Raft.
 pub async fn emergency_start(
     client: &mut ConfigServiceClient<Channel>,

@@ -4,6 +4,7 @@
 //! Commands handle argument parsing, gRPC client creation,
 //! request construction, and output formatting.
 
+pub mod apply;
 pub mod approve;
 pub mod commit;
 pub mod config;

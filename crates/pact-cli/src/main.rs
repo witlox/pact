@@ -226,6 +226,7 @@ async fn main() {
             | Commands::Emergency { .. }
             | Commands::Approve { .. }
             | Commands::Watch { .. }
+            | Commands::Apply { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -420,7 +421,13 @@ async fn main() {
             execute::watch(journal_channel.as_ref().unwrap(), vc).await
         }
         Commands::Apply { spec } => {
-            Ok(format!("apply {spec} (spec format not yet defined)"))
+            execute::apply(
+                journal_client.as_mut().unwrap(),
+                &spec,
+                &principal,
+                &role,
+            )
+            .await
         }
         Commands::Extend { mins } => {
             Ok(format!("extend {mins} min (agent commit window RPC not yet defined)"))

@@ -391,7 +391,7 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
 }
 
 /// Convert domain StateDelta to proto StateDelta.
-fn state_delta_to_proto(delta: &pact_common::types::StateDelta) -> pact_common::proto::config::StateDelta {
+pub fn state_delta_to_proto(delta: &pact_common::types::StateDelta) -> pact_common::proto::config::StateDelta {
     use pact_common::proto::config::{
         FileDelta, GpuDelta, KernelDelta, MountDelta, NetworkDelta, PackageDelta, ServiceDelta,
     };
