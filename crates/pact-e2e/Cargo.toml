@@ -6,8 +6,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+pact-cli = { workspace = true }
 pact-common = { workspace = true }
 pact-journal = { workspace = true }
+pact-mcp = { workspace = true }
 pact-policy = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
