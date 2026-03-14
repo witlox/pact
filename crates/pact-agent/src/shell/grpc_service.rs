@@ -5,25 +5,30 @@
 
 use std::sync::Arc;
 
+use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::warn;
 
 use pact_common::proto::shell::{
     exec_output, shell_service_server::ShellService, CommandEntry, ExecOutput, ExecRequest,
-    ListCommandsRequest, ListCommandsResponse, ShellInput, ShellOutput,
+    ExtendWindowRequest, ExtendWindowResponse, ListCommandsRequest, ListCommandsResponse,
+    ShellInput, ShellOutput,
 };
+
+use crate::commit::CommitWindowManager;
 
 use super::ShellServer;
 
 /// gRPC ShellService implementation — delegates to ShellServer.
 pub struct ShellServiceImpl {
     server: Arc<ShellServer>,
+    commit_window: Arc<RwLock<CommitWindowManager>>,
 }
 
 impl ShellServiceImpl {
-    pub fn new(server: Arc<ShellServer>) -> Self {
-        Self { server }
+    pub fn new(server: Arc<ShellServer>, commit_window: Arc<RwLock<CommitWindowManager>>) -> Self {
+        Self { server, commit_window }
     }
 }
 
@@ -120,6 +125,33 @@ impl ShellService for ShellServiceImpl {
 
         Ok(Response::new(ListCommandsResponse { commands: entries }))
     }
+
+    /// Extend the commit window by additional minutes.
+    async fn extend_commit_window(
+        &self,
+        request: Request<ExtendWindowRequest>,
+    ) -> Result<Response<ExtendWindowResponse>, Status> {
+        let mins = request.into_inner().additional_minutes;
+        if mins == 0 {
+            return Ok(Response::new(ExtendWindowResponse {
+                success: false,
+                new_deadline_seconds: 0,
+                error: Some("additional_minutes must be > 0".to_string()),
+            }));
+        }
+
+        let mut cw = self.commit_window.write().await;
+        cw.extend(mins * 60);
+
+        // Calculate seconds until deadline
+        let deadline_secs = cw.seconds_remaining();
+
+        Ok(Response::new(ExtendWindowResponse {
+            success: true,
+            new_deadline_seconds: deadline_secs,
+            error: None,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -127,8 +159,13 @@ mod tests {
     use super::*;
     use crate::shell::auth::AuthConfig;
     use crate::shell::exec::ExecConfig;
+    use pact_common::config::CommitWindowConfig;
 
     const TEST_SECRET: &[u8] = b"test-secret-key-for-pact-development";
+
+    fn test_commit_window() -> Arc<RwLock<CommitWindowManager>> {
+        Arc::new(RwLock::new(CommitWindowManager::new(CommitWindowConfig::default())))
+    }
 
     fn test_shell_server() -> Arc<ShellServer> {
         Arc::new(ShellServer::new(
@@ -164,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn exec_returns_output_stream() {
         let server = test_shell_server();
-        let svc = ShellServiceImpl::new(server);
+        let svc = ShellServiceImpl::new(server, test_commit_window());
 
         let token = make_token("ops@example.com", "pact-ops-ml-training");
         let mut request = Request::new(ExecRequest {
@@ -200,7 +237,7 @@ mod tests {
     #[tokio::test]
     async fn exec_without_auth_fails() {
         let server = test_shell_server();
-        let svc = ShellServiceImpl::new(server);
+        let svc = ShellServiceImpl::new(server, test_commit_window());
 
         let request = Request::new(ExecRequest {
             command: "echo".into(),
@@ -214,7 +251,7 @@ mod tests {
     #[tokio::test]
     async fn list_commands_returns_entries() {
         let server = test_shell_server();
-        let svc = ShellServiceImpl::new(server);
+        let svc = ShellServiceImpl::new(server, test_commit_window());
 
         let resp = svc
             .list_commands(Request::new(ListCommandsRequest {}))

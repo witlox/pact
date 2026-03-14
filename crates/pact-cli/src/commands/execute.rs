@@ -533,6 +533,35 @@ pub async fn watch(channel: &Channel, vcluster: &str) -> anyhow::Result<String> 
     Ok("Watch ended.".to_string())
 }
 
+/// Execute `pact extend` — extend commit window on agent.
+pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
+    use pact_common::proto::shell::{
+        shell_service_client::ShellServiceClient, ExtendWindowRequest,
+    };
+
+    let mut client = ShellServiceClient::new(channel);
+    let resp = client
+        .extend_commit_window(tonic::Request::new(ExtendWindowRequest {
+            additional_minutes: mins,
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("extend failed: {e}"))?;
+
+    let result = resp.into_inner();
+    if result.success {
+        let secs = result.new_deadline_seconds;
+        let mins_remaining = secs / 60;
+        Ok(format!(
+            "Commit window extended by {mins} minutes ({mins_remaining} minutes remaining)"
+        ))
+    } else {
+        Err(anyhow::anyhow!(
+            "extend failed: {}",
+            result.error.unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+}
+
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.
 fn parse_scope_filter(s: &str) -> ProtoScopeMsg {
     if let Some(node) = s.strip_prefix("node:") {

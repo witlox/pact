@@ -430,7 +430,11 @@ async fn main() {
             .await
         }
         Commands::Extend { mins } => {
-            Ok(format!("extend {mins} min (agent commit window RPC not yet defined)"))
+            let agent_addr = "http://127.0.0.1:9445";
+            match execute::connect_agent(agent_addr).await {
+                Ok(channel) => execute::extend(channel, mins).await,
+                Err(e) => Err(e),
+            }
         }
     };
 

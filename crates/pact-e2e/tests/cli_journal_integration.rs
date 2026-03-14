@@ -269,6 +269,62 @@ async fn cli_log_scope_filter() {
     );
 }
 
+/// Apply a TOML spec and verify entries have StateDelta data.
+#[tokio::test]
+async fn cli_apply_spec_flow() {
+    let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
+    let channel = connect_to_leader(&cluster).await;
+    let mut client = ConfigServiceClient::new(channel.clone());
+
+    // Write a spec file to a temp location
+    let spec_dir = tempfile::tempdir().unwrap();
+    let spec_path = spec_dir.path().join("test-spec.toml");
+    std::fs::write(
+        &spec_path,
+        r#"
+[vcluster.ml-training.sysctl]
+"vm.nr_hugepages" = "1024"
+"vm.swappiness" = "10"
+
+[vcluster.ml-training.services.nvidia-persistenced]
+state = "running"
+"#,
+    )
+    .unwrap();
+
+    // Apply the spec
+    let result = execute::apply(
+        &mut client,
+        spec_path.to_str().unwrap(),
+        "admin@example.com",
+        "pact-platform-admin",
+    )
+    .await
+    .unwrap();
+
+    assert!(result.contains("ml-training"), "should mention vCluster: {result}");
+    assert!(result.contains("3 changes"), "should report 3 changes: {result}");
+    assert!(result.contains("Applied"), "should confirm applied: {result}");
+
+    // Verify the entry has StateDelta
+    let log_output = execute::log(&mut client, 10, None).await.unwrap();
+    assert!(log_output.contains("COMMIT"), "should have commit entry: {log_output}");
+
+    // Read the entry back and verify it has state_delta
+    let resp = client
+        .get_entry(tonic::Request::new(
+            pact_common::proto::journal::GetEntryRequest { sequence: 0 },
+        ))
+        .await
+        .unwrap();
+    let entry = resp.into_inner();
+    assert!(entry.state_delta.is_some(), "entry should have StateDelta");
+    let delta = entry.state_delta.unwrap();
+    assert_eq!(delta.kernel.len(), 2, "should have 2 sysctl entries");
+    assert_eq!(delta.services.len(), 1, "should have 1 service entry");
+    assert_eq!(delta.kernel[0].key, "vm.nr_hugepages");
+}
+
 /// MCP connected dispatch against real journal.
 #[tokio::test]
 async fn mcp_connected_dispatch() {

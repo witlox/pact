@@ -13,6 +13,9 @@ service ShellService {
 
   // List whitelisted commands for this node's vCluster.
   rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+
+  // Extend the commit window on this agent.
+  rpc ExtendCommitWindow(ExtendWindowRequest) returns (ExtendWindowResponse);
 }
 
 message ExecRequest {
@@ -71,4 +74,14 @@ message CommandEntry {
   string command = 1;
   bool state_changing = 2;
   string description = 3;
+}
+
+message ExtendWindowRequest {
+  uint32 additional_minutes = 1;
+}
+
+message ExtendWindowResponse {
+  bool success = 1;
+  uint32 new_deadline_seconds = 2;  // seconds until new deadline
+  optional string error = 3;
 }

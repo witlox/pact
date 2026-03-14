@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         agent_config.shell.whitelist_mode == "learning",
         10, // max concurrent sessions
     ));
-    let shell_svc = ShellServiceImpl::new(shell_server);
+    let shell_svc = ShellServiceImpl::new(shell_server, boot_result.commit_window.clone());
 
     let shell_listener = tokio::net::TcpListener::bind(&shell_listen).await?;
     let shell_addr = shell_listener.local_addr()?;
