@@ -17,6 +17,38 @@ use pact_common::proto::journal::{
 
 use super::config::CliConfig;
 
+/// Resolve identity (principal + role) from a JWT token.
+///
+/// Decodes the JWT payload without signature verification (the journal validates it).
+/// Falls back to defaults if decoding fails.
+pub fn resolve_identity_from_token(token: &str) -> (String, String) {
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+
+    #[derive(serde::Deserialize)]
+    struct Claims {
+        sub: Option<String>,
+        pact_role: Option<String>,
+    }
+
+    // Try to decode without verification — we just need the claims
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_exp = false;
+    validation.validate_aud = false;
+
+    match decode::<Claims>(token, &DecodingKey::from_secret(b""), &validation) {
+        Ok(data) => {
+            let principal = data.claims.sub.unwrap_or_else(|| "cli-user".to_string());
+            let role = data
+                .claims
+                .pact_role
+                .unwrap_or_else(|| "pact-platform-admin".to_string());
+            (principal, role)
+        }
+        Err(_) => ("cli-user".to_string(), "pact-platform-admin".to_string()),
+    }
+}
+
 /// Create a gRPC channel to the journal endpoint.
 pub async fn connect(config: &CliConfig) -> anyhow::Result<Channel> {
     let uri = if config.endpoint.starts_with("http") {
@@ -576,5 +608,46 @@ mod tests {
         assert!(formatted.contains("#100"));
         assert!(formatted.contains("EMERGENCY_ON"));
         assert!(formatted.contains("global"));
+    }
+
+    #[test]
+    fn resolve_identity_from_valid_jwt() {
+        // Create a real JWT with jsonwebtoken
+        use jsonwebtoken::{encode, EncodingKey, Header};
+
+        #[derive(serde::Serialize)]
+        struct Claims {
+            sub: String,
+            pact_role: String,
+            exp: u64,
+        }
+        let token = encode(
+            &Header::default(),
+            &Claims {
+                sub: "alice@example.com".into(),
+                pact_role: "pact-ops-ml-training".into(),
+                exp: 9999999999,
+            },
+            &EncodingKey::from_secret(b"test-secret"),
+        )
+        .unwrap();
+
+        let (principal, role) = resolve_identity_from_token(&token);
+        assert_eq!(principal, "alice@example.com");
+        assert_eq!(role, "pact-ops-ml-training");
+    }
+
+    #[test]
+    fn resolve_identity_from_invalid_token_returns_defaults() {
+        let (principal, role) = resolve_identity_from_token("not-a-jwt");
+        assert_eq!(principal, "cli-user");
+        assert_eq!(role, "pact-platform-admin");
+    }
+
+    #[test]
+    fn resolve_identity_from_empty_token_returns_defaults() {
+        let (principal, role) = resolve_identity_from_token("");
+        assert_eq!(principal, "cli-user");
+        assert_eq!(role, "pact-platform-admin");
     }
 }

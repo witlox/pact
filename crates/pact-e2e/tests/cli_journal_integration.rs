@@ -252,12 +252,21 @@ async fn cli_log_scope_filter() {
     assert!(all.contains("#0"), "should have entry 0");
     assert!(all.contains("#1"), "should have entry 1");
 
-    // Note: scope filtering in ListEntries is not yet implemented server-side
-    // (the proto scope field is passed but the server doesn't filter by it)
-    // This test documents the current behavior
+    // Scope filtering: only ml-training entries
     let filtered = execute::log(&mut client, 10, Some("vc:ml-training")).await.unwrap();
-    // Currently returns all entries (filtering TODO)
-    assert!(!filtered.contains("No entries"), "should return entries");
+    assert!(filtered.contains("#0"), "should include ml-training entry");
+    assert!(
+        !filtered.contains("vc:dev-sandbox"),
+        "should NOT include dev-sandbox entry: {filtered}"
+    );
+
+    // Scope filtering: only dev-sandbox entries
+    let filtered = execute::log(&mut client, 10, Some("vc:dev-sandbox")).await.unwrap();
+    assert!(filtered.contains("#1"), "should include dev-sandbox entry");
+    assert!(
+        !filtered.contains("vc:ml-training"),
+        "should NOT include ml-training entry: {filtered}"
+    );
 }
 
 /// MCP connected dispatch against real journal.

@@ -242,6 +242,10 @@ async fn main() {
     let mut journal_client =
         journal_channel.as_ref().map(|ch| ConfigServiceClient::new(ch.clone()));
 
+    // Resolve identity from token (if available)
+    let token = config.resolve_token().unwrap_or_default();
+    let (principal, role) = execute::resolve_identity_from_token(&token);
+
     let result = match cli.command {
         Commands::Status { node, .. } => {
             let node_id = node.unwrap_or_else(|| "local".to_string());
@@ -256,13 +260,12 @@ async fn main() {
                 .as_deref()
                 .unwrap_or("default")
                 .to_string();
-            // TODO: resolve principal/role from OIDC token
             execute::commit(
                 journal_client.as_mut().unwrap(),
                 &m,
                 &vcluster,
-                "cli-user",
-                "pact-platform-admin",
+                &principal,
+                &role,
             )
             .await
         }
@@ -276,8 +279,8 @@ async fn main() {
                 journal_client.as_mut().unwrap(),
                 seq,
                 &vcluster,
-                "cli-user",
-                "pact-platform-admin",
+                &principal,
+                &role,
             )
             .await
         }
@@ -295,9 +298,6 @@ async fn main() {
                     let agent_addr = "http://127.0.0.1:9445";
                     match execute::connect_agent(agent_addr).await {
                         Ok(channel) => {
-                            let token = config
-                                .resolve_token()
-                                .unwrap_or_else(|_| "dev-token".to_string());
                             execute::exec_remote(channel, &token, &cmd, &args).await
                         }
                         Err(e) => Err(e),
@@ -370,9 +370,6 @@ async fn main() {
             let agent_addr = "http://127.0.0.1:9445";
             match execute::connect_agent(agent_addr).await {
                 Ok(channel) => {
-                    let token = config
-                        .resolve_token()
-                        .unwrap_or_else(|_| "dev-token".to_string());
                     match action {
                         ServiceSubcommand::Status { name } => {
                             let svc = name.as_deref().unwrap_or("--all");

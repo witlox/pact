@@ -25,6 +25,7 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 dirs = { workspace = true }
 chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

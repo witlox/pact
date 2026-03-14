@@ -127,12 +127,28 @@ impl ConfigService for ConfigServiceImpl {
         let to = req.to_sequence.unwrap_or(u64::MAX);
         let limit = req.limit.unwrap_or(u32::MAX) as usize;
 
+        // Parse optional scope filter
+        let scope_filter = req.scope.and_then(|s| s.scope).map(|s| match s {
+            pact_common::proto::config::scope::Scope::NodeId(n) => {
+                pact_common::types::Scope::Node(n)
+            }
+            pact_common::proto::config::scope::Scope::VclusterId(v) => {
+                pact_common::types::Scope::VCluster(v)
+            }
+            pact_common::proto::config::scope::Scope::Global(_) => {
+                pact_common::types::Scope::Global
+            }
+        });
+
         let state = self.state.read().await;
 
-        // Collect matching entries from BTreeMap range
+        // Collect matching entries from BTreeMap range, filtered by scope
         let entries: Vec<ProtoConfigEntry> = state
             .entries
             .range(from..=to)
+            .filter(|(_, e)| {
+                scope_filter.as_ref().is_none_or(|filter| e.scope == *filter)
+            })
             .take(limit)
             .map(|(_, e)| config_entry_to_proto(e))
             .collect();
