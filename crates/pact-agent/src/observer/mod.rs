@@ -7,6 +7,15 @@
 use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+
 /// An event detected by any observer subsystem.
 #[derive(Debug, Clone)]
 pub struct ObserverEvent {
@@ -28,6 +37,264 @@ pub trait Observer: Send + Sync {
 
     /// Stop observing.
     async fn stop(&self) -> anyhow::Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// InotifyObserver — filesystem change watcher (Linux only)
+// ---------------------------------------------------------------------------
+
+/// Watches filesystem paths for changes using Linux inotify.
+///
+/// Emits `ObserverEvent` with `category = "file"` for every modify, create,
+/// delete, or move detected on the watched paths.
+#[cfg(target_os = "linux")]
+pub struct InotifyObserver {
+    paths: Vec<PathBuf>,
+    running: Arc<AtomicBool>,
+}
+
+#[cfg(target_os = "linux")]
+impl InotifyObserver {
+    /// Create a new inotify observer watching the given paths.
+    pub fn new(paths: Vec<PathBuf>) -> Self {
+        Self {
+            paths,
+            running: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[async_trait::async_trait]
+impl Observer for InotifyObserver {
+    async fn start(&self, tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
+        use nix::sys::inotify::{AddWatchFlags, Inotify, InitFlags};
+
+        let inotify = Inotify::init(InitFlags::IN_NONBLOCK)?;
+        let watch_flags = AddWatchFlags::IN_MODIFY
+            | AddWatchFlags::IN_CREATE
+            | AddWatchFlags::IN_DELETE
+            | AddWatchFlags::IN_MOVED_FROM
+            | AddWatchFlags::IN_MOVED_TO;
+
+        // Map watch descriptors back to paths for event reporting.
+        let mut wd_to_path = std::collections::HashMap::new();
+        for path in &self.paths {
+            let wd = inotify.add_watch(path, watch_flags)?;
+            wd_to_path.insert(wd, path.clone());
+        }
+
+        self.running.store(true, Ordering::SeqCst);
+        let running = Arc::clone(&self.running);
+        let fd = inotify.as_raw_fd();
+
+        tokio::spawn(async move {
+            let async_fd = match tokio::io::unix::AsyncFd::new(fd) {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("InotifyObserver: failed to create AsyncFd: {e}");
+                    return;
+                }
+            };
+
+            while running.load(Ordering::SeqCst) {
+                // Wait until the inotify fd is readable.
+                let guard = match async_fd.readable().await {
+                    Ok(g) => g,
+                    Err(_) => break,
+                };
+
+                match inotify.read_events() {
+                    Ok(events) => {
+                        for ev in events {
+                            let base = wd_to_path
+                                .get(&ev.wd)
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_default();
+
+                            let full_path = if let Some(ref name) = ev.name {
+                                format!("{}/{}", base, name.to_string_lossy())
+                            } else {
+                                base
+                            };
+
+                            let detail = describe_inotify_mask(ev.mask);
+
+                            let observer_event = ObserverEvent {
+                                category: "file".into(),
+                                path: full_path,
+                                detail,
+                                timestamp: Utc::now(),
+                            };
+
+                            if tx.send(observer_event).await.is_err() {
+                                // Receiver dropped — stop.
+                                running.store(false, Ordering::SeqCst);
+                                return;
+                            }
+                        }
+                    }
+                    Err(nix::errno::Errno::EAGAIN) => {
+                        // No events ready — clear readiness and loop.
+                    }
+                    Err(e) => {
+                        tracing::error!("InotifyObserver: read error: {e}");
+                        break;
+                    }
+                }
+
+                guard.clear_ready();
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// Translate an inotify event mask into a human-readable description.
+#[cfg(target_os = "linux")]
+fn describe_inotify_mask(mask: nix::sys::inotify::AddWatchFlags) -> String {
+    use nix::sys::inotify::AddWatchFlags;
+
+    let mut parts = Vec::new();
+    if mask.contains(AddWatchFlags::IN_CREATE) {
+        parts.push("created");
+    }
+    if mask.contains(AddWatchFlags::IN_DELETE) {
+        parts.push("deleted");
+    }
+    if mask.contains(AddWatchFlags::IN_MODIFY) {
+        parts.push("modified");
+    }
+    if mask.contains(AddWatchFlags::IN_MOVED_FROM) {
+        parts.push("moved_from");
+    }
+    if mask.contains(AddWatchFlags::IN_MOVED_TO) {
+        parts.push("moved_to");
+    }
+    if parts.is_empty() {
+        format!("inotify event 0x{:x}", mask.bits())
+    } else {
+        parts.join(", ")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NetlinkObserver — network interface change monitor (Linux only)
+// ---------------------------------------------------------------------------
+
+/// Monitors network interface link changes using a NETLINK_ROUTE socket.
+///
+/// Emits `ObserverEvent` with `category = "network"` whenever a link
+/// state change notification is received from the kernel.
+#[cfg(target_os = "linux")]
+pub struct NetlinkObserver {
+    running: Arc<AtomicBool>,
+}
+
+#[cfg(target_os = "linux")]
+impl NetlinkObserver {
+    /// Create a new netlink observer.
+    pub fn new() -> Self {
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Default for NetlinkObserver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[async_trait::async_trait]
+impl Observer for NetlinkObserver {
+    async fn start(&self, tx: mpsc::Sender<ObserverEvent>) -> anyhow::Result<()> {
+        use nix::sys::socket::{
+            bind, socket, AddressFamily, NetlinkAddr, SockFlag, SockType,
+        };
+
+        // RTMGRP_LINK = 1 — subscribe to link notifications.
+        const RTMGRP_LINK: u32 = 1;
+
+        let sock = socket(
+            AddressFamily::Netlink,
+            SockType::Datagram,
+            SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+            None, // NETLINK_ROUTE is protocol 0, the default
+        )?;
+
+        let addr = NetlinkAddr::new(0, RTMGRP_LINK);
+        bind(sock.as_raw_fd(), &addr)?;
+
+        self.running.store(true, Ordering::SeqCst);
+        let running = Arc::clone(&self.running);
+
+        tokio::spawn(async move {
+            let raw_fd = sock.as_raw_fd();
+            let async_fd = match tokio::io::unix::AsyncFd::new(raw_fd) {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("NetlinkObserver: failed to create AsyncFd: {e}");
+                    return;
+                }
+            };
+
+            // Keep the OwnedFd alive for the duration of the task so `raw_fd` stays valid.
+            let _sock_guard = sock;
+
+            let mut buf = [0u8; 4096];
+
+            while running.load(Ordering::SeqCst) {
+                let guard = match async_fd.readable().await {
+                    Ok(g) => g,
+                    Err(_) => break,
+                };
+
+                match nix::unistd::read(&_sock_guard, &mut buf) {
+                    Ok(n) if n > 0 => {
+                        let event = ObserverEvent {
+                            category: "network".into(),
+                            path: "netlink".into(),
+                            detail: format!("link change notification ({n} bytes)"),
+                            timestamp: Utc::now(),
+                        };
+                        if tx.send(event).await.is_err() {
+                            running.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                    }
+                    Ok(_) => {
+                        // EOF or zero-length read.
+                    }
+                    Err(nix::errno::Errno::EAGAIN) => {
+                        // No data ready.
+                    }
+                    Err(e) => {
+                        tracing::error!("NetlinkObserver: read error: {e}");
+                        break;
+                    }
+                }
+
+                guard.clear_ready();
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
 /// Mock observer for development and testing on macOS.
@@ -240,5 +507,115 @@ mod tests {
         let observer = MockObserver::new();
         observer.stop().await.unwrap();
         observer.stop().await.unwrap(); // double stop should not fail
+    }
+
+    // -----------------------------------------------------------------------
+    // Linux-only tests for InotifyObserver and NetlinkObserver
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "linux")]
+    mod linux_tests {
+        use super::*;
+        use std::path::PathBuf;
+        use tokio::fs;
+        use tokio::time::{timeout, Duration};
+
+        #[tokio::test]
+        async fn inotify_observer_detects_file_creation() {
+            let dir = tempfile::tempdir().unwrap();
+            let dir_path = dir.path().to_path_buf();
+
+            let observer = super::super::InotifyObserver::new(vec![dir_path.clone()]);
+            let (tx, mut rx) = mpsc::channel(32);
+
+            observer.start(tx).await.unwrap();
+
+            // Create a file in the watched directory.
+            let test_file = dir_path.join("test.txt");
+            fs::write(&test_file, b"hello").await.unwrap();
+
+            // Wait for the event (with timeout).
+            let event = timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for inotify event")
+                .expect("channel closed unexpectedly");
+
+            assert_eq!(event.category, "file");
+            assert!(event.path.contains("test.txt"), "path should contain filename: {}", event.path);
+
+            observer.stop().await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn inotify_observer_stop_is_idempotent() {
+            let observer = super::super::InotifyObserver::new(vec![PathBuf::from("/tmp")]);
+            let (tx, _rx) = mpsc::channel(8);
+            observer.start(tx).await.unwrap();
+
+            observer.stop().await.unwrap();
+            observer.stop().await.unwrap(); // should not fail
+        }
+
+        #[tokio::test]
+        async fn inotify_observer_handles_dropped_receiver() {
+            let dir = tempfile::tempdir().unwrap();
+            let observer = super::super::InotifyObserver::new(vec![dir.path().to_path_buf()]);
+            let (tx, rx) = mpsc::channel(1);
+            drop(rx);
+
+            // start should succeed even if receiver is already dropped
+            let result = observer.start(tx).await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn netlink_observer_starts_and_stops() {
+            let observer = super::super::NetlinkObserver::new();
+            let (tx, _rx) = mpsc::channel(8);
+
+            observer.start(tx).await.unwrap();
+            observer.stop().await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn netlink_observer_stop_is_idempotent() {
+            let observer = super::super::NetlinkObserver::new();
+            let (tx, _rx) = mpsc::channel(8);
+            observer.start(tx).await.unwrap();
+
+            observer.stop().await.unwrap();
+            observer.stop().await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn netlink_observer_default_trait() {
+            let observer = super::super::NetlinkObserver::default();
+            observer.stop().await.unwrap();
+        }
+
+        #[test]
+        fn describe_inotify_mask_modify() {
+            use nix::sys::inotify::AddWatchFlags;
+            let desc = super::super::describe_inotify_mask(AddWatchFlags::IN_MODIFY);
+            assert_eq!(desc, "modified");
+        }
+
+        #[test]
+        fn describe_inotify_mask_combined() {
+            use nix::sys::inotify::AddWatchFlags;
+            let desc = super::super::describe_inotify_mask(
+                AddWatchFlags::IN_CREATE | AddWatchFlags::IN_DELETE,
+            );
+            assert!(desc.contains("created"));
+            assert!(desc.contains("deleted"));
+        }
+
+        #[test]
+        fn describe_inotify_mask_unknown() {
+            use nix::sys::inotify::AddWatchFlags;
+            let desc =
+                super::super::describe_inotify_mask(AddWatchFlags::IN_CLOSE_WRITE);
+            assert!(desc.starts_with("inotify event 0x"), "got: {desc}");
+        }
     }
 }

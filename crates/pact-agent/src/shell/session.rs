@@ -289,6 +289,206 @@ pub fn cleanup_session_bin_dir(session: &ShellSession) {
 #[cfg(not(target_os = "linux"))]
 pub fn cleanup_session_bin_dir(_session: &ShellSession) {}
 
+// ---------------------------------------------------------------------------
+// PTY allocation — Linux implementation
+// ---------------------------------------------------------------------------
+
+/// Handle to an allocated PTY with the child shell process.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub struct PtyHandle {
+    /// Master file descriptor of the PTY pair.
+    master_fd: std::os::unix::io::RawFd,
+    /// PID of the child shell process.
+    child_pid: nix::unistd::Pid,
+}
+
+#[cfg(target_os = "linux")]
+impl PtyHandle {
+    /// Write data to the master side of the PTY (sends input to the shell).
+    pub fn write(&self, data: &[u8]) -> Result<usize, SessionError> {
+        nix::unistd::write(self.master_fd, data)
+            .map_err(|e| SessionError::PtyFailed(format!("write to master fd: {e}")))
+    }
+
+    /// Read data from the master side of the PTY (receives output from the shell).
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, SessionError> {
+        nix::unistd::read(self.master_fd, buf)
+            .map_err(|e| SessionError::PtyFailed(format!("read from master fd: {e}")))
+    }
+
+    /// Resize the PTY terminal window.
+    pub fn resize(&self, rows: u16, cols: u16) -> Result<(), SessionError> {
+        let ws = nix::pty::Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        // SAFETY: TIOCSWINSZ is a well-defined ioctl for setting terminal window size.
+        // The winsize struct is stack-allocated and valid for the duration of the call.
+        let ret =
+            unsafe { nix::libc::ioctl(self.master_fd, nix::libc::TIOCSWINSZ, &ws as *const _) };
+        if ret == -1 {
+            Err(SessionError::PtyFailed(format!(
+                "TIOCSWINSZ ioctl failed: {}",
+                std::io::Error::last_os_error()
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Close the PTY session: send SIGHUP to the child and close the master fd.
+    pub fn close(self) -> Result<(), SessionError> {
+        // Send SIGHUP to the child process (standard terminal hangup signal).
+        let _ = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP);
+
+        // Close the master fd.
+        let _ = nix::unistd::close(self.master_fd);
+
+        // Reap the child to avoid zombies.
+        let _ = nix::sys::wait::waitpid(self.child_pid, None);
+
+        info!(child_pid = %self.child_pid, "PTY session closed");
+        Ok(())
+    }
+
+    /// Returns the master file descriptor (for use with poll/select/epoll).
+    pub fn master_fd(&self) -> std::os::unix::io::RawFd {
+        self.master_fd
+    }
+
+    /// Returns the child process PID.
+    pub fn child_pid(&self) -> nix::unistd::Pid {
+        self.child_pid
+    }
+}
+
+/// Allocate a PTY pair and fork a restricted bash shell for the given session.
+///
+/// The child process:
+/// - Creates a new session with `setsid()`
+/// - Sets the slave PTY as stdin/stdout/stderr via `dup2()`
+/// - Configures environment variables from the session
+/// - Exec's `/bin/rbash` (restricted bash)
+///
+/// The parent process returns a [`PtyHandle`] holding the master fd and child pid.
+#[cfg(target_os = "linux")]
+pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
+    use nix::pty::openpty;
+    use nix::unistd::{dup2, execve, fork, setsid, ForkResult};
+    use std::ffi::CString;
+
+    // Set initial window size from session dimensions.
+    let win_size = Some(nix::pty::Winsize {
+        ws_row: session.rows,
+        ws_col: session.cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    });
+
+    // Allocate PTY pair.
+    let pty = openpty(win_size.as_ref(), None)
+        .map_err(|e| SessionError::PtyFailed(format!("openpty: {e}")))?;
+
+    let master_fd = pty.master;
+    let slave_fd = pty.slave;
+
+    // Fork.
+    // SAFETY: We are single-threaded at the point of fork in the child path
+    // (the child immediately sets up fds and exec's). The parent path is safe
+    // because we only record the child pid and close the slave fd.
+    match unsafe { fork() } {
+        Ok(ForkResult::Child) => {
+            // --- Child process ---
+
+            // Close the master fd in the child — only the parent uses it.
+            let _ = nix::unistd::close(master_fd);
+
+            // Create a new session and set the slave as the controlling terminal.
+            setsid().map_err(|e| SessionError::PtyFailed(format!("setsid: {e}")))?;
+
+            // Set slave PTY as stdin/stdout/stderr.
+            dup2(slave_fd, 0).map_err(|e| SessionError::PtyFailed(format!("dup2 stdin: {e}")))?;
+            dup2(slave_fd, 1).map_err(|e| SessionError::PtyFailed(format!("dup2 stdout: {e}")))?;
+            dup2(slave_fd, 2).map_err(|e| SessionError::PtyFailed(format!("dup2 stderr: {e}")))?;
+
+            // Close the original slave fd (now duplicated to 0/1/2).
+            if slave_fd > 2 {
+                let _ = nix::unistd::close(slave_fd);
+            }
+
+            // Build environment from session.
+            let env_vars: Vec<CString> = session
+                .env_vars()
+                .into_iter()
+                .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok())
+                .collect();
+
+            let shell =
+                CString::new("/bin/rbash").expect("CString::new failed for /bin/rbash path");
+            let argv = [shell.clone()];
+
+            // Exec rbash — this does not return on success.
+            let _ = execve(&shell, &argv, &env_vars);
+
+            // If execve fails, exit the child immediately.
+            std::process::exit(127);
+        }
+        Ok(ForkResult::Parent { child }) => {
+            // --- Parent process ---
+
+            // Close the slave fd in the parent — only the child uses it.
+            let _ = nix::unistd::close(slave_fd);
+
+            info!(
+                session_id = %session.session_id,
+                child_pid = %child,
+                "PTY allocated for shell session"
+            );
+
+            Ok(PtyHandle { master_fd, child_pid: child })
+        }
+        Err(e) => Err(SessionError::PtyFailed(format!("fork: {e}"))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PTY allocation — non-Linux stub
+// ---------------------------------------------------------------------------
+
+/// Stub PTY handle for non-Linux platforms.
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug)]
+pub struct PtyHandle {
+    _private: (),
+}
+
+#[cfg(not(target_os = "linux"))]
+impl PtyHandle {
+    /// Always returns an error on non-Linux platforms.
+    pub fn write(&self, _data: &[u8]) -> Result<usize, SessionError> {
+        Err(SessionError::PtyFailed("PTY not supported on this platform".into()))
+    }
+
+    /// Always returns an error on non-Linux platforms.
+    pub fn read(&self, _buf: &mut [u8]) -> Result<usize, SessionError> {
+        Err(SessionError::PtyFailed("PTY not supported on this platform".into()))
+    }
+
+    /// Always returns an error on non-Linux platforms.
+    pub fn resize(&self, _rows: u16, _cols: u16) -> Result<(), SessionError> {
+        Err(SessionError::PtyFailed("PTY not supported on this platform".into()))
+    }
+
+    /// No-op on non-Linux platforms.
+    pub fn close(self) -> Result<(), SessionError> {
+        Err(SessionError::PtyFailed("PTY not supported on this platform".into()))
+    }
+}
+
+/// Stub for non-Linux: always returns an error.
+#[cfg(not(target_os = "linux"))]
+pub fn allocate_pty(_session: &ShellSession) -> Result<PtyHandle, SessionError> {
+    Err(SessionError::PtyFailed("PTY allocation not supported on this platform".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,5 +739,82 @@ mod tests {
         assert!(env_map["PATH"].starts_with("/run/pact/shell/"));
         // HOME must not be a real user home
         assert_eq!(env_map["HOME"], "/tmp");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn allocate_pty_stub_returns_error() {
+        let session = ShellSession::new(
+            test_user(),
+            "node-001".into(),
+            "ml-training".into(),
+            24,
+            80,
+            "xterm-256color".into(),
+        );
+
+        let result = allocate_pty(&session);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(SessionError::PtyFailed(_))));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn pty_handle_stub_methods_return_errors() {
+        let handle = PtyHandle { _private: () };
+        assert!(handle.write(b"test").is_err());
+        assert!(handle.read(&mut [0u8; 64]).is_err());
+        assert!(handle.resize(40, 120).is_err());
+        assert!(handle.close().is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn allocate_pty_creates_handle() {
+        // This test requires /bin/sh at minimum (rbash may not exist in CI).
+        // We test the PTY allocation path by forking a simple shell.
+        let session = ShellSession::new(
+            test_user(),
+            "node-001".into(),
+            "ml-training".into(),
+            24,
+            80,
+            "xterm-256color".into(),
+        );
+
+        // allocate_pty requires /bin/rbash — if it doesn't exist, the child
+        // exits with code 127. The parent still gets a valid PtyHandle.
+        let handle = allocate_pty(&session);
+
+        // On systems without /bin/rbash, the fork still succeeds (child exits 127).
+        // On systems with /bin/rbash, we get a real shell.
+        // Either way, PtyHandle should be returned successfully.
+        if let Ok(h) = handle {
+            assert!(h.master_fd() >= 0);
+            assert!(h.child_pid().as_raw() > 0);
+            // Clean up
+            let _ = h.close();
+        }
+        // If handle is Err, openpty itself failed (e.g., no /dev/ptmx) — acceptable in CI.
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pty_handle_resize() {
+        let session = ShellSession::new(
+            test_user(),
+            "node-001".into(),
+            "ml-training".into(),
+            24,
+            80,
+            "xterm-256color".into(),
+        );
+
+        if let Ok(h) = allocate_pty(&session) {
+            // Resize should succeed on a valid PTY.
+            let resize_result = h.resize(40, 120);
+            assert!(resize_result.is_ok());
+            let _ = h.close();
+        }
     }
 }

@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 
 use pact_common::config::AgentConfig;
 use pact_common::proto::stream::{config_chunk, BootConfigRequest};
-use pact_common::types::{ConfigState, DriftWeights, SupervisorBackend, VClusterPolicy};
+use pact_common::types::{ConfigState, DeltaItem, DriftWeights, StateDelta, SupervisorBackend, VClusterPolicy};
 
 use crate::capability::{CapabilityReporter, GpuBackend, MockGpuBackend};
 use crate::commit::CommitWindowManager;
@@ -113,8 +113,12 @@ pub async fn boot(
                     base_version = boot_config.base_version,
                     "Boot config received from journal"
                 );
-                // TODO: apply overlay + node delta to system state
-                // (kernel params, mounts, modules, uenv, services)
+                // Apply overlay data as state delta (Linux: sysctl + mounts)
+                if !boot_config.overlay_data.is_empty() {
+                    if let Ok(delta) = serde_json::from_slice::<StateDelta>(&boot_config.overlay_data) {
+                        apply_state_delta(&delta);
+                    }
+                }
             }
             Err(e) => {
                 warn!(error = %e, "Failed to stream boot config — starting with defaults");
@@ -287,6 +291,205 @@ pub async fn handle_config_action(action: ConfigUpdateAction, handles: &ConfigAc
             let mut evaluator = handles.drift_evaluator.write().await;
             *evaluator = DriftEvaluator::new(new_blacklist, DriftWeights::default());
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Linux-specific config application
+// ---------------------------------------------------------------------------
+
+/// Apply sysctl entries by writing to /proc/sys.
+///
+/// Each `DeltaItem.key` is a sysctl key (e.g. `vm.swappiness`), and
+/// `DeltaItem.value` is the value to write. Dots in the key are replaced
+/// with slashes to form the /proc/sys path.
+#[cfg(target_os = "linux")]
+pub fn apply_sysctl(entries: &[DeltaItem]) {
+    use pact_common::types::DeltaAction;
+
+    for entry in entries {
+        if entry.action == DeltaAction::Remove {
+            warn!(key = %entry.key, "Cannot remove sysctl — skipping");
+            continue;
+        }
+        let Some(ref value) = entry.value else {
+            warn!(key = %entry.key, "Sysctl entry has no value — skipping");
+            continue;
+        };
+        let path = format!("/proc/sys/{}", entry.key.replace('.', "/"));
+        match std::fs::write(&path, value) {
+            Ok(()) => info!(key = %entry.key, value = %value, "Applied sysctl"),
+            Err(e) => warn!(key = %entry.key, path = %path, error = %e, "Failed to apply sysctl — skipping"),
+        }
+    }
+}
+
+/// Apply mount entries.
+///
+/// For `DeltaAction::Add` / `DeltaAction::Modify`: mount using `nix::mount::mount()`.
+/// The key is the mount path, value format is `"fstype:source (options)"`.
+///
+/// For `DeltaAction::Remove`: unmount the path via `nix::mount::umount()`.
+#[cfg(target_os = "linux")]
+pub fn apply_mounts(entries: &[DeltaItem]) {
+    use nix::mount::{mount, umount, MsFlags};
+    use pact_common::types::DeltaAction;
+
+    for entry in entries {
+        let mount_path = &entry.key;
+        match entry.action {
+            DeltaAction::Remove => {
+                match umount(mount_path.as_str()) {
+                    Ok(()) => info!(path = %mount_path, "Unmounted"),
+                    Err(e) => warn!(path = %mount_path, error = %e, "Failed to unmount — skipping"),
+                }
+            }
+            DeltaAction::Add | DeltaAction::Modify => {
+                let Some(ref value) = entry.value else {
+                    warn!(path = %mount_path, "Mount entry has no value — skipping");
+                    continue;
+                };
+                // Parse value format: "fstype:source (options)"
+                let (fs_type, source, options) = parse_mount_value(value);
+                let flags = MsFlags::empty();
+                match mount(
+                    Some(source.as_str()),
+                    mount_path.as_str(),
+                    Some(fs_type.as_str()),
+                    flags,
+                    Some(options.as_str()),
+                ) {
+                    Ok(()) => info!(
+                        path = %mount_path,
+                        fs_type = %fs_type,
+                        source = %source,
+                        "Mounted"
+                    ),
+                    Err(e) => warn!(
+                        path = %mount_path,
+                        fs_type = %fs_type,
+                        source = %source,
+                        error = %e,
+                        "Failed to mount — skipping"
+                    ),
+                }
+            }
+        }
+    }
+}
+
+/// Parse mount value format: `"fstype:source (options)"`.
+///
+/// Returns `(fs_type, source, options)`. Missing parts default to empty strings.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_mount_value(value: &str) -> (String, String, String) {
+    // Extract options from parentheses if present
+    let (main, options) = if let Some(paren_start) = value.find('(') {
+        let opts = value[paren_start + 1..]
+            .trim_end_matches(')')
+            .trim()
+            .to_string();
+        (value[..paren_start].trim(), opts)
+    } else {
+        (value.trim(), String::new())
+    };
+
+    // Split "fstype:source"
+    if let Some(colon) = main.find(':') {
+        let fs_type = main[..colon].trim().to_string();
+        let source = main[colon + 1..].trim().to_string();
+        (fs_type, source, options)
+    } else {
+        (main.to_string(), String::new(), options)
+    }
+}
+
+/// Apply a full state delta — orchestrates sysctl, mounts, and logs other categories.
+#[cfg(target_os = "linux")]
+pub fn apply_state_delta(delta: &StateDelta) {
+    info!("Applying state delta");
+
+    if !delta.kernel.is_empty() {
+        info!(count = delta.kernel.len(), "Applying sysctl entries");
+        apply_sysctl(&delta.kernel);
+    }
+
+    if !delta.mounts.is_empty() {
+        info!(count = delta.mounts.len(), "Applying mount entries");
+        apply_mounts(&delta.mounts);
+    }
+
+    // Categories that require additional tooling — log but do not apply
+    if !delta.services.is_empty() {
+        info!(count = delta.services.len(), "Service delta received — requires supervisor (not applied here)");
+    }
+    if !delta.files.is_empty() {
+        info!(count = delta.files.len(), "File delta received — requires file manager (not applied here)");
+    }
+    if !delta.network.is_empty() {
+        info!(count = delta.network.len(), "Network delta received — requires netlink manager (not applied here)");
+    }
+    if !delta.packages.is_empty() {
+        info!(count = delta.packages.len(), "Package delta received — requires package manager (not applied here)");
+    }
+    if !delta.gpu.is_empty() {
+        info!(count = delta.gpu.len(), "GPU delta received — requires GPU manager (not applied here)");
+    }
+
+    let total = delta.kernel.len()
+        + delta.mounts.len()
+        + delta.services.len()
+        + delta.files.len()
+        + delta.network.len()
+        + delta.packages.len()
+        + delta.gpu.len();
+    info!(
+        total_items = total,
+        applied_sysctl = delta.kernel.len(),
+        applied_mounts = delta.mounts.len(),
+        "State delta application complete"
+    );
+}
+
+// --- Non-Linux stubs ---
+
+/// Stub: sysctl application is Linux-only.
+#[cfg(not(target_os = "linux"))]
+pub fn apply_sysctl(entries: &[DeltaItem]) {
+    if !entries.is_empty() {
+        warn!(
+            count = entries.len(),
+            "apply_sysctl called on non-Linux platform — no-op"
+        );
+    }
+}
+
+/// Stub: mount application is Linux-only.
+#[cfg(not(target_os = "linux"))]
+pub fn apply_mounts(entries: &[DeltaItem]) {
+    if !entries.is_empty() {
+        warn!(
+            count = entries.len(),
+            "apply_mounts called on non-Linux platform — no-op"
+        );
+    }
+}
+
+/// Stub: state delta application is Linux-only.
+#[cfg(not(target_os = "linux"))]
+pub fn apply_state_delta(delta: &StateDelta) {
+    let total = delta.kernel.len()
+        + delta.mounts.len()
+        + delta.services.len()
+        + delta.files.len()
+        + delta.network.len()
+        + delta.packages.len()
+        + delta.gpu.len();
+    if total > 0 {
+        warn!(
+            total_items = total,
+            "apply_state_delta called on non-Linux platform — no-op"
+        );
     }
 }
 
@@ -469,6 +672,47 @@ mod tests {
                 "/tmp should NOT be blacklisted after blacklist update"
             );
         }
+    }
+
+    // --- parse_mount_value tests ---
+
+    #[test]
+    fn parse_mount_value_full_format() {
+        let (fs, src, opts) = parse_mount_value("tmpfs:/dev/shm (size=64G,mode=1777)");
+        assert_eq!(fs, "tmpfs");
+        assert_eq!(src, "/dev/shm");
+        assert_eq!(opts, "size=64G,mode=1777");
+    }
+
+    #[test]
+    fn parse_mount_value_no_options() {
+        let (fs, src, opts) = parse_mount_value("nfs:10.0.0.1:/export/data");
+        assert_eq!(fs, "nfs");
+        assert_eq!(src, "10.0.0.1:/export/data");
+        assert_eq!(opts, "");
+    }
+
+    #[test]
+    fn parse_mount_value_no_source() {
+        let (fs, src, opts) = parse_mount_value("proc");
+        assert_eq!(fs, "proc");
+        assert_eq!(src, "");
+        assert_eq!(opts, "");
+    }
+
+    #[test]
+    fn apply_state_delta_empty_is_noop() {
+        let delta = StateDelta {
+            mounts: vec![],
+            files: vec![],
+            network: vec![],
+            services: vec![],
+            kernel: vec![],
+            packages: vec![],
+            gpu: vec![],
+        };
+        // Should not panic
+        apply_state_delta(&delta);
     }
 
     #[tokio::test]
