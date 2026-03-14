@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "pact-journal"
+    static_configs:
+      - targets:
+          - "journal-1:9091"
+          - "journal-2:9091"
+          - "journal-3:9091"

@@ -4,12 +4,28 @@
 
 ---
 
+# User Guide
+
+- [Getting Started](usage/getting-started.md)
+- [CLI Reference](usage/cli-reference.md)
+- [Admin Operations](usage/admin-operations.md)
+- [Deployment](usage/deployment.md)
+- [Troubleshooting](usage/troubleshooting.md)
+
+---
+
 # Architecture
 
 - [System Architecture](architecture/system-architecture.md)
 - [Agent Design](architecture/agent-design.md)
 - [Journal Design](architecture/journal-design.md)
 - [CLI Design](architecture/cli-design.md)
+- [Drift Detection](architecture/drift-detection.md)
+- [Shell Server](architecture/shell-server.md)
+- [Emergency Mode](architecture/emergency-mode.md)
+- [Policy Engine](architecture/policy-engine.md)
+- [Security](architecture/security.md)
+- [Failure Modes](architecture/failure-modes.md)
 - [Observability](architecture/observability.md)
 - [Agentic API (MCP)](architecture/agentic-api.md)
 - [Federation](architecture/federation.md)

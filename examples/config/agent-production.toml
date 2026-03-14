@@ -1,0 +1,61 @@
+# pact agent — production configuration
+#
+# Use this as a starting point for production compute nodes.
+# Features: mTLS, eBPF observers, strict whitelist, GPU monitoring.
+#
+# Prerequisites:
+#   - mTLS certificates in /etc/pact/
+#   - Journal quorum running on management nodes
+#   - OPA policy engine running on journal nodes
+
+[agent]
+# node_id is auto-detected from hostname (set by OpenCHAMI during PXE boot)
+# vcluster is assigned by the journal based on node group membership
+enforcement_mode = "enforce"        # Enforce declared state
+
+[agent.supervisor]
+backend = "pact"                    # Built-in process supervisor (default)
+# backend = "systemd"              # Uncomment for systemd fallback
+
+[agent.journal]
+endpoints = [
+    "journal-1.mgmt:9443",
+    "journal-2.mgmt:9443",
+    "journal-3.mgmt:9443",
+]
+tls_enabled = true
+tls_cert = "/etc/pact/agent.crt"
+tls_key = "/etc/pact/agent.key"
+tls_ca = "/etc/pact/ca.crt"
+
+[agent.observer]
+ebpf_enabled = true                 # Full eBPF monitoring (mount, sysctl, modules, etc.)
+inotify_enabled = true              # File change monitoring
+netlink_enabled = true              # Network change monitoring
+
+[agent.shell]
+enabled = true
+listen = "0.0.0.0:9445"
+whitelist_mode = "strict"           # Only whitelisted commands allowed
+
+[agent.commit_window]
+base_window_seconds = 900           # 15 minutes
+drift_sensitivity = 2.0             # Sensitivity multiplier for drift scoring
+emergency_window_seconds = 14400    # 4 hours
+
+[agent.capability]
+manifest_path = "/run/pact/capability.json"
+socket_path = "/run/pact/capability.sock"
+gpu_poll_interval_seconds = 30      # GPU health check interval
+
+[agent.blacklist]
+patterns = [
+    "/tmp/**",
+    "/var/log/**",
+    "/proc/**",
+    "/sys/**",
+    "/dev/**",
+    "/run/user/**",
+    "/run/pact/**",
+    "/run/lattice/**",
+]

@@ -237,3 +237,22 @@ Refresh tokens and client secrets are never included in log output, error messag
 
 ### Auth8: Cascading flow fallback
 The auth crate selects the best available OAuth2 flow: Auth Code + PKCE → Confidential Client → Device Code → Manual Paste. The cascade is driven by IdP discovery, not hardcoded.
+
+---
+
+## Authentication Invariants (PACT-specific consumer)
+
+### PAuth1: Strict permission mode
+PACT CLI uses strict permission mode. Token cache with wrong permissions is rejected, never auto-fixed.
+
+### PAuth2: Emergency mode requires human identity
+Emergency mode cannot be initiated by a service/AI principal. The token must have a human principal type. Enforced by RBAC (P8) and at the CLI auth layer.
+
+### PAuth3: Auth discovery endpoint is public
+The pact-journal auth discovery endpoint does not require authentication. It returns the IdP URL and public client ID.
+
+### PAuth4: Break-glass is BMC console
+When the IdP is down and tokens are expired, the break-glass path is BMC console access (out-of-band, via OpenCHAMI). PACT CLI does not provide its own break-glass authentication mechanism.
+
+### PAuth5: Two-person approval requires distinct identities
+Two-person approval validates that the approver's token identity differs from the requester's. Same-identity approval is rejected regardless of token freshness.

@@ -1,0 +1,28 @@
+[Unit]
+Description=pact-agent — per-node configuration management daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pact-agent --config /etc/pact/agent.toml
+Restart=on-failure
+RestartSec=5
+
+EnvironmentFile=/etc/pact/agent.env
+
+User=pact
+Group=pact
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pact
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

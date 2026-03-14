@@ -1,0 +1,43 @@
+# pact agent — minimal development configuration
+#
+# Use this for local development and testing.
+# No TLS, single journal endpoint, all observers except eBPF.
+#
+# Start with: pact-agent --config examples/config/agent-dev.toml
+
+[agent]
+node_id = "dev-node-001"
+vcluster = "dev-sandbox"
+enforcement_mode = "observe"        # Don't enforce drift, just report it
+
+[agent.supervisor]
+backend = "pact"                    # Built-in process supervisor
+
+[agent.journal]
+endpoints = ["localhost:9443"]      # Single local journal
+tls_enabled = false                 # No TLS for development
+
+[agent.observer]
+ebpf_enabled = false                # eBPF requires Linux + root
+inotify_enabled = true              # File change monitoring
+netlink_enabled = true              # Network change monitoring
+
+[agent.shell]
+enabled = true
+listen = "0.0.0.0:9445"
+whitelist_mode = "bypass"           # Allow all commands in development
+
+[agent.commit_window]
+base_window_seconds = 900           # 15 minutes
+drift_sensitivity = 2.0
+emergency_window_seconds = 14400    # 4 hours
+
+[agent.blacklist]
+patterns = [
+    "/tmp/**",
+    "/var/log/**",
+    "/proc/**",
+    "/sys/**",
+    "/dev/**",
+    "/run/user/**",
+]

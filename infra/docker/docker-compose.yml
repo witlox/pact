@@ -1,0 +1,115 @@
+services:
+  journal-1:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.journal
+    container_name: pact-journal-1
+    command:
+      - --node-id=1
+      - --listen=0.0.0.0:9443
+      - --metrics-listen=0.0.0.0:9091
+      - --peers=1=journal-1:9444,2=journal-2:9444,3=journal-3:9444
+    ports:
+      - "9443:9443"
+      - "9091:9091"
+    volumes:
+      - journal-1-data:/var/lib/pact/journal
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+  journal-2:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.journal
+    container_name: pact-journal-2
+    command:
+      - --node-id=2
+      - --listen=0.0.0.0:9443
+      - --metrics-listen=0.0.0.0:9091
+      - --peers=1=journal-1:9444,2=journal-2:9444,3=journal-3:9444
+    ports:
+      - "9543:9443"
+      - "9191:9091"
+    volumes:
+      - journal-2-data:/var/lib/pact/journal
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+  journal-3:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.journal
+    container_name: pact-journal-3
+    command:
+      - --node-id=3
+      - --listen=0.0.0.0:9443
+      - --metrics-listen=0.0.0.0:9091
+      - --peers=1=journal-1:9444,2=journal-2:9444,3=journal-3:9444
+    ports:
+      - "9643:9443"
+      - "9291:9091"
+    volumes:
+      - journal-3-data:/var/lib/pact/journal
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.agent
+    container_name: pact-agent
+    command:
+      - --config=/etc/pact/agent.toml
+      - --journal-endpoint=http://journal-1:9443
+    ports:
+      - "9445:9445"
+    depends_on:
+      - journal-1
+      - journal-2
+      - journal-3
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: pact-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: pact-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - pact-net
+    restart: unless-stopped
+
+volumes:
+  journal-1-data:
+  journal-2-data:
+  journal-3-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  pact-net:
+    driver: bridge

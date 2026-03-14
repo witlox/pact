@@ -1,0 +1,65 @@
+# pact journal — 3-node quorum configuration
+#
+# Deploy this on 3 management nodes for a production Raft quorum.
+# A 3-node quorum tolerates 1 node failure.
+#
+# Each node uses the same config file. The node ID is set via
+# the environment file /etc/pact/journal.env:
+#
+#   PACT_JOURNAL_NODE_ID=1          # 1, 2, or 3
+#   PACT_JOURNAL_LISTEN=0.0.0.0:9443
+#   PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
+#
+# Start with:
+#   pact-journal --node-id $PACT_JOURNAL_NODE_ID \
+#                --listen $PACT_JOURNAL_LISTEN \
+#                --data-dir $PACT_JOURNAL_DATA_DIR
+#
+# Or use the systemd unit: infra/systemd/pact-journal.service
+
+[journal]
+listen_addr = "0.0.0.0:9443"
+data_dir = "/var/lib/pact/journal"
+
+[journal.raft]
+# All 3 members of the quorum.
+# Format: "node_id:hostname:raft_port"
+# Raft port (9444) is for peer-to-peer consensus, separate from gRPC (9443).
+members = [
+    "1:journal-1.mgmt:9444",
+    "2:journal-2.mgmt:9444",
+    "3:journal-3.mgmt:9444",
+]
+snapshot_interval = 10000           # Compact log every 10k entries
+
+[journal.streaming]
+max_concurrent_boot_streams = 15000 # Max simultaneous boot config streams
+
+# --- Policy (OIDC + OPA) ---
+
+[policy]
+enabled = true
+
+[policy.iam]
+oidc_issuer = "https://auth.example.org/realms/hpc"
+oidc_audience = "pact"
+
+[policy.engine]
+type = "opa"
+opa_endpoint = "http://localhost:8181/v1/data/pact"
+
+# --- Federation (optional, uncomment to enable) ---
+
+# [policy.federation]
+# sovra_endpoint = "https://sovra.mgmt:8443"
+# sync_interval_seconds = 300
+
+# --- Telemetry ---
+
+[telemetry]
+log_level = "info"
+log_format = "json"
+prometheus_enabled = true
+prometheus_listen = "0.0.0.0:9091"
+loki_enabled = true
+loki_endpoint = "http://loki.mgmt:3100/loki/api/v1/push"

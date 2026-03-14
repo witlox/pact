@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+# ---- Builder stage ----
+FROM rust:1.83-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy workspace manifests first for layer caching
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ crates/
+COPY proto/ proto/
+
+RUN cargo build --release --package pact-cli
+
+# ---- Runtime stage ----
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/pact /usr/local/bin/pact
+
+ENTRYPOINT ["/usr/local/bin/pact"]
