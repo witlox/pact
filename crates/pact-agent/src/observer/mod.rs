@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 
 #[cfg(target_os = "linux")]
-use std::os::fd::AsRawFd;
+use std::os::fd::AsFd;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
@@ -83,20 +83,19 @@ impl Observer for InotifyObserver {
 
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
-        let fd = inotify.as_raw_fd();
+
+        // Wrap the inotify fd for async I/O. We use the raw fd via AsFd
+        // and move the Inotify into the task to keep it alive.
+        let raw_fd = std::os::fd::OwnedFd::from(inotify.as_fd().try_clone_to_owned()?);
+        let async_fd = tokio::io::unix::AsyncFd::new(raw_fd)?;
 
         tokio::spawn(async move {
-            let async_fd = match tokio::io::unix::AsyncFd::new(fd) {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("InotifyObserver: failed to create AsyncFd: {e}");
-                    return;
-                }
-            };
+            // Keep inotify alive in the task (it owns the watch descriptors)
+            let _inotify_guard = &inotify;
 
             while running.load(Ordering::SeqCst) {
                 // Wait until the inotify fd is readable.
-                let guard = match async_fd.readable().await {
+                let mut guard = match async_fd.readable().await {
                     Ok(g) => g,
                     Err(_) => break,
                 };
@@ -125,7 +124,6 @@ impl Observer for InotifyObserver {
                             };
 
                             if tx.send(observer_event).await.is_err() {
-                                // Receiver dropped — stop.
                                 running.store(false, Ordering::SeqCst);
                                 return;
                             }
@@ -225,34 +223,28 @@ impl Observer for NetlinkObserver {
             None, // NETLINK_ROUTE is protocol 0, the default
         )?;
 
-        let addr = NetlinkAddr::new(0, RTMGRP_LINK);
-        bind(sock.as_raw_fd(), &addr)?;
+        bind(sock.as_fd(), &addr)?;
 
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
 
-        tokio::spawn(async move {
-            let raw_fd = sock.as_raw_fd();
-            let async_fd = match tokio::io::unix::AsyncFd::new(raw_fd) {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("NetlinkObserver: failed to create AsyncFd: {e}");
-                    return;
-                }
-            };
+        // Clone the fd for async wrapping; original `sock` moves into task
+        let async_fd_owned = sock.as_fd().try_clone_to_owned()?;
+        let async_fd = tokio::io::unix::AsyncFd::new(async_fd_owned)?;
 
-            // Keep the OwnedFd alive for the duration of the task so `raw_fd` stays valid.
-            let _sock_guard = sock;
+        tokio::spawn(async move {
+            // Keep the socket alive for the duration of the task
+            let _sock_guard = &sock;
 
             let mut buf = [0u8; 4096];
 
             while running.load(Ordering::SeqCst) {
-                let guard = match async_fd.readable().await {
+                let mut guard = match async_fd.readable().await {
                     Ok(g) => g,
                     Err(_) => break,
                 };
 
-                match nix::unistd::read(&_sock_guard, &mut buf) {
+                match nix::unistd::read(sock.as_fd(), &mut buf) {
                     Ok(n) if n > 0 => {
                         let event = ObserverEvent {
                             category: "network".into(),

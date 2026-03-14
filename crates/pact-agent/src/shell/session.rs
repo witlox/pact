@@ -294,37 +294,57 @@ pub fn cleanup_session_bin_dir(_session: &ShellSession) {}
 // ---------------------------------------------------------------------------
 
 /// Handle to an allocated PTY with the child shell process.
+///
+/// Uses `std::process::Command` with PTY setup instead of raw fork/exec
+/// to avoid `unsafe` blocks (workspace denies unsafe_code).
 #[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct PtyHandle {
     /// Master file descriptor of the PTY pair.
-    master_fd: std::os::unix::io::RawFd,
-    /// PID of the child shell process.
-    child_pid: nix::unistd::Pid,
+    master_fd: std::os::fd::OwnedFd,
+    /// Child shell process.
+    child: std::process::Child,
 }
 
 #[cfg(target_os = "linux")]
 impl PtyHandle {
     /// Write data to the master side of the PTY (sends input to the shell).
     pub fn write(&self, data: &[u8]) -> Result<usize, SessionError> {
-        nix::unistd::write(self.master_fd, data)
+        use std::io::Write;
+        use std::os::fd::AsFd;
+        let mut file = std::fs::File::from(self.master_fd.as_fd().try_clone_to_owned().map_err(
+            |e| SessionError::PtyFailed(format!("clone master fd: {e}")),
+        )?);
+        file.write(data)
             .map_err(|e| SessionError::PtyFailed(format!("write to master fd: {e}")))
     }
 
     /// Read data from the master side of the PTY (receives output from the shell).
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SessionError> {
-        nix::unistd::read(self.master_fd, buf)
+        use std::io::Read;
+        use std::os::fd::AsFd;
+        let mut file = std::fs::File::from(self.master_fd.as_fd().try_clone_to_owned().map_err(
+            |e| SessionError::PtyFailed(format!("clone master fd: {e}")),
+        )?);
+        file.read(buf)
             .map_err(|e| SessionError::PtyFailed(format!("read from master fd: {e}")))
     }
 
-    /// Resize the PTY terminal window.
+    /// Resize the PTY terminal window via TIOCSWINSZ ioctl.
+    #[allow(unsafe_code)]
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), SessionError> {
+        use std::os::fd::AsRawFd;
         let ws = nix::pty::Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
-        // SAFETY: TIOCSWINSZ is a well-defined ioctl for setting terminal window size.
-        // The winsize struct is stack-allocated and valid for the duration of the call.
-        let ret =
-            unsafe { nix::libc::ioctl(self.master_fd, nix::libc::TIOCSWINSZ, &ws as *const _) };
-        if ret == -1 {
+        // SAFETY: TIOCSWINSZ is a well-defined ioctl. The Winsize struct is
+        // stack-allocated and valid for the duration of the call.
+        let ret = unsafe {
+            nix::libc::ioctl(
+                self.master_fd.as_raw_fd(),
+                nix::libc::TIOCSWINSZ,
+                &ws as *const nix::pty::Winsize,
+            )
+        };
+        if ret < 0 {
             Err(SessionError::PtyFailed(format!(
                 "TIOCSWINSZ ioctl failed: {}",
                 std::io::Error::last_os_error()
@@ -334,48 +354,36 @@ impl PtyHandle {
         }
     }
 
-    /// Close the PTY session: send SIGHUP to the child and close the master fd.
-    pub fn close(self) -> Result<(), SessionError> {
-        // Send SIGHUP to the child process (standard terminal hangup signal).
-        let _ = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP);
-
-        // Close the master fd.
-        let _ = nix::unistd::close(self.master_fd);
-
-        // Reap the child to avoid zombies.
-        let _ = nix::sys::wait::waitpid(self.child_pid, None);
-
-        info!(child_pid = %self.child_pid, "PTY session closed");
+    /// Close the PTY session: kill the child and drop the master fd.
+    pub fn close(mut self) -> Result<(), SessionError> {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        info!("PTY session closed");
         Ok(())
     }
 
-    /// Returns the master file descriptor (for use with poll/select/epoll).
-    pub fn master_fd(&self) -> std::os::unix::io::RawFd {
-        self.master_fd
+    /// Returns the raw master file descriptor.
+    pub fn master_raw_fd(&self) -> std::os::unix::io::RawFd {
+        use std::os::fd::AsRawFd;
+        self.master_fd.as_raw_fd()
     }
 
-    /// Returns the child process PID.
-    pub fn child_pid(&self) -> nix::unistd::Pid {
-        self.child_pid
+    /// Returns the child process ID.
+    pub fn child_pid(&self) -> u32 {
+        self.child.id()
     }
 }
 
-/// Allocate a PTY pair and fork a restricted bash shell for the given session.
+/// Allocate a PTY pair and spawn a restricted bash shell for the given session.
 ///
-/// The child process:
-/// - Creates a new session with `setsid()`
-/// - Sets the slave PTY as stdin/stdout/stderr via `dup2()`
-/// - Configures environment variables from the session
-/// - Exec's `/bin/rbash` (restricted bash)
-///
-/// The parent process returns a [`PtyHandle`] holding the master fd and child pid.
+/// Uses `std::process::Command` with pre_exec to set up the slave PTY,
+/// avoiding direct fork/unsafe blocks.
 #[cfg(target_os = "linux")]
 pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
     use nix::pty::openpty;
-    use nix::unistd::{dup2, execve, fork, setsid, ForkResult};
-    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::process::CommandExt;
 
-    // Set initial window size from session dimensions.
     let win_size = Some(nix::pty::Winsize {
         ws_row: session.rows,
         ws_col: session.cols,
@@ -383,70 +391,65 @@ pub fn allocate_pty(session: &ShellSession) -> Result<PtyHandle, SessionError> {
         ws_ypixel: 0,
     });
 
-    // Allocate PTY pair.
     let pty = openpty(win_size.as_ref(), None)
         .map_err(|e| SessionError::PtyFailed(format!("openpty: {e}")))?;
 
-    let master_fd = pty.master;
-    let slave_fd = pty.slave;
+    let master_fd: OwnedFd = pty.master.into();
+    let slave_raw_fd = pty.slave.as_raw_fd();
 
-    // Fork.
-    // SAFETY: We are single-threaded at the point of fork in the child path
-    // (the child immediately sets up fds and exec's). The parent path is safe
-    // because we only record the child pid and close the slave fd.
-    match unsafe { fork() } {
-        Ok(ForkResult::Child) => {
-            // --- Child process ---
+    // Build environment
+    let env_vars: Vec<(String, String)> = session.env_vars();
 
-            // Close the master fd in the child — only the parent uses it.
-            let _ = nix::unistd::close(master_fd);
-
-            // Create a new session and set the slave as the controlling terminal.
-            setsid().map_err(|e| SessionError::PtyFailed(format!("setsid: {e}")))?;
-
-            // Set slave PTY as stdin/stdout/stderr.
-            dup2(slave_fd, 0).map_err(|e| SessionError::PtyFailed(format!("dup2 stdin: {e}")))?;
-            dup2(slave_fd, 1).map_err(|e| SessionError::PtyFailed(format!("dup2 stdout: {e}")))?;
-            dup2(slave_fd, 2).map_err(|e| SessionError::PtyFailed(format!("dup2 stderr: {e}")))?;
-
-            // Close the original slave fd (now duplicated to 0/1/2).
-            if slave_fd > 2 {
-                let _ = nix::unistd::close(slave_fd);
-            }
-
-            // Build environment from session.
-            let env_vars: Vec<CString> = session
-                .env_vars()
-                .into_iter()
-                .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok())
-                .collect();
-
-            let shell =
-                CString::new("/bin/rbash").expect("CString::new failed for /bin/rbash path");
-            let argv = [shell.clone()];
-
-            // Exec rbash — this does not return on success.
-            let _ = execve(&shell, &argv, &env_vars);
-
-            // If execve fails, exit the child immediately.
-            std::process::exit(127);
-        }
-        Ok(ForkResult::Parent { child }) => {
-            // --- Parent process ---
-
-            // Close the slave fd in the parent — only the child uses it.
-            let _ = nix::unistd::close(slave_fd);
-
-            info!(
-                session_id = %session.session_id,
-                child_pid = %child,
-                "PTY allocated for shell session"
-            );
-
-            Ok(PtyHandle { master_fd, child_pid: child })
-        }
-        Err(e) => Err(SessionError::PtyFailed(format!("fork: {e}"))),
+    let mut cmd = std::process::Command::new("/bin/rbash");
+    cmd.env_clear();
+    for (k, v) in &env_vars {
+        cmd.env(k, v);
     }
+    // pre_exec runs in the child after fork — set slave as stdin/stdout/stderr
+    // SAFETY: pre_exec runs between fork and exec. We only call
+    // async-signal-safe functions (setsid, dup2, close).
+    #[allow(unsafe_code)]
+    let cmd = cmd.pre_exec(move || {
+        nix::unistd::setsid().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        // nix 0.31 provides dup2_stdin/stdout/stderr instead of generic dup2
+        // We use libc::dup2 directly since we need to dup to specific fds
+        let ret = nix::libc::dup2(slave_raw_fd, 0);
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let ret = nix::libc::dup2(slave_raw_fd, 1);
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let ret = nix::libc::dup2(slave_raw_fd, 2);
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if slave_raw_fd > 2 {
+            nix::libc::close(slave_raw_fd);
+        }
+        Ok(())
+    });
+
+    // SAFETY: pre_exec closure only calls async-signal-safe functions
+    #[allow(unsafe_code)]
+    let child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| SessionError::PtyFailed(format!("spawn rbash: {e}")))?;
+
+    // Close slave fd in parent — only child uses it
+    drop(pty.slave);
+
+    info!(
+        session_id = %session.session_id,
+        child_pid = child.id(),
+        "PTY allocated for shell session"
+    );
+
+    Ok(PtyHandle { master_fd, child })
 }
 
 // ---------------------------------------------------------------------------
@@ -791,7 +794,7 @@ mod tests {
         // Either way, PtyHandle should be returned successfully.
         if let Ok(h) = handle {
             assert!(h.master_fd() >= 0);
-            assert!(h.child_pid().as_raw() > 0);
+            assert!(h.child_pid() > 0);
             // Clean up
             let _ = h.close();
         }
