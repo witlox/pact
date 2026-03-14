@@ -3,12 +3,18 @@
 //! See docs/architecture/agent-design.md for design documentation.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
 use tracing::{error, info};
 
 use pact_agent::boot;
+use pact_agent::shell::auth::AuthConfig;
+use pact_agent::shell::exec::ExecConfig;
+use pact_agent::shell::grpc_service::ShellServiceImpl;
+use pact_agent::shell::ShellServer;
 use pact_common::config::PactConfig;
+use pact_common::proto::shell::shell_service_server::ShellServiceServer;
 
 /// pact-agent: config management agent for HPC/AI nodes.
 #[derive(Parser, Debug)]
@@ -95,7 +101,36 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // TODO Phase 3: Start shell gRPC server
+    // Start shell gRPC server
+    let shell_listen = agent_config.shell.listen.clone();
+    let shell_server = Arc::new(ShellServer::new(
+        AuthConfig {
+            issuer: String::new(), // TODO: from OIDC config
+            audience: String::new(),
+            hmac_secret: Some(b"dev-secret-key-for-pact-development".to_vec()),
+        },
+        ExecConfig::default(),
+        agent_config.node_id.clone(),
+        agent_config.vcluster.clone(),
+        agent_config.shell.whitelist_mode == "learning",
+        10, // max concurrent sessions
+    ));
+    let shell_svc = ShellServiceImpl::new(shell_server);
+
+    let shell_listener = tokio::net::TcpListener::bind(&shell_listen).await?;
+    let shell_addr = shell_listener.local_addr()?;
+    info!(%shell_addr, "Shell gRPC server listening");
+    tokio::spawn(async move {
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(shell_listener);
+        if let Err(e) = tonic::transport::Server::builder()
+            .add_service(ShellServiceServer::new(shell_svc))
+            .serve_with_incoming(incoming)
+            .await
+        {
+            error!(error = %e, "Shell gRPC server error");
+        }
+    });
+
     info!(
         config_state = ?boot_result.config_state,
         "Agent ready — steady state"

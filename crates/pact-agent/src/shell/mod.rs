@@ -16,6 +16,7 @@
 
 pub mod auth;
 pub mod exec;
+pub mod grpc_service;
 pub mod session;
 pub mod whitelist;
 

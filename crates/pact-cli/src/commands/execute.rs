@@ -154,6 +154,104 @@ pub async fn rollback(
     Ok(format!("Rolled back to seq:{target_seq} (new seq:{seq})"))
 }
 
+/// Connect to an agent's shell gRPC endpoint.
+pub async fn connect_agent(agent_addr: &str) -> anyhow::Result<Channel> {
+    let uri = if agent_addr.starts_with("http") {
+        agent_addr.to_string()
+    } else {
+        format!("http://{agent_addr}")
+    };
+
+    Channel::from_shared(uri.clone())
+        .map_err(|e| anyhow::anyhow!("invalid agent endpoint {uri}: {e}"))?
+        .connect()
+        .await
+        .map_err(|e| anyhow::anyhow!("cannot connect to agent at {uri}: {e}"))
+}
+
+/// Execute `pact exec` — run a command on a remote node via ShellService.
+pub async fn exec_remote(
+    channel: Channel,
+    token: &str,
+    command: &str,
+    args: &[String],
+) -> anyhow::Result<String> {
+    use pact_common::proto::shell::{exec_output, shell_service_client::ShellServiceClient, ExecRequest};
+
+    let mut client = ShellServiceClient::new(channel);
+
+    let mut request = tonic::Request::new(ExecRequest {
+        command: command.to_string(),
+        args: args.to_vec(),
+    });
+    request
+        .metadata_mut()
+        .insert("authorization", format!("Bearer {token}").parse()
+            .map_err(|_| anyhow::anyhow!("invalid token format"))?);
+
+    let resp = client
+        .exec(request)
+        .await
+        .map_err(|e| anyhow::anyhow!("exec failed: {e}"))?;
+
+    let mut stream = resp.into_inner();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_code = 0i32;
+
+    while let Some(output) = tokio_stream::StreamExt::next(&mut stream).await {
+        match output {
+            Ok(o) => match o.output {
+                Some(exec_output::Output::Stdout(data)) => stdout.extend_from_slice(&data),
+                Some(exec_output::Output::Stderr(data)) => stderr.extend_from_slice(&data),
+                Some(exec_output::Output::ExitCode(code)) => exit_code = code,
+                Some(exec_output::Output::Error(e)) => return Err(anyhow::anyhow!("{e}")),
+                None => {}
+            },
+            Err(e) => return Err(anyhow::anyhow!("exec stream error: {e}")),
+        }
+    }
+
+    let mut output = String::new();
+    if !stdout.is_empty() {
+        output.push_str(&String::from_utf8_lossy(&stdout));
+    }
+    if !stderr.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&String::from_utf8_lossy(&stderr));
+    }
+    if exit_code != 0 {
+        output.push_str(&format!("\n(exit code: {exit_code})"));
+    }
+
+    Ok(output)
+}
+
+/// Execute `pact service status` — list commands via ShellService.
+pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
+    use pact_common::proto::shell::{shell_service_client::ShellServiceClient, ListCommandsRequest};
+
+    let mut client = ShellServiceClient::new(channel);
+    let resp = client
+        .list_commands(tonic::Request::new(ListCommandsRequest {}))
+        .await
+        .map_err(|e| anyhow::anyhow!("list commands failed: {e}"))?;
+
+    let commands = resp.into_inner().commands;
+    if commands.is_empty() {
+        return Ok("No commands available.".to_string());
+    }
+
+    let mut output = format!("{:<24} {:<6} {}\n", "COMMAND", "STATE", "DESCRIPTION");
+    for cmd in &commands {
+        let state = if cmd.state_changing { "yes" } else { "no" };
+        output.push_str(&format!("{:<24} {:<6} {}\n", cmd.command, state, cmd.description));
+    }
+    Ok(output)
+}
+
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.
 fn parse_scope_filter(s: &str) -> ProtoScopeMsg {
     if let Some(node) = s.strip_prefix("node:") {

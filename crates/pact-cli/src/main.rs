@@ -282,11 +282,21 @@ async fn main() {
             execute::log(journal_client.as_mut().unwrap(), 50, scope_filter.as_deref()).await
         }
 
-        // Commands that need agent gRPC (not yet wired)
-        Commands::Exec { node, command } => {
+        // Commands that need agent gRPC
+        Commands::Exec { node: _, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
-                Ok((cmd, _args)) => {
-                    Ok(format!("exec on {node}: {cmd} (agent gRPC not yet wired)"))
+                Ok((cmd, args)) => {
+                    // TODO: resolve agent address from node_id (for now, assume localhost:9445)
+                    let agent_addr = "http://127.0.0.1:9445";
+                    match execute::connect_agent(agent_addr).await {
+                        Ok(channel) => {
+                            let token = config
+                                .resolve_token()
+                                .unwrap_or_else(|_| "dev-token".to_string());
+                            execute::exec_remote(channel, &token, &cmd, &args).await
+                        }
+                        Err(e) => Err(e),
+                    }
                 }
                 Err(e) => Err(anyhow::anyhow!("{e}")),
             }
