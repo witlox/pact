@@ -267,9 +267,7 @@ async fn given_wrong_permissions(world: &mut PactWorld) {
         .auth_default_server
         .clone()
         .unwrap_or_else(|| "https://test-journal.example.com:9443".to_string());
-    if !world.auth_server_tokens.contains_key(&server) {
-        world.auth_server_tokens.insert(server, AuthTokenState::Valid);
-    }
+    world.auth_server_tokens.entry(server).or_insert(AuthTokenState::Valid);
 }
 
 #[given("lenient permission mode is enabled")]
@@ -357,7 +355,7 @@ async fn given_valid_token_for_server(world: &mut PactWorld) {
     });
 }
 
-#[given(regex = r#"^a token cache file with permissions (\d+)$"#)]
+#[given(regex = r"^a token cache file with permissions (\d+)$")]
 async fn given_cache_permissions(world: &mut PactWorld, perms: String) {
     // Parse octal-like string (e.g. "0644", "0600")
     let p = u32::from_str_radix(perms.trim_start_matches('0'), 8).unwrap_or(0o644);
@@ -416,7 +414,7 @@ async fn given_user_has_role(world: &mut PactWorld, role: String) {
     let principal = world
         .current_identity
         .as_ref()
-        .map_or("user@example.com".to_string(), |i| i.principal.clone());
+        .map_or_else(|| "user@example.com".to_string(), |i| i.principal.clone());
     world.current_identity = Some(pact_common::types::Identity {
         principal,
         role,
@@ -507,7 +505,7 @@ async fn when_user_initiates_login(world: &mut PactWorld) {
         .or_else(|| world.auth_default_server.clone())
         .unwrap_or_else(|| "https://test-journal.example.com:9443".to_string());
 
-    if let Some(AuthTokenState::Valid) = world.auth_server_tokens.get(&server) {
+    if matches!(world.auth_server_tokens.get(&server), Some(AuthTokenState::Valid)) {
         world.auth_login_succeeded = true;
         world.auth_flow_initiated = false;
         world.auth_selected_flow = Some("none_already_logged_in".to_string());
@@ -542,7 +540,7 @@ async fn when_user_initiates_login(world: &mut PactWorld) {
     }
 
     // All-expired refresh token -> full login flow.
-    if let Some(AuthTokenState::AllExpired) = world.auth_server_tokens.get(&server) {
+    if matches!(world.auth_server_tokens.get(&server), Some(AuthTokenState::AllExpired)) {
         world.auth_flow_initiated = true;
     }
 
@@ -675,7 +673,7 @@ async fn when_authenticated_command(world: &mut PactWorld) {
             world.auth_cache_modified = true;
             world.cli_exit_code = Some(0);
         }
-        Some(AuthTokenState::AllExpired) | Some(AuthTokenState::NoRefresh) => {
+        Some(AuthTokenState::AllExpired | AuthTokenState::NoRefresh) => {
             world.auth_error = Some("authentication error — please run login again".to_string());
             world.cli_exit_code = Some(1);
         }
@@ -888,7 +886,7 @@ async fn when_pact_commit_vc_auth(world: &mut PactWorld, _msg: String, vcluster:
     // Ensure policy is loaded.
     if world.policy_engine.get_policy(&vcluster).is_none() {
         world.policy_engine.set_policy(pact_common::types::VClusterPolicy {
-            vcluster_id: vcluster.clone(),
+            vcluster_id: vcluster,
             ..pact_common::types::VClusterPolicy::default()
         });
     }

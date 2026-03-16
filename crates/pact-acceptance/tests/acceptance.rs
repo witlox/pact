@@ -276,7 +276,7 @@ pub struct HealthResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthTokenState {
     /// Access token is valid, not expired.
     Valid,
