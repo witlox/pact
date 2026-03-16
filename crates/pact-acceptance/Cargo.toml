@@ -14,6 +14,7 @@ pact-agent = { workspace = true }
 pact-policy = { workspace = true }
 pact-cli = { workspace = true }
 pact-mcp = { workspace = true }
+hpc-auth = { workspace = true }
 
 cucumber = { workspace = true }
 tokio = { workspace = true }

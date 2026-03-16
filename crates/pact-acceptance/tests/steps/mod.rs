@@ -8,6 +8,7 @@
 
 pub mod helpers;
 
+mod auth;
 mod boot; // Boot sequence + boot config streaming
 mod capability; // CapabilityReporter + MockGpuBackend
 mod cli; // CLI formatting + exit codes + delegation
@@ -22,4 +23,4 @@ mod overlay; // Overlay management + staleness + promote/conflict
 mod partition; // ConflictManager + cached config/policy
 mod policy; // RbacEngine + DefaultPolicyEngine + RBAC authorization
 mod shell; // ShellServer + WhitelistManager + SessionManager + execute_command
-mod supervisor; // PactSupervisor + ServiceManager // FederationState + MockFederationSync
+mod supervisor; // PactSupervisor + ServiceManager // FederationState + MockFederationSync // hpc-auth: login, logout, token refresh, cache, multi-server

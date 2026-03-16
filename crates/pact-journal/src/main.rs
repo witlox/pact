@@ -130,6 +130,8 @@ async fn main() -> anyhow::Result<()> {
         raft: raft.clone(),
         journal: Arc::clone(&state),
         metrics: JournalMetrics::default(),
+        idp_url: std::env::var("PACT_IDP_URL").unwrap_or_default(),
+        client_id: std::env::var("PACT_CLIENT_ID").unwrap_or_else(|_| "pact-cli".to_string()),
     };
     let metrics_listener = tokio::net::TcpListener::bind(&args.metrics_listen).await?;
     let metrics_addr = metrics_listener.local_addr()?;

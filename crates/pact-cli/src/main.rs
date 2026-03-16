@@ -133,6 +133,22 @@ enum Commands {
         #[arg(default_value = "15")]
         mins: u32,
     },
+
+    /// Authenticate with the pact-journal server.
+    Login {
+        /// Server URL (overrides default).
+        #[arg(long)]
+        server: Option<String>,
+        /// Force device code flow (headless environments).
+        #[arg(long)]
+        device_code: bool,
+        /// Use service account (client credentials) flow.
+        #[arg(long)]
+        service_account: bool,
+    },
+
+    /// End the current session.
+    Logout,
 }
 
 #[derive(Subcommand, Debug)]
@@ -430,6 +446,53 @@ async fn main() {
                 };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::extend(channel, mins).await,
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Login { server, device_code, service_account } => {
+            let server_url = server.unwrap_or_else(|| config.endpoint.clone());
+            let flow_override = if device_code {
+                Some(hpc_auth::OAuthFlow::DeviceCode)
+            } else if service_account {
+                Some(hpc_auth::OAuthFlow::ClientCredentials {
+                    client_id: std::env::var("PACT_CLIENT_ID").unwrap_or_default(),
+                    client_secret: std::env::var("PACT_CLIENT_SECRET").unwrap_or_default(),
+                })
+            } else {
+                None
+            };
+            let auth = hpc_auth::AuthClient::new(hpc_auth::AuthClientConfig {
+                server_url,
+                app_name: "pact".to_string(),
+                permission_mode: hpc_auth::PermissionMode::Strict,
+                idp_override: None,
+                flow_override,
+                timeout: std::time::Duration::from_secs(30),
+            })
+            .map_err(|e| anyhow::anyhow!("{e}"));
+            match auth {
+                Ok(auth) => match auth.login().await {
+                    Ok(_) => Ok("Login successful.".to_string()),
+                    Err(e) => Err(anyhow::anyhow!("{e}")),
+                },
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Logout => {
+            let auth = hpc_auth::AuthClient::new(hpc_auth::AuthClientConfig {
+                server_url: config.endpoint.clone(),
+                app_name: "pact".to_string(),
+                permission_mode: hpc_auth::PermissionMode::Strict,
+                idp_override: None,
+                flow_override: None,
+                timeout: std::time::Duration::from_secs(30),
+            })
+            .map_err(|e| anyhow::anyhow!("{e}"));
+            match auth {
+                Ok(auth) => match auth.logout().await {
+                    Ok(()) => Ok("Logged out.".to_string()),
+                    Err(e) => Err(anyhow::anyhow!("{e}")),
+                },
                 Err(e) => Err(e),
             }
         }

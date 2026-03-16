@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 pact-common = { workspace = true }
 pact-journal = { workspace = true }
+hpc-auth = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }

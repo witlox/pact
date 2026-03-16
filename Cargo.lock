@@ -1322,6 +1322,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hpc-auth"
+version = "2026.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "jsonwebtoken",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2228,6 +2248,7 @@ dependencies = [
  "chrono",
  "cucumber",
  "futures",
+ "hpc-auth",
  "jsonwebtoken",
  "pact-agent",
  "pact-cli",
@@ -2284,6 +2305,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "hpc-auth",
  "jsonwebtoken",
  "pact-common",
  "pact-journal",

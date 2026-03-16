@@ -148,6 +148,8 @@ impl RaftCluster {
                 raft: raft.clone(),
                 journal: Arc::clone(&state),
                 metrics: JournalMetrics::default(),
+                idp_url: String::new(),
+                client_id: "pact-cli-test".into(),
             };
             let metrics_handle = tokio::spawn(async move {
                 axum::serve(metrics_listener, telemetry_router(telemetry_state)).await.ok();

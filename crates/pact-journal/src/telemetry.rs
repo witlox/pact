@@ -24,6 +24,10 @@ pub struct TelemetryState {
     pub raft: Raft<JournalTypeConfig>,
     pub journal: Arc<RwLock<JournalState>>,
     pub metrics: JournalMetrics,
+    /// IdP URL for auth discovery (PAuth3). Empty if not configured.
+    pub idp_url: String,
+    /// Public client ID for auth discovery.
+    pub client_id: String,
 }
 
 /// Prometheus metrics for the journal.
@@ -66,10 +70,13 @@ impl Default for JournalMetrics {
 }
 
 /// Build the axum router for telemetry endpoints.
+///
+/// Includes `/auth/discovery` (PAuth3: public, no auth required).
 pub fn telemetry_router(state: TelemetryState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
+        .route("/auth/discovery", get(auth_discovery_handler))
         .with_state(state)
 }
 
@@ -108,6 +115,17 @@ async fn metrics_handler(State(state): State<TelemetryState>) -> impl IntoRespon
     encoder.encode(&metric_families, &mut buffer).unwrap();
     let content_type = encoder.format_type().to_string();
     ([(axum::http::header::CONTENT_TYPE, content_type)], buffer)
+}
+
+/// Auth discovery endpoint (PAuth3: public, no auth required).
+///
+/// Returns IdP URL and client ID for CLI login flow.
+async fn auth_discovery_handler(State(state): State<TelemetryState>) -> impl IntoResponse {
+    axum::Json(serde_json::json!({
+        "idp_url": state.idp_url,
+        "client_id": state.client_id,
+        "scopes": ["openid", "profile"],
+    }))
 }
 
 #[cfg(test)]
@@ -165,7 +183,13 @@ mod tests {
         let network = GrpcNetworkFactory::new();
         let raft = Raft::new(1, config, network, log_store, sm).await.unwrap();
 
-        let state = TelemetryState { raft, journal, metrics: JournalMetrics::default() };
+        let state = TelemetryState {
+            raft,
+            journal,
+            metrics: JournalMetrics::default(),
+            idp_url: "https://test-idp.example.com".into(),
+            client_id: "pact-cli-test".into(),
+        };
         (state, temp)
     }
 

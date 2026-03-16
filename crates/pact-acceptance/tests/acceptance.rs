@@ -148,6 +148,66 @@ pub struct PactWorld {
     // --- Merge conflict ---
     pub conflict_local_value: Option<String>,
     pub conflict_journal_value: Option<String>,
+
+    // --- Auth (hpc-auth) ---
+    /// Auth server URL for test scenarios.
+    pub auth_server_url: Option<String>,
+    /// Temporary directory for token cache in auth tests.
+    pub auth_cache_dir: Option<tempfile::TempDir>,
+    /// Whether a browser is available (simulated).
+    pub auth_browser_available: bool,
+    /// Whether the IdP is reachable (simulated).
+    pub auth_idp_reachable: bool,
+    /// Whether the server is reachable (simulated).
+    pub auth_server_reachable: bool,
+    /// Manual IdP configuration URL (if any).
+    pub auth_manual_idp_url: Option<String>,
+    /// Whether manual IdP override is enabled.
+    pub auth_manual_idp_override: bool,
+    /// Simulated IdP capabilities.
+    pub auth_idp_supports_pkce: bool,
+    pub auth_idp_supports_device_code: bool,
+    pub auth_idp_supports_confidential: bool,
+    /// The flow that was selected by the auth system.
+    pub auth_selected_flow: Option<String>,
+    /// Whether login was attempted.
+    pub auth_login_attempted: bool,
+    /// Whether login succeeded.
+    pub auth_login_succeeded: bool,
+    /// Auth error message (if any).
+    pub auth_error: Option<String>,
+    /// Whether token was stored in cache.
+    pub auth_token_stored: bool,
+    /// Whether cache was modified.
+    pub auth_cache_modified: bool,
+    /// Whether a new auth flow was initiated.
+    pub auth_flow_initiated: bool,
+    /// Permission mode for cache (strict or lenient).
+    pub auth_permission_mode: String,
+    /// Simulated cache file permissions (octal, e.g. 0o600).
+    pub auth_cache_permissions: u32,
+    /// Whether a permissions warning was logged.
+    pub auth_permissions_warning: bool,
+    /// Whether permissions were fixed automatically.
+    pub auth_permissions_fixed: bool,
+    /// Cached discovery document available.
+    pub auth_cached_discovery: bool,
+    /// Whether cached discovery document is stale.
+    pub auth_cached_discovery_stale: bool,
+    /// Default server URL.
+    pub auth_default_server: Option<String>,
+    /// Multi-server token cache: server URL -> token validity.
+    pub auth_server_tokens: std::collections::HashMap<String, AuthTokenState>,
+    /// Client credentials provided for service-account flow.
+    pub auth_client_credentials_valid: bool,
+    /// Whether token revocation was attempted.
+    pub auth_revocation_attempted: bool,
+    /// Last CLI command simulated (for auth integration tests).
+    pub auth_last_cli_command: Option<String>,
+    /// Whether the auth refresh was silent.
+    pub auth_silent_refresh: bool,
+    /// Scopes returned after refresh (if different).
+    pub auth_refresh_scopes: Option<Vec<String>>,
 }
 
 // Manual Debug impl — real types don't all derive Debug uniformly.
@@ -214,6 +274,20 @@ pub struct LokiEvent {
 pub struct HealthResponse {
     pub status_code: u16,
     pub role: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthTokenState {
+    /// Access token is valid, not expired.
+    Valid,
+    /// Access token expired, refresh token valid.
+    AccessExpired,
+    /// Both tokens expired.
+    AllExpired,
+    /// No refresh token, access token expired.
+    NoRefresh,
+    /// Cache corrupted.
+    Corrupted,
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +394,38 @@ impl PactWorld {
             // Merge conflict
             conflict_local_value: None,
             conflict_journal_value: None,
+
+            // Auth (hpc-auth)
+            auth_server_url: None,
+            auth_cache_dir: None,
+            auth_browser_available: true,
+            auth_idp_reachable: true,
+            auth_server_reachable: true,
+            auth_manual_idp_url: None,
+            auth_manual_idp_override: false,
+            auth_idp_supports_pkce: true,
+            auth_idp_supports_device_code: true,
+            auth_idp_supports_confidential: true,
+            auth_selected_flow: None,
+            auth_login_attempted: false,
+            auth_login_succeeded: false,
+            auth_error: None,
+            auth_token_stored: false,
+            auth_cache_modified: false,
+            auth_flow_initiated: false,
+            auth_permission_mode: "strict".to_string(),
+            auth_cache_permissions: 0o600,
+            auth_permissions_warning: false,
+            auth_permissions_fixed: false,
+            auth_cached_discovery: false,
+            auth_cached_discovery_stale: false,
+            auth_default_server: None,
+            auth_server_tokens: HashMap::new(),
+            auth_client_credentials_valid: true,
+            auth_revocation_attempted: false,
+            auth_last_cli_command: None,
+            auth_silent_refresh: false,
+            auth_refresh_scopes: None,
         }
     }
 }
