@@ -485,14 +485,10 @@ async fn main() {
                 idp_override: None,
                 flow_override,
                 timeout: std::time::Duration::from_secs(30),
-            })
-            .map_err(|e| anyhow::anyhow!("{e}"));
-            match auth {
-                Ok(auth) => match auth.login().await {
-                    Ok(_) => Ok("Login successful.".to_string()),
-                    Err(e) => Err(anyhow::anyhow!("{e}")),
-                },
-                Err(e) => Err(e),
+            });
+            match auth.login().await {
+                Ok(_) => Ok("Login successful.".to_string()),
+                Err(e) => Err(anyhow::anyhow!("{e}")),
             }
         }
         Commands::Logout => {
@@ -503,14 +499,10 @@ async fn main() {
                 idp_override: None,
                 flow_override: None,
                 timeout: std::time::Duration::from_secs(30),
-            })
-            .map_err(|e| anyhow::anyhow!("{e}"));
-            match auth {
-                Ok(auth) => match auth.logout().await {
-                    Ok(()) => Ok("Logged out.".to_string()),
-                    Err(e) => Err(anyhow::anyhow!("{e}")),
-                },
-                Err(e) => Err(e),
+            });
+            match auth.logout().await {
+                Ok(()) => Ok("Logged out.".to_string()),
+                Err(e) => Err(anyhow::anyhow!("{e}")),
             }
         }
     };
