@@ -236,6 +236,16 @@ impl ShellServer {
         &self.sessions
     }
 
+    /// Get the node ID this server runs on.
+    pub fn node_id(&self) -> &str {
+        &self.node_id
+    }
+
+    /// Get the vCluster this node belongs to.
+    pub fn vcluster_id(&self) -> &str {
+        &self.vcluster_id
+    }
+
     /// List available commands.
     pub async fn list_commands(&self) -> Vec<whitelist::WhitelistEntry> {
         let wl = self.whitelist.read().await;

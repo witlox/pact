@@ -53,7 +53,7 @@ impl AuthClient {
 
         // If a flow override is set, use that directly.
         if let Some(ref flow) = self.config.flow_override {
-            let tokens = self.execute_flow(flow, None).await?;
+            let tokens = self.execute_flow(flow, None, None).await?;
             self.cache.write(&self.config.server_url, &tokens)?;
             info!(server = %self.config.server_url, "login successful");
             return Ok(tokens);
@@ -64,7 +64,7 @@ impl AuthClient {
 
         // Auth8: Cascading flow selection based on discovery capabilities.
         let flow = self.select_flow(&discovery, &client_id)?;
-        let tokens = self.execute_flow(&flow, Some(&discovery)).await?;
+        let tokens = self.execute_flow(&flow, Some(&discovery), Some(&client_id)).await?;
         self.cache.write(&self.config.server_url, &tokens)?;
         info!(server = %self.config.server_url, "login successful");
         Ok(tokens)
@@ -144,6 +144,10 @@ impl AuthClient {
     }
 
     /// Discover IdP configuration.
+    ///
+    /// If `idp_override` is set, uses that directly. Otherwise, fetches the
+    /// journal server's `/auth/discovery` endpoint to get the IdP URL and client ID,
+    /// then fetches OIDC discovery from the IdP.
     async fn discover_idp(&self) -> Result<(OidcDiscovery, String), AuthError> {
         if let Some(ref idp) = self.config.idp_override {
             // Fetch real OIDC discovery from the issuer URL.
@@ -163,12 +167,8 @@ impl AuthClient {
             return Ok((discovery, idp.client_id.clone()));
         }
 
-        // Fetch OIDC discovery from the IdP.
-        // In the future, we first fetch the server's auth discovery endpoint
-        // to get the IdP URL and client ID. For now, this requires idp_override.
-        Err(AuthError::Internal(
-            "server auth discovery not yet implemented; use idp_override".to_string(),
-        ))
+        // Fetch from the journal server's auth discovery endpoint.
+        flows::server_discovery(&self.config.server_url, self.config.timeout).await
     }
 
     /// Auth8: Select the best OAuth2 flow based on discovery capabilities.
@@ -202,19 +202,26 @@ impl AuthClient {
         &self,
         flow: &OAuthFlow,
         discovery: Option<&OidcDiscovery>,
+        client_id: Option<&str>,
     ) -> Result<TokenSet, AuthError> {
+        let resolve_client_id = || -> &str {
+            client_id
+                .or_else(|| self.config.idp_override.as_ref().map(|i| i.client_id.as_str()))
+                .unwrap_or_default()
+        };
+
         match flow {
             OAuthFlow::AuthCodePkce => {
                 let disc = discovery.ok_or_else(|| {
                     AuthError::Internal("discovery required for auth_code_pkce".to_string())
                 })?;
-                flows::auth_code_pkce(disc, "", 0).await
+                flows::auth_code_pkce(disc, resolve_client_id(), self.config.timeout).await
             }
             OAuthFlow::DeviceCode => {
                 let disc = discovery.ok_or_else(|| {
                     AuthError::Internal("discovery required for device_code".to_string())
                 })?;
-                flows::device_code(disc, "").await
+                flows::device_code(disc, resolve_client_id(), self.config.timeout).await
             }
             OAuthFlow::ClientCredentials { client_id, client_secret } => {
                 let endpoint = discovery.map(|d| d.token_endpoint.as_str()).unwrap_or_default();
@@ -224,7 +231,7 @@ impl AuthClient {
                 let disc = discovery.ok_or_else(|| {
                     AuthError::Internal("discovery required for manual_paste".to_string())
                 })?;
-                flows::manual_paste(disc, "").await
+                flows::manual_paste(disc, resolve_client_id(), self.config.timeout).await
             }
         }
     }

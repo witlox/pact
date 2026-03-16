@@ -105,6 +105,11 @@ dirs = "6"
 # URL parsing
 url = "2"
 
+# Crypto / encoding
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+
 # Testing
 proptest = "1"
 cucumber = "0.22"
