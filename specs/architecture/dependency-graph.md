@@ -12,6 +12,7 @@ pact-journal ──▶ pact-policy    (library crate: PolicyService logic hosted
 pact-agent   ──▶ pact-common    (shared types for CapabilityReport, ServiceDecl, DriftVector)
 pact-policy  ──▶ pact-common    (shared types for Identity, Scope, VClusterPolicy)
 pact-cli     ──▶ pact-common    (shared types for display/formatting)
+pact-cli     ──▶ hpc-auth       (OAuth2 login/logout/token refresh, Auth1-Auth8)
 pact-test-harness ──▶ pact-common (builders construct pact-common types)
 pact-acceptance   ──▶ pact-common (step impls use pact-common types)
 ```
@@ -39,6 +40,7 @@ pact-cli   ──REST──▶ OpenCHAMI      (reboot/reimage delegation, stubbe
 | agent → common | Agent constructs CapabilityReport, evaluates DriftVector, manages ServiceDecl (domain-model.md: Node Management context) |
 | policy → common | Policy evaluates against Identity, Scope, VClusterPolicy (invariants P1-P8) |
 | cli → common | CLI formats and displays all domain types |
+| cli → hpc-auth | OAuth2 token acquisition for CLI commands (Auth1: no unauth commands) |
 | agent →(gRPC) journal | Boot config streaming (I2), config subscription (I1), commit/rollback (I3), audit logging (I4) |
 | cli →(gRPC) journal | Config queries (I5): status, diff, log, apply, overlay |
 | cli →(gRPC) agent | Exec/shell (I6): remote command execution, interactive sessions |
@@ -62,7 +64,7 @@ pact-cli   ──REST──▶ OpenCHAMI      (reboot/reimage delegation, stubbe
 | pact-policy | 1 (common) | OK |
 | pact-journal | 2 (common, policy) | OK |
 | pact-agent | 1 (common) | OK |
-| pact-cli | 1 (common) | OK |
+| pact-cli | 2 (common, hpc-auth) | OK |
 | pact-test-harness | 1 (common) | OK |
 
 No module exceeds 5 direct dependencies.

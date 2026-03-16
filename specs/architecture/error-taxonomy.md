@@ -191,6 +191,31 @@ When operating in degraded mode (journal partition, OPA unreachable), error hand
 4. **Observer → Agent**: `mpsc` channel errors. If channel closed, observer stops gracefully.
 5. **Raft → Journal**: openraft errors mapped to JournalResponse or PactError::JournalUnavailable.
 
+---
+
+## AuthError (hpc-auth)
+
+Authentication errors from the shared auth library. Consumed by CLI commands.
+
+| Variant | Meaning | CLI Exit Code | User Message |
+|---------|---------|---------------|--------------|
+| `IdpUnreachable(String)` | Cannot reach OIDC provider (F15) | 2 | "Cannot reach identity provider at {url}. Use BMC console for emergency access." |
+| `NoSupportedFlow` | IdP discovery lists no compatible grant types | 2 | "No compatible authentication flow. Check IdP configuration." |
+| `TokenExpired` | Access token expired, no refresh possible | 2 | "Session expired. Run `pact login` to authenticate." |
+| `CacheCorrupted(String)` | Token cache file is invalid (F16) | 2 | "Token cache is corrupted. Run `pact login` to re-authenticate." |
+| `CachePermissionDenied(String)` | Cache file has wrong permissions (strict mode) | 2 | "Token cache has incorrect permissions ({actual}). Expected 0600. Run `pact login`." |
+| `OAuthFailed(String)` | OAuth2 exchange failed | 2 | "Authentication failed: {reason}" |
+| `Timeout` | User didn't complete auth in time | 2 | "Authentication timed out. Try `--device-code` for headless environments." |
+| `StaleDiscovery` | Cached discovery document is outdated (F17) | 2 | "IdP configuration may have changed. Retry when IdP is reachable." |
+
+### Error Flow: hpc-auth → CLI
+
+```
+AuthClient::get_token() → Err(AuthError::TokenExpired)
+  → CLI prints "Session expired. Run `pact login`."
+  → CLI exits with code 2
+```
+
 ### Never Panic
 
 All crates use `Result<T, PactError>` or `Result<T, tonic::Status>`. Panics are bugs. The only acceptable panic is in test code (`unwrap()` in tests is fine).

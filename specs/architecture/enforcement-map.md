@@ -130,6 +130,31 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Authentication Invariants (hpc-auth crate)
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| Auth1 | No unauth commands | `AuthClient::get_token()` → consumer check | Consumer calls `get_token()` before gRPC. Error → exit with "run login" message. login/logout/version/help exempt. | `AuthError::TokenExpired` → exit code 2 |
+| Auth2 | Fail closed on cache corruption | `TokenCache::read()` | Validates JSON structure. Invalid → `AuthError::CacheCorrupted`. Never attempts partial parse. | Cache rejected, user must re-login |
+| Auth3 | Concurrent refresh safe | `AuthClient::get_token()` | File lock on cache during refresh. Refresh is idempotent at IdP. Last writer wins. | No conflict — idempotent |
+| Auth4 | Logout always clears local | `AuthClient::logout()` | Deletes cache entry BEFORE attempting IdP revocation. IdP failure does not block cache clear. | Cache always cleared |
+| Auth5 | Cache file 0600 permissions | `TokenCache::read()` + `TokenCache::write()` | Read: checks permissions per `PermissionMode` (strict=reject, lenient=warn+fix). Write: always creates with 0600. | Strict: `AuthError::CachePermissionDenied`. Lenient: warn + fix |
+| Auth6 | Per-server token isolation | `TokenCache` keying | Cache file is a JSON map keyed by server URL. No cross-server access. | Structural — HashMap<server_url, tokens> |
+| Auth7 | Refresh tokens never logged | `TokenSet::fmt()` + logging | `Display` impl redacts refresh_token field. `tracing` instrumentation excludes it. | Structural — no log path includes refresh token |
+| Auth8 | Cascading flow fallback | `AuthClient::login()` | Probes IdP discovery for supported grants. Tries PKCE → Confidential → DeviceCode → ManualPaste in order. | Falls back or `AuthError::NoSupportedFlow` |
+
+## Authentication Invariants (PACT-specific consumer)
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| PAuth1 | Strict permission mode | `pact-cli` AuthClient construction | `PermissionMode::Strict` passed to hpc-auth. Cache with wrong perms rejected. | Security error + "run pact login" |
+| PAuth2 | Emergency requires human | `PolicyEngine::evaluate()` + CLI auth check | P8 enforced server-side. CLI also checks principal_type != Service/Agent before sending. | Authorization error |
+| PAuth3 | Auth discovery public | `pact-journal` telemetry server | `/auth/discovery` endpoint on port 9091, no auth middleware. Returns IdP URL + client_id. | Structural — no auth check on route |
+| PAuth4 | Break-glass is BMC | Error message in `pact login` | When IdP unreachable + tokens expired, error suggests BMC console access. No pact break-glass mechanism. | Info message in error output |
+| PAuth5 | Two-person distinct identities | `PolicyService.DecideApproval()` | Compares `requester.principal` vs `approver.principal`. Same-identity → reject. | `ValidationError: self-approval denied` |
+
+---
+
 ## Enforcement Categories
 
 Summary of how invariants are enforced:

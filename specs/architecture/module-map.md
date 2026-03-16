@@ -141,3 +141,28 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - Custom harness (`harness = false`)
 
 **Justification:** testing-strategy.md Level 3. Feature files are the specification — steps must call real pact code when features are implemented.
+
+---
+
+## hpc-auth (external shared crate)
+
+**Responsibility:** OAuth2/OIDC token acquisition, caching, and refresh. Shared between pact-cli and lattice-cli.
+
+**Owns:**
+- OAuth2 flow execution (Auth Code+PKCE, Device Code, Client Credentials, Manual Paste)
+- Token cache (file-based, per-server keyed, permission validation)
+- OIDC discovery document fetching and caching
+- Silent token refresh
+- Cascading flow fallback logic (Auth8)
+
+**Does NOT own:**
+- gRPC metadata injection (consumer responsibility)
+- RBAC/policy evaluation (server-side, pact-policy)
+- CLI subcommand definitions (consumer defines `login`/`logout`)
+- Server-side token validation (pact-agent shell/auth.rs)
+
+**Consumed by:** pact-cli, lattice-cli (as a library dependency)
+
+**Invariants enforced:** Auth1-Auth8, with PAuth1-PAuth5 enforced by consumer (pact-cli)
+
+**Justification:** specs/invariants.md Auth1-Auth8 require a shared auth library. Both pact and lattice CLIs need identical OAuth2 flows, differing only in permission mode (PAuth1 vs lenient). Extracting to a shared crate prevents duplication and ensures consistent behavior.
