@@ -308,7 +308,24 @@ async fn main() {
                 Err(e) => Err(anyhow::anyhow!("{e}")),
             }
         }
-        Commands::Shell { node } => Ok(format!("shell on {node} (agent gRPC not yet wired)")),
+        Commands::Shell { node } => {
+            let agent_addr = match execute::resolve_agent_address(
+                &node,
+                journal_channel.as_ref().unwrap(),
+            )
+            .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match execute::connect_agent(&agent_addr).await {
+                Ok(channel) => execute::shell_interactive(channel, &token).await,
+                Err(e) => Err(e),
+            }
+        }
         Commands::Emergency { action } => {
             let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
             match action {

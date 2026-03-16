@@ -625,6 +625,60 @@ pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
     }
 }
 
+/// Execute `pact shell` — open interactive shell session on a node.
+pub async fn shell_interactive(channel: Channel, token: &str) -> anyhow::Result<String> {
+    use pact_common::proto::shell::{
+        shell_input, shell_output, shell_service_client::ShellServiceClient, ShellInput, ShellOpen,
+    };
+    use tokio_stream::StreamExt;
+
+    let mut client = ShellServiceClient::new(channel);
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+    // Send ShellOpen as first message
+    let open_msg = ShellInput {
+        input: Some(shell_input::Input::Open(ShellOpen {
+            rows: 24,
+            cols: 80,
+            term: std::env::var("TERM").unwrap_or_else(|_| "xterm".into()),
+        })),
+    };
+    tx.send(open_msg).await.ok();
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let mut request = tonic::Request::new(stream);
+    request.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {token}").parse().map_err(|_| anyhow::anyhow!("invalid token"))?,
+    );
+
+    let response =
+        client.shell(request).await.map_err(|e| anyhow::anyhow!("shell connection failed: {e}"))?;
+
+    let mut output_stream = response.into_inner();
+    while let Some(Ok(msg)) = output_stream.next().await {
+        match msg.output {
+            Some(shell_output::Output::Stdout(data)) => {
+                use std::io::Write;
+                std::io::stdout().write_all(&data).ok();
+                std::io::stdout().flush().ok();
+            }
+            Some(shell_output::Output::SessionId(id)) => {
+                eprintln!("Shell session: {id}");
+            }
+            Some(shell_output::Output::ExitCode(code)) => {
+                return Ok(format!("Shell exited with code {code}"));
+            }
+            Some(shell_output::Output::Error(e)) => {
+                return Err(anyhow::anyhow!("shell error: {e}"));
+            }
+            None => {}
+        }
+    }
+
+    Ok("Shell session ended.".to_string())
+}
+
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.
 fn parse_scope_filter(s: &str) -> ProtoScopeMsg {
     if let Some(node) = s.strip_prefix("node:") {

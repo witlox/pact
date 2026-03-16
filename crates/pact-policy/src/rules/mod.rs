@@ -237,11 +237,46 @@ impl DefaultPolicyEngine {
 
 #[async_trait]
 impl PolicyEngine for DefaultPolicyEngine {
-    async fn evaluate(&self, _request: &PolicyRequest) -> Result<PolicyDecision, PolicyError> {
-        // The async version delegates to the mutable sync version, but since
-        // the trait requires &self, we need interior mutability in production.
-        // For now, this is a simplified version that doesn't create approvals.
-        Err(PolicyError::NotImplemented("use evaluate_sync for mutable access".into()))
+    async fn evaluate(&self, request: &PolicyRequest) -> Result<PolicyDecision, PolicyError> {
+        // Async version performs RBAC evaluation without approval creation
+        // (approvals require &mut self, which the async trait doesn't allow).
+        // Production code uses RbacEngine::evaluate() directly via PolicyServiceImpl.
+        let vcluster_id = match &request.scope {
+            Scope::VCluster(vc) | Scope::Node(vc) => vc.clone(),
+            Scope::Global => String::new(),
+        };
+
+        let policy = self.policies.get(&vcluster_id).cloned().unwrap_or_else(|| VClusterPolicy {
+            vcluster_id: vcluster_id.clone(),
+            ..VClusterPolicy::default()
+        });
+
+        let policy_ref = if policy.policy_id.is_empty() {
+            format!("default:{vcluster_id}")
+        } else {
+            policy.policy_id.clone()
+        };
+
+        let rbac_result =
+            RbacEngine::evaluate(&request.identity, &request.action, &request.scope, &policy);
+
+        match rbac_result {
+            RbacDecision::Allow => Ok(PolicyDecision::Allow { policy_ref }),
+            RbacDecision::Deny { reason } => Ok(PolicyDecision::Deny { policy_ref, reason }),
+            RbacDecision::Defer => {
+                if policy.two_person_approval {
+                    // Cannot create approval without &mut self — return RequireApproval
+                    // with a placeholder. Production path uses evaluate_sync() or
+                    // PolicyServiceImpl which handles approvals through Raft.
+                    Ok(PolicyDecision::RequireApproval {
+                        policy_ref,
+                        approval_id: "pending".to_string(),
+                    })
+                } else {
+                    Ok(PolicyDecision::Allow { policy_ref })
+                }
+            }
+        }
     }
 
     async fn get_effective_policy(&self, vcluster_id: &str) -> Result<VClusterPolicy, PolicyError> {

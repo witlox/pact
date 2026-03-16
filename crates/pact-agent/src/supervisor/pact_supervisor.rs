@@ -232,8 +232,21 @@ impl ServiceManager for PactSupervisor {
                 Ok(HealthCheckResult { healthy: true, detail: "process alive".into() })
             }
             Some(HealthCheckType::Http { url }) => {
-                // HTTP health check — not implemented yet (needs reqwest)
-                Ok(HealthCheckResult { healthy: true, detail: format!("HTTP check stub: {url}") })
+                // HTTP health check — GET the URL and check for 2xx status
+                match reqwest::get(url).await {
+                    Ok(resp) if resp.status().is_success() => Ok(HealthCheckResult {
+                        healthy: true,
+                        detail: format!("HTTP {}", resp.status()),
+                    }),
+                    Ok(resp) => Ok(HealthCheckResult {
+                        healthy: false,
+                        detail: format!("HTTP {}", resp.status()),
+                    }),
+                    Err(e) => Ok(HealthCheckResult {
+                        healthy: false,
+                        detail: format!("HTTP check failed: {e}"),
+                    }),
+                }
             }
             Some(HealthCheckType::Tcp { port }) => {
                 // TCP health check

@@ -15,8 +15,8 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use pact_common::types::{
-    CapabilityReport, ConfigState, GpuCapability, MemoryCapability, SoftwareCapability,
-    StorageCapability, SupervisorBackend, SupervisorStatus,
+    CapabilityReport, ConfigState, GpuCapability, MemoryCapability, MountPointInfo,
+    NetworkCapability, SoftwareCapability, StorageCapability, SupervisorBackend, SupervisorStatus,
 };
 
 /// Trait for GPU detection backends.
@@ -76,7 +76,7 @@ impl CapabilityReporter {
             report_id: Uuid::new_v4(),
             gpus,
             memory: detect_memory(),
-            network: None, // TODO: detect Slingshot/InfiniBand/Ethernet
+            network: detect_network(),
             storage: detect_storage(),
             software: detect_software(),
             config_state: ConfigState::ObserveOnly,
@@ -144,21 +144,76 @@ fn parse_meminfo_kb(line: &str) -> Option<u64> {
     line.split_whitespace().nth(1)?.parse().ok()
 }
 
-/// Detect storage capabilities.
+/// Detect storage capabilities from /proc/mounts (Linux) or defaults.
 fn detect_storage() -> StorageCapability {
-    StorageCapability {
-        tmpfs_bytes: 0,
-        mounts: vec![], // TODO: detect from /proc/mounts
-    }
+    let mounts = parse_proc_mounts();
+    let tmpfs_bytes = mounts.iter().filter(|m| m.fs_type == "tmpfs").count() as u64 * 64 * 1024 * 1024; // estimate 64MB per tmpfs
+    StorageCapability { tmpfs_bytes, mounts }
 }
 
-/// Detect software capabilities.
+/// Parse /proc/mounts into MountPointInfo entries.
+fn parse_proc_mounts() -> Vec<MountPointInfo> {
+    let content = match std::fs::read_to_string("/proc/mounts") {
+        Ok(c) => c,
+        Err(_) => return vec![], // non-Linux or unreadable
+    };
+    content
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                Some(MountPointInfo {
+                    source: parts[0].to_string(),
+                    path: parts[1].to_string(),
+                    fs_type: parts[2].to_string(),
+                    available: true,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Detect software capabilities from /proc/modules (Linux) or defaults.
 fn detect_software() -> SoftwareCapability {
-    SoftwareCapability {
-        loaded_modules: vec![], // TODO: detect from /proc/modules
-        uenv_image: None,
-        services: vec![],
+    let loaded_modules = parse_proc_modules();
+    SoftwareCapability { loaded_modules, uenv_image: None, services: vec![] }
+}
+
+/// Detect network capabilities by checking for high-speed fabric interfaces.
+fn detect_network() -> Option<NetworkCapability> {
+    // Check for common HPC fabric types via /sys/class/infiniband or loaded modules
+    let has_infiniband = std::path::Path::new("/sys/class/infiniband").exists();
+    if has_infiniband {
+        return Some(NetworkCapability {
+            fabric_type: "InfiniBand".to_string(),
+            bandwidth_bps: 200_000_000_000, // 200 Gbps default
+            latency_us: 1.0,
+        });
     }
+
+    // Check for Slingshot (Cray/HPE)
+    let modules = parse_proc_modules();
+    if modules.iter().any(|m| m.starts_with("cxi") || m.starts_with("slingshot")) {
+        return Some(NetworkCapability {
+            fabric_type: "Slingshot".to_string(),
+            bandwidth_bps: 200_000_000_000,
+            latency_us: 0.5,
+        });
+    }
+
+    // Default Ethernet
+    None
+}
+
+/// Parse /proc/modules into a list of loaded module names.
+fn parse_proc_modules() -> Vec<String> {
+    let content = match std::fs::read_to_string("/proc/modules") {
+        Ok(c) => c,
+        Err(_) => return vec![], // non-Linux or unreadable
+    };
+    content.lines().filter_map(|line| line.split_whitespace().next().map(String::from)).collect()
 }
 
 // ---------------------------------------------------------------------------
