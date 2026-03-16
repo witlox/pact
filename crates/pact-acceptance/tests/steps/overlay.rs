@@ -23,12 +23,7 @@ fn admin_identity() -> Identity {
 
 // Track overlay build sequence for staleness checks (stored in overlay data as metadata)
 fn overlay_at_seq(vcluster: &str, version: u64, seq: u64) -> BootOverlay {
-    BootOverlay {
-        vcluster_id: vcluster.into(),
-        version,
-        data: format!("config-at-seq-{seq}").into_bytes(),
-        checksum: format!("sha256:seq{seq}"),
-    }
+    BootOverlay::new(vcluster, version, format!("config-at-seq-{seq}").into_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -37,24 +32,21 @@ fn overlay_at_seq(vcluster: &str, version: u64, seq: u64) -> BootOverlay {
 
 #[given(regex = r#"^vCluster "([\w-]+)" has config with sysctl, mounts, and services$"#)]
 async fn given_vc_full_config(world: &mut PactWorld, vcluster: String) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: 1,
-        data: b"[sysctl]\nvm.swappiness=60\n[mounts]\n/scratch=nfs\n[services]\nchronyd=true"
-            .to_vec(),
-        checksum: "sha256:fullconfig".into(),
-    };
+    let overlay = BootOverlay::new(
+        vcluster.clone(),
+        1,
+        b"[sysctl]\nvm.swappiness=60\n[mounts]\n/scratch=nfs\n[services]\nchronyd=true".to_vec(),
+    );
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^an overlay for vCluster "([\w-]+)" with base sysctl config$"#)]
 async fn given_overlay_base_sysctl(world: &mut PactWorld, vcluster: String) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: 1,
-        data: b"[sysctl]\nvm.swappiness=60\nnet.core.somaxconn=128\n".to_vec(),
-        checksum: "sha256:base-sysctl".into(),
-    };
+    let overlay = BootOverlay::new(
+        vcluster.clone(),
+        1,
+        b"[sysctl]\nvm.swappiness=60\nnet.core.somaxconn=128\n".to_vec(),
+    );
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -62,23 +54,14 @@ async fn given_overlay_base_sysctl(world: &mut PactWorld, vcluster: String) {
 async fn given_vc_large_config(world: &mut PactWorld, vcluster: String) {
     // Create a "large" config (>1KB raw)
     let raw = "x".repeat(2048);
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: 1,
-        data: raw.into_bytes(),
-        checksum: "sha256:large".into(),
-    };
+    let overlay = BootOverlay::new(vcluster.clone(), 1, raw.into_bytes());
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^an existing overlay for vCluster "([\w-]+)" at version (\d+)$"#)]
 async fn given_overlay_at_version(world: &mut PactWorld, vcluster: String, version: u64) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version,
-        data: format!("config-v{version}").into_bytes(),
-        checksum: format!("sha256:v{version}"),
-    };
+    let overlay =
+        BootOverlay::new(vcluster.clone(), version, format!("config-v{version}").into_bytes());
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -272,12 +255,7 @@ async fn when_overlay_built(world: &mut PactWorld, vcluster: String) {
 
     // Simulate zstd compression (just note it's "compressed")
     let compressed_data = config_data; // In real code this would be zstd::encode
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version,
-        data: compressed_data,
-        checksum: format!("sha256:v{version}"),
-    };
+    let overlay = BootOverlay::new(vcluster.clone(), version, compressed_data);
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -285,12 +263,7 @@ async fn when_overlay_built(world: &mut PactWorld, vcluster: String) {
 async fn when_boot_request(world: &mut PactWorld, vcluster: String) {
     // Build on demand if missing
     if !world.journal.overlays.contains_key(&vcluster) {
-        let overlay = BootOverlay {
-            vcluster_id: vcluster.clone(),
-            version: 1,
-            data: b"on-demand-config".to_vec(),
-            checksum: "sha256:ondemand".into(),
-        };
+        let overlay = BootOverlay::new(vcluster.clone(), 1, b"on-demand-config".to_vec());
         world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
     }
 }
@@ -343,12 +316,7 @@ async fn when_delta_promoted(world: &mut PactWorld, node: String) {
 async fn when_apply_promoted(world: &mut PactWorld) {
     // Create overlay if not present
     if !world.journal.overlays.contains_key("ml-training") {
-        let overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: 1,
-            data: b"[sysctl]\n".to_vec(),
-            checksum: "sha256:v1".into(),
-        };
+        let overlay = BootOverlay::new("ml-training", 1, b"[sysctl]\n".to_vec());
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay,
@@ -358,12 +326,8 @@ async fn when_apply_promoted(world: &mut PactWorld) {
     if let Some(overlay) = world.journal.overlays.get("ml-training") {
         let mut new_data = overlay.data.clone();
         new_data.extend_from_slice(b"\nvm.swappiness=10");
-        let new_overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: overlay.version + 1,
-            data: new_data,
-            checksum: format!("sha256:v{}", overlay.version + 1),
-        };
+        let new_version = overlay.version + 1;
+        let new_overlay = BootOverlay::new("ml-training", new_version, new_data);
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay: new_overlay,
@@ -405,12 +369,7 @@ async fn when_accept_overwrite(world: &mut PactWorld, node: String) {
 
     // Ensure overlay exists
     if !world.journal.overlays.contains_key("ml-training") {
-        let overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: 1,
-            data: b"[vcluster.ml-training]\n".to_vec(),
-            checksum: "sha256:v1".into(),
-        };
+        let overlay = BootOverlay::new("ml-training", 1, b"[vcluster.ml-training]\n".to_vec());
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay,
@@ -421,12 +380,8 @@ async fn when_accept_overwrite(world: &mut PactWorld, node: String) {
     if let Some(overlay) = world.journal.overlays.get("ml-training") {
         let mut new_data = overlay.data.clone();
         new_data.extend_from_slice(b"\nvm.swappiness=10");
-        let new_overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: overlay.version + 1,
-            data: new_data,
-            checksum: format!("sha256:v{}", overlay.version + 1),
-        };
+        let new_version = overlay.version + 1;
+        let new_overlay = BootOverlay::new("ml-training", new_version, new_data);
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay: new_overlay,
@@ -451,12 +406,7 @@ async fn when_keep_local(world: &mut PactWorld, node: String) {
     // Overlay still gets the promoted value
     // Ensure overlay exists
     if !world.journal.overlays.contains_key("ml-training") {
-        let overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: 1,
-            data: b"[vcluster.ml-training]\n".to_vec(),
-            checksum: "sha256:v1".into(),
-        };
+        let overlay = BootOverlay::new("ml-training", 1, b"[vcluster.ml-training]\n".to_vec());
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay,
@@ -465,12 +415,8 @@ async fn when_keep_local(world: &mut PactWorld, node: String) {
     if let Some(overlay) = world.journal.overlays.get("ml-training") {
         let mut new_data = overlay.data.clone();
         new_data.extend_from_slice(b"\nvm.swappiness=10");
-        let new_overlay = BootOverlay {
-            vcluster_id: "ml-training".into(),
-            version: overlay.version + 1,
-            data: new_data,
-            checksum: format!("sha256:v{}", overlay.version + 1),
-        };
+        let new_version = overlay.version + 1;
+        let new_overlay = BootOverlay::new("ml-training", new_version, new_data);
         world.journal.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
             overlay: new_overlay,

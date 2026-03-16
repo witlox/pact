@@ -210,12 +210,7 @@ async fn boot_config_stream_from_cluster() {
         let mut state = leader.state.write().await;
         state.apply_command(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
-            overlay: BootOverlay {
-                vcluster_id: "ml-training".into(),
-                version: 1,
-                data: vec![42; 100],
-                checksum: "sha256:test".into(),
-            },
+            overlay: BootOverlay::new("ml-training", 1, vec![42; 100]),
         });
     }
 

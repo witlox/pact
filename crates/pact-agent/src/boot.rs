@@ -50,6 +50,7 @@ pub struct BootResult {
 /// Each phase logs its progress and timing for observability.
 /// If `journal_client` is `Some`, the agent streams initial config from the journal.
 /// If `None` (dev mode or disconnected start), it starts with defaults.
+#[allow(clippy::too_many_lines)]
 pub async fn boot(
     config: &AgentConfig,
     journal_client: Option<&JournalClient>,
@@ -136,6 +137,33 @@ pub async fn boot(
     // ConfigState tracks the convergence lifecycle, not enforcement mode.
     // All agents start in ObserveOnly during bootstrap (ADR-002).
     let config_state = ConfigState::ObserveOnly;
+
+    // Spawn auto-rollback timer (A4)
+    let cw_timer = commit_window.clone();
+    let em_timer = emergency.clone();
+    let enforcement = config.enforcement_mode.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            // D5: observe-only mode skips commit window enforcement
+            if enforcement == "observe" {
+                continue;
+            }
+            // Emergency mode suspends auto-rollback (A4 exception)
+            if em_timer.read().await.is_active() {
+                continue;
+            }
+            let mut cw = cw_timer.write().await;
+            cw.check_expired();
+            if matches!(cw.state(), crate::commit::WindowState::Expired { .. }) {
+                tracing::warn!("Commit window expired — auto-rollback triggered (A4)");
+                if let Err(e) = cw.rollback_with_check(0) {
+                    tracing::warn!(error = %e, "Auto-rollback blocked");
+                }
+            }
+        }
+    });
 
     let elapsed = start.elapsed();
     info!(

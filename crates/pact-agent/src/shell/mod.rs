@@ -23,10 +23,12 @@ pub mod whitelist;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
-use tracing::info;
+use tracing::{info, warn};
 
 use pact_common::types::Identity;
 
+use crate::commit::CommitWindowManager;
+use crate::journal_client::JournalClient;
 use crate::shell::auth::{
     extract_bearer_token, has_ops_role, has_viewer_role, is_platform_admin, validate_token,
     AuthConfig, AuthError,
@@ -49,6 +51,10 @@ pub struct ShellServer {
     node_id: String,
     /// vCluster this node belongs to.
     vcluster_id: String,
+    /// Optional journal client for exec audit logging.
+    journal_client: Option<JournalClient>,
+    /// Optional commit window manager for state-changing execs.
+    commit_window: Option<Arc<RwLock<CommitWindowManager>>>,
 }
 
 impl ShellServer {
@@ -67,7 +73,21 @@ impl ShellServer {
             exec_config,
             node_id,
             vcluster_id,
+            journal_client: None,
+            commit_window: None,
         }
+    }
+
+    /// Set the journal client for exec audit logging.
+    pub fn with_journal_client(mut self, client: JournalClient) -> Self {
+        self.journal_client = Some(client);
+        self
+    }
+
+    /// Set the commit window manager for state-changing exec operations.
+    pub fn with_commit_window(mut self, cw: Arc<RwLock<CommitWindowManager>>) -> Self {
+        self.commit_window = Some(cw);
+        self
     }
 
     /// Authenticate a request from gRPC metadata.
@@ -156,8 +176,52 @@ impl ShellServer {
         let result =
             execute_command(command, args, &self.exec_config).await.map_err(ShellError::Exec)?;
 
-        // 4. TODO: Log to journal (ExecLog entry)
-        // 5. TODO: If state_changing, interact with commit window
+        // 4. Log to journal (ExecLog entry)
+        if let Some(ref client) = self.journal_client {
+            let exec_entry = pact_common::proto::config::ConfigEntry {
+                sequence: 0,
+                timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+                entry_type: pact_common::proto::config::EntryType::ExecLog.into(),
+                scope: Some(pact_common::proto::config::Scope {
+                    scope: Some(pact_common::proto::config::scope::Scope::NodeId(
+                        self.node_id.clone(),
+                    )),
+                }),
+                author: Some(pact_common::proto::config::Identity {
+                    principal: identity.principal.clone(),
+                    principal_type: format!("{:?}", identity.principal_type),
+                    role: identity.role.clone(),
+                }),
+                parent: None,
+                state_delta: Some(pact_common::proto::config::StateDelta {
+                    mounts: vec![],
+                    files: vec![],
+                    network: vec![],
+                    services: vec![],
+                    kernel: vec![],
+                    packages: vec![],
+                    gpu: vec![],
+                }),
+                policy_ref: format!("exec:{command}"),
+                ttl: None,
+                emergency_reason: None,
+            };
+            let mut config_svc = client.config_service();
+            let append_req = tonic::Request::new(pact_common::proto::journal::AppendEntryRequest {
+                entry: Some(exec_entry),
+            });
+            if let Err(e) = config_svc.append_entry(append_req).await {
+                warn!(error = %e, command, "Failed to log exec to journal — continuing");
+            }
+        }
+
+        // 5. If state_changing, open the commit window
+        if state_changing {
+            if let Some(ref cw) = self.commit_window {
+                cw.write().await.open(1.0);
+                info!(command, "State-changing exec — commit window opened");
+            }
+        }
 
         Ok((result, state_changing))
     }

@@ -74,10 +74,10 @@ Feature: Journal Operations
     Then vCluster "ml-training" should have overlay version 1
 
   Scenario: Overlay update replaces previous version
-    When I store a boot overlay for vCluster "ml-training" version 1 with checksum "abc123"
-    And I store a boot overlay for vCluster "ml-training" version 2 with checksum "def456"
+    When I store a boot overlay for vCluster "ml-training" version 1 with checksum "ignored"
+    And I store a boot overlay for vCluster "ml-training" version 2 with checksum "ignored"
     Then vCluster "ml-training" should have overlay version 2
-    And vCluster "ml-training" overlay should have checksum "def456"
+    And vCluster "ml-training" overlay should have a valid checksum
 
   # --- Audit log ---
 

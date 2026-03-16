@@ -111,8 +111,9 @@ impl ShellService for ShellServiceImpl {
     /// List whitelisted commands for this node's vCluster.
     async fn list_commands(
         &self,
-        _request: Request<ListCommandsRequest>,
+        request: Request<ListCommandsRequest>,
     ) -> Result<Response<ListCommandsResponse>, Status> {
+        let _auth = extract_auth(&request)?;
         let commands = self.server.list_commands().await;
         let entries = commands
             .into_iter()
@@ -131,6 +132,7 @@ impl ShellService for ShellServiceImpl {
         &self,
         request: Request<ExtendWindowRequest>,
     ) -> Result<Response<ExtendWindowResponse>, Status> {
+        let _auth = extract_auth(&request)?;
         let mins = request.into_inner().additional_minutes;
         if mins == 0 {
             return Ok(Response::new(ExtendWindowResponse {
@@ -247,7 +249,11 @@ mod tests {
         let server = test_shell_server();
         let svc = ShellServiceImpl::new(server, test_commit_window());
 
-        let resp = svc.list_commands(Request::new(ListCommandsRequest {})).await.unwrap();
+        let token = make_token("ops@example.com", "pact-ops-ml-training");
+        let mut request = Request::new(ListCommandsRequest {});
+        request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
+
+        let resp = svc.list_commands(request).await.unwrap();
         let commands = resp.into_inner().commands;
         assert!(!commands.is_empty());
 
@@ -255,6 +261,26 @@ mod tests {
         let names: Vec<&str> = commands.iter().map(|c| c.command.as_str()).collect();
         assert!(names.contains(&"ps"), "should include 'ps'");
         assert!(names.contains(&"nvidia-smi"), "should include 'nvidia-smi'");
+    }
+
+    #[tokio::test]
+    async fn list_commands_without_auth_fails() {
+        let server = test_shell_server();
+        let svc = ShellServiceImpl::new(server, test_commit_window());
+
+        let request = Request::new(ListCommandsRequest {});
+        let result = svc.list_commands(request).await;
+        assert_eq!(result.unwrap_err().code(), tonic::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn extend_commit_window_without_auth_fails() {
+        let server = test_shell_server();
+        let svc = ShellServiceImpl::new(server, test_commit_window());
+
+        let request = Request::new(ExtendWindowRequest { additional_minutes: 5 });
+        let result = svc.extend_commit_window(request).await;
+        assert_eq!(result.unwrap_err().code(), tonic::Code::Unauthenticated);
     }
 
     // Note: shell() test omitted — Streaming<ShellInput> is not constructible

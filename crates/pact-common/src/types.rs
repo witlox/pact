@@ -450,6 +450,22 @@ pub struct BootOverlay {
     pub checksum: String,
 }
 
+impl BootOverlay {
+    /// Create a new overlay with an automatically computed checksum (J5).
+    pub fn new(vcluster_id: impl Into<VClusterId>, version: u64, data: Vec<u8>) -> Self {
+        let checksum = compute_overlay_checksum(&data);
+        Self { vcluster_id: vcluster_id.into(), version, data, checksum }
+    }
+}
+
+/// Compute a deterministic checksum for overlay data (invariant J5).
+pub fn compute_overlay_checksum(data: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
 /// Record of an admin operation for the audit log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminOperation {

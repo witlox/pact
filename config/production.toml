@@ -35,6 +35,12 @@ enabled = true
 listen = "0.0.0.0:9445"
 whitelist_mode = "strict"
 
+[agent.shell.auth]
+issuer = "https://auth.example.org/realms/hpc"
+audience = "pact-agent"
+# hmac_secret MUST NOT be set in production — use JWKS only
+# jwks_url = "https://auth.example.org/realms/hpc/.well-known/jwks.json"
+
 [agent.commit_window]
 base_window_seconds = 900
 drift_sensitivity = 2.0

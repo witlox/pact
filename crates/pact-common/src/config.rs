@@ -106,6 +106,26 @@ pub struct ShellConfig {
     pub listen: String,
     #[serde(default = "default_whitelist_mode")]
     pub whitelist_mode: String,
+    #[serde(default)]
+    pub auth: Option<AuthAgentConfig>,
+}
+
+/// Auth configuration for the shell server.
+///
+/// Fail-closed: no defaults for issuer/audience/secrets. If this section is
+/// missing, the agent starts without auth capability (no HMAC secret, no JWKS).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthAgentConfig {
+    /// OIDC issuer URL (e.g., "https://auth.example.com/realms/hpc").
+    pub issuer: String,
+    /// Expected JWT audience (e.g., "pact-agent").
+    pub audience: String,
+    /// HMAC secret for development/testing (Base64-encoded). Not for production.
+    #[serde(default)]
+    pub hmac_secret: Option<String>,
+    /// JWKS endpoint URL for RS256 validation. Derived from issuer if not set.
+    #[serde(default)]
+    pub jwks_url: Option<String>,
 }
 
 fn default_shell_listen() -> String {
@@ -122,6 +142,7 @@ impl Default for ShellConfig {
             enabled: true,
             listen: default_shell_listen(),
             whitelist_mode: default_whitelist_mode(),
+            auth: None,
         }
     }
 }

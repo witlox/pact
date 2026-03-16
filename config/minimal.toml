@@ -22,6 +22,12 @@ enabled = true
 listen = "0.0.0.0:9445"
 whitelist_mode = "learning"  # "strict" | "learning" | "bypass"
 
+[agent.shell.auth]
+issuer = "https://auth.dev.example.com"
+audience = "pact-agent"
+# hmac_secret is intentionally NOT set — use JWKS in production
+# jwks_url derived from issuer if not set
+
 [agent.commit_window]
 base_window_seconds = 900
 drift_sensitivity = 2.0

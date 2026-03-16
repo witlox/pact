@@ -104,6 +104,18 @@ impl CommitWindowManager {
         self.state = WindowState::Idle;
     }
 
+    /// Rollback with active consumer check (A5).
+    ///
+    /// Rejects rollback if there are active consumers using the current config.
+    /// Use `active_consumers: 0` when consumer tracking is not yet available.
+    pub fn rollback_with_check(&mut self, active_consumers: usize) -> Result<(), String> {
+        if active_consumers > 0 {
+            return Err(format!("{active_consumers} active consumers — rollback blocked (A5)"));
+        }
+        self.state = WindowState::Idle;
+        Ok(())
+    }
+
     /// Extend the window by the given number of seconds.
     pub fn extend(&mut self, additional_seconds: u32) {
         if let WindowState::Open { opened_at, deadline } = &self.state {
@@ -247,6 +259,24 @@ mod tests {
         mgr.open(0.0);
         // Even with tiny base window, emergency prevents expiry
         assert!(!mgr.check_expired());
+    }
+
+    #[test]
+    fn rollback_with_check_blocks_on_active_consumers() {
+        let mut mgr = CommitWindowManager::new(default_config());
+        mgr.open(1.0);
+        let err = mgr.rollback_with_check(3).unwrap_err();
+        assert!(err.contains("3 active consumers"));
+        // State should still be Open (rollback was blocked)
+        assert!(matches!(mgr.state(), WindowState::Open { .. }));
+    }
+
+    #[test]
+    fn rollback_with_check_succeeds_when_no_consumers() {
+        let mut mgr = CommitWindowManager::new(default_config());
+        mgr.open(1.0);
+        mgr.rollback_with_check(0).unwrap();
+        assert!(matches!(mgr.state(), WindowState::Idle));
     }
 
     #[test]

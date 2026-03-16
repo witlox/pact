@@ -50,12 +50,7 @@ async fn given_journal_default(world: &mut PactWorld) {
 
 #[given(regex = r#"^a boot overlay for vCluster "([\w-]+)" version (\d+) with data "(.*)"$"#)]
 async fn given_boot_overlay(world: &mut PactWorld, vcluster: String, version: u64, data: String) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version,
-        checksum: format!("sha256:{:x}", md5_simple(&data)),
-        data: data.into_bytes(),
-    };
+    let overlay = BootOverlay::new(vcluster.clone(), version, data.into_bytes());
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -63,23 +58,17 @@ async fn given_boot_overlay(world: &mut PactWorld, vcluster: String, version: u6
     regex = r#"^a boot overlay for vCluster "([\w-]+)" with (?:base )?sysctl(?: and mount)? config$"#
 )]
 async fn given_boot_overlay_sysctl(world: &mut PactWorld, vcluster: String) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: 1,
-        data: b"sysctl.vm.swappiness=60\nmount./scratch=nfs".to_vec(),
-        checksum: "sha256:abc".to_string(),
-    };
+    let overlay = BootOverlay::new(
+        vcluster.clone(),
+        1,
+        b"sysctl.vm.swappiness=60\nmount./scratch=nfs".to_vec(),
+    );
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^a boot overlay for vCluster "([\w-]+)"$"#)]
 async fn given_boot_overlay_simple(world: &mut PactWorld, vcluster: String) {
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: 1,
-        data: b"default-config".to_vec(),
-        checksum: "sha256:default".to_string(),
-    };
+    let overlay = BootOverlay::new(vcluster.clone(), 1, b"default-config".to_vec());
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -236,10 +225,10 @@ async fn when_store_overlay(
     world: &mut PactWorld,
     vcluster: String,
     version: u64,
-    checksum: String,
+    _checksum: String,
 ) {
-    let overlay =
-        BootOverlay { vcluster_id: vcluster.clone(), version, data: vec![1, 2, 3], checksum };
+    // J5: checksum is now computed from data, the feature-file checksum is ignored.
+    let overlay = BootOverlay::new(vcluster.clone(), version, vec![1, 2, 3]);
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
@@ -377,6 +366,13 @@ async fn then_overlay_version(world: &mut PactWorld, vcluster: String, version: 
 async fn then_overlay_checksum(world: &mut PactWorld, vcluster: String, checksum: String) {
     let overlay = world.journal.overlays.get(&vcluster).expect("overlay not found");
     assert_eq!(overlay.checksum, checksum);
+}
+
+#[then(regex = r#"^vCluster "([\w-]+)" overlay should have a valid checksum$"#)]
+async fn then_overlay_valid_checksum(world: &mut PactWorld, vcluster: String) {
+    let overlay = world.journal.overlays.get(&vcluster).expect("overlay not found");
+    let expected = pact_common::types::compute_overlay_checksum(&overlay.data);
+    assert_eq!(overlay.checksum, expected, "overlay checksum should match computed value");
 }
 
 #[then(regex = r"^the audit log should contain (\d+) entr(?:y|ies)$")]

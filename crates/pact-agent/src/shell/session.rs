@@ -121,6 +121,15 @@ impl ShellSession {
 
     /// Build the restricted bash environment variables.
     pub fn env_vars(&self) -> Vec<(String, String)> {
+        // Sanitize the principal to prevent shell injection via PROMPT_COMMAND.
+        // Only allow alphanumeric characters and safe delimiters.
+        let safe_principal: String = self
+            .user
+            .principal
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_')
+            .collect();
+
         vec![
             ("PATH".into(), self.bin_dir()),
             ("HOME".into(), "/tmp".into()),
@@ -131,7 +140,7 @@ impl ShellSession {
                 "PROMPT_COMMAND".into(),
                 format!(
                     "echo \"PACT_AUDIT session={} user={} cmd=$(history 1)\" >> /run/pact/shell/{}/audit.log",
-                    self.session_id, self.user.principal, self.session_id
+                    self.session_id, safe_principal, self.session_id
                 ),
             ),
             // Prevent escape via bash startup files
@@ -716,6 +725,36 @@ mod tests {
         // Active session still there
         assert!(mgr.get(&sid2).is_some());
         assert_eq!(mgr.get(&sid2).unwrap().state, SessionState::Active);
+    }
+
+    #[test]
+    fn env_vars_sanitize_principal_shell_metacharacters() {
+        let malicious_user = Identity {
+            principal: "admin$(whoami)@example.com; rm -rf /".into(),
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml".into(),
+        };
+        let session = ShellSession::new(
+            malicious_user,
+            "node-001".into(),
+            "ml-training".into(),
+            24,
+            80,
+            "xterm-256color".into(),
+        );
+
+        let env = session.env_vars();
+        let env_map: std::collections::HashMap<_, _> = env.into_iter().collect();
+        let prompt = &env_map["PROMPT_COMMAND"];
+
+        // Shell metacharacters should be stripped from the user= value
+        assert!(!prompt.contains("$(whoami)"));
+        assert!(!prompt.contains("rm -rf"));
+        // The sanitized principal should appear (metacharacters removed)
+        assert!(prompt.contains("user=adminwhoami@example.com"));
+        // Semicolons from the malicious principal should not appear between user= and cmd=
+        let user_to_cmd = &prompt[prompt.find("user=").unwrap()..prompt.find("cmd=").unwrap()];
+        assert!(!user_to_cmd.contains(';'));
     }
 
     #[test]

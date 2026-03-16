@@ -16,6 +16,7 @@ use tracing::{error, info};
 use pact_common::proto::journal::config_service_server::ConfigServiceServer;
 use pact_common::proto::policy::policy_service_server::PolicyServiceServer;
 use pact_common::proto::stream::boot_config_service_server::BootConfigServiceServer;
+use pact_journal::auth::auth_interceptor;
 use pact_journal::boot_service::{BootConfigServiceImpl, ConfigUpdateNotifier};
 use pact_journal::policy_service::PolicyServiceImpl;
 use pact_journal::service::ConfigServiceImpl;
@@ -155,9 +156,9 @@ async fn main() -> anyhow::Result<()> {
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     tonic::transport::Server::builder()
         .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(raft_server))
-        .add_service(ConfigServiceServer::new(config_service))
-        .add_service(PolicyServiceServer::new(policy_service))
-        .add_service(BootConfigServiceServer::new(boot_service))
+        .add_service(ConfigServiceServer::with_interceptor(config_service, auth_interceptor))
+        .add_service(PolicyServiceServer::with_interceptor(policy_service, auth_interceptor))
+        .add_service(BootConfigServiceServer::with_interceptor(boot_service, auth_interceptor))
         .serve_with_incoming(incoming)
         .await
         .inspect_err(|e| error!("gRPC server error: {e}"))?;

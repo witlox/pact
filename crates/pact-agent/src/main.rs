@@ -34,6 +34,7 @@ struct Args {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -102,19 +103,35 @@ async fn main() -> anyhow::Result<()> {
 
     // Start shell gRPC server
     let shell_listen = agent_config.shell.listen.clone();
-    let shell_server = Arc::new(ShellServer::new(
+    let auth_config = if let Some(ref auth) = agent_config.shell.auth {
         AuthConfig {
-            issuer: String::new(), // TODO: from OIDC config
+            issuer: auth.issuer.clone(),
+            audience: auth.audience.clone(),
+            hmac_secret: auth.hmac_secret.as_ref().map(|s| s.as_bytes().to_vec()),
+            jwks_url: auth.jwks_url.clone(),
+        }
+    } else {
+        info!("No [agent.shell.auth] configured — shell auth will require JWKS (fail-closed)");
+        AuthConfig {
+            issuer: String::new(),
             audience: String::new(),
-            hmac_secret: Some(b"dev-secret-key-for-pact-development".to_vec()),
-            jwks_url: None, // TODO: from OIDC discovery
-        },
+            hmac_secret: None,
+            jwks_url: None,
+        }
+    };
+    let mut shell_server = ShellServer::new(
+        auth_config,
         ExecConfig::default(),
         agent_config.node_id.clone(),
         agent_config.vcluster.clone(),
         agent_config.shell.whitelist_mode == "learning",
         10, // max concurrent sessions
-    ));
+    );
+    if let Some(ref client) = journal_client {
+        shell_server = shell_server.with_journal_client(client.clone());
+    }
+    shell_server = shell_server.with_commit_window(boot_result.commit_window.clone());
+    let shell_server = Arc::new(shell_server);
     let shell_svc = ShellServiceImpl::new(shell_server, boot_result.commit_window.clone());
 
     let shell_listener = tokio::net::TcpListener::bind(&shell_listen).await?;

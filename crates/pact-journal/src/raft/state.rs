@@ -192,6 +192,16 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                 JournalResponse::Ok
             }
             JournalCommand::SetOverlay { vcluster_id, overlay } => {
+                // J5: validate overlay checksum matches hash of data.
+                let computed = pact_common::types::compute_overlay_checksum(&overlay.data);
+                if overlay.checksum != computed {
+                    return JournalResponse::ValidationError {
+                        reason: format!(
+                            "overlay checksum mismatch: expected {}, got {computed}",
+                            overlay.checksum
+                        ),
+                    };
+                }
                 self.overlays.insert(vcluster_id, overlay);
                 JournalResponse::Ok
             }
@@ -318,15 +328,26 @@ mod tests {
     #[test]
     fn set_overlay() {
         let mut state = JournalState::default();
+        let overlay = BootOverlay::new("dev", 1, vec![1, 2, 3]);
+        state.apply(JournalCommand::SetOverlay { vcluster_id: "dev".into(), overlay });
+        assert!(state.overlays.contains_key("dev"));
+        assert_eq!(state.overlays["dev"].version, 1);
+    }
+
+    #[test]
+    fn reject_overlay_with_bad_checksum() {
+        let mut state = JournalState::default();
         let overlay = BootOverlay {
             vcluster_id: "dev".into(),
             version: 1,
             data: vec![1, 2, 3],
-            checksum: "abc123".into(),
+            checksum: "bad-checksum".into(),
         };
-        state.apply(JournalCommand::SetOverlay { vcluster_id: "dev".into(), overlay });
-        assert!(state.overlays.contains_key("dev"));
-        assert_eq!(state.overlays["dev"].version, 1);
+        let resp = state.apply(JournalCommand::SetOverlay { vcluster_id: "dev".into(), overlay });
+        assert!(
+            matches!(resp, JournalResponse::ValidationError { reason } if reason.contains("checksum mismatch"))
+        );
+        assert!(!state.overlays.contains_key("dev"));
     }
 
     #[test]

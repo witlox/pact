@@ -5,6 +5,7 @@
 //!
 //! See `docs/architecture/journal-design.md` for design documentation.
 
+pub mod auth;
 pub mod boot_service;
 pub mod policy_service;
 pub mod raft;

@@ -257,8 +257,8 @@ impl BootConfigService for BootConfigServiceImpl {
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        debug!(skipped = n, "Subscriber lagged, some updates were lost");
-                        // Continue receiving — subscriber will need to re-sync
+                        debug!(skipped = n, "Subscriber lagged — disconnecting for re-sync");
+                        break; // Force reconnect to get fresh catch-up
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         break; // journal shutting down
@@ -330,12 +330,7 @@ mod tests {
         // Add overlay
         state.apply(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
-            overlay: BootOverlay {
-                vcluster_id: "ml-training".into(),
-                version: 5,
-                data: vec![10; 100], // 100 bytes of test data
-                checksum: "test-checksum".into(),
-            },
+            overlay: BootOverlay::new("ml-training", 5, vec![10; 100]),
         });
         // Add some entries for subscribe testing
         state.apply(JournalCommand::AppendEntry(test_entry(
@@ -524,12 +519,7 @@ mod tests {
         let large_data = vec![42u8; CHUNK_SIZE * 3 + 100]; // 3.something chunks
         state.apply(JournalCommand::SetOverlay {
             vcluster_id: "big-vc".into(),
-            overlay: BootOverlay {
-                vcluster_id: "big-vc".into(),
-                version: 1,
-                data: large_data,
-                checksum: "big-checksum".into(),
-            },
+            overlay: BootOverlay::new("big-vc", 1, large_data),
         });
 
         let svc = BootConfigServiceImpl::new(

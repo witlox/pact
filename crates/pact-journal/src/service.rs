@@ -524,12 +524,7 @@ mod tests {
         // Add overlay
         state.apply(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
-            overlay: BootOverlay {
-                vcluster_id: "ml-training".into(),
-                version: 3,
-                data: vec![1, 2, 3, 4],
-                checksum: "abc123".into(),
-            },
+            overlay: BootOverlay::new("ml-training", 3, vec![1, 2, 3, 4]),
         });
         state
     }
@@ -778,7 +773,8 @@ mod tests {
         assert_eq!(overlay.vcluster_id, "ml-training");
         assert_eq!(overlay.version, 3);
         assert_eq!(overlay.data, vec![1, 2, 3, 4]);
-        assert_eq!(overlay.checksum, "abc123");
+        let expected_checksum = pact_common::types::compute_overlay_checksum(&[1, 2, 3, 4]);
+        assert_eq!(overlay.checksum, expected_checksum);
     }
 
     #[tokio::test]

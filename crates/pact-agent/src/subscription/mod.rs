@@ -139,6 +139,17 @@ impl ConfigSubscription {
         Ok(())
     }
 
+    /// Called before processing updates on (re)connect.
+    ///
+    /// Override point for CR1: feed back local changes before accepting journal state.
+    /// In a full implementation, this would:
+    /// 1. Collect unpromoted local drift from the agent's drift evaluator
+    /// 2. Submit local changes to journal via `ConfigService.AppendEntry`
+    /// 3. Wait for acknowledgment before proceeding
+    pub async fn on_reconnecting(&self) {
+        tracing::info!("Config subscription reconnecting — CR1 hook point");
+    }
+
     /// Record successful connection.
     pub async fn on_connected(&self) {
         let mut state = self.state.write().await;
@@ -210,6 +221,7 @@ impl ConfigSubscription {
             match client.subscribe_config_updates(request).await {
                 Ok(response) => {
                     self.on_connected().await;
+                    self.on_reconnecting().await;
                     let mut stream = response.into_inner();
 
                     while let Some(result) = stream.next().await {

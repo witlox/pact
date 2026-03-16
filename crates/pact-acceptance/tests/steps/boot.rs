@@ -48,12 +48,11 @@ fn simulate_boot_stream(world: &mut PactWorld, node_id: &str, vcluster: &str) {
         });
     } else {
         // On-demand overlay build for new vClusters
-        let overlay = BootOverlay {
-            vcluster_id: vcluster.to_string(),
-            version: 1,
-            data: format!("[vcluster.{vcluster}]\n").into_bytes(),
-            checksum: format!("sha256:on-demand-{vcluster}"),
-        };
+        let overlay = BootOverlay::new(
+            vcluster.to_string(),
+            1,
+            format!("[vcluster.{vcluster}]\n").into_bytes(),
+        );
         world.boot_stream_chunks.push(BootStreamChunk::BaseOverlay {
             version: overlay.version,
             data: overlay.data.clone(),
@@ -132,12 +131,7 @@ async fn given_boot_overlay_with_services(world: &mut PactWorld, step: &cucumber
     }
 
     // Also set up a basic overlay
-    let overlay = BootOverlay {
-        vcluster_id: "ml-training".into(),
-        version: 1,
-        data: b"boot-config-with-services".to_vec(),
-        checksum: "sha256:svc".into(),
-    };
+    let overlay = BootOverlay::new("ml-training", 1, b"boot-config-with-services".to_vec());
     world
         .journal
         .apply_command(JournalCommand::SetOverlay { vcluster_id: "ml-training".into(), overlay });
@@ -152,12 +146,7 @@ async fn given_journal_unreachable(world: &mut PactWorld) {
 async fn given_cached_config(world: &mut PactWorld, _node: String, vcluster: String) {
     // Simulate cached config by having an overlay available despite unreachable journal
     if !world.journal.overlays.contains_key(&vcluster) {
-        let overlay = BootOverlay {
-            vcluster_id: vcluster.clone(),
-            version: 1,
-            data: b"cached-config".to_vec(),
-            checksum: "sha256:cached".into(),
-        };
+        let overlay = BootOverlay::new(vcluster.clone(), 1, b"cached-config".to_vec());
         world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
     }
 }
@@ -237,12 +226,7 @@ async fn when_agent_completes_boot(world: &mut PactWorld, node: String) {
 async fn when_node_requests_boot(world: &mut PactWorld, node: String, vcluster: String) {
     // If no overlay, build on demand
     if !world.journal.overlays.contains_key(&vcluster) {
-        let overlay = BootOverlay {
-            vcluster_id: vcluster.clone(),
-            version: 1,
-            data: b"on-demand-config".to_vec(),
-            checksum: "sha256:ondemand".into(),
-        };
+        let overlay = BootOverlay::new(vcluster.clone(), 1, b"on-demand-config".to_vec());
         world
             .journal
             .apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster.clone(), overlay });
@@ -258,12 +242,7 @@ async fn when_config_commit(world: &mut PactWorld, vcluster: String) {
 
     // Rebuild overlay with incremented version
     let old_version = world.journal.overlays.get(&vcluster).map_or(0, |o| o.version);
-    let overlay = BootOverlay {
-        vcluster_id: vcluster.clone(),
-        version: old_version + 1,
-        data: b"rebuilt-config".to_vec(),
-        checksum: format!("sha256:v{}", old_version + 1),
-    };
+    let overlay = BootOverlay::new(vcluster.clone(), old_version + 1, b"rebuilt-config".to_vec());
     world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 
     // Notify subscribers

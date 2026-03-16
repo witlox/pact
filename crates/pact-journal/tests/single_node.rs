@@ -263,12 +263,7 @@ async fn boot_config_stream_after_overlay_set() {
         let mut s = state.write().await;
         s.apply(JournalCommand::SetOverlay {
             vcluster_id: "ml-training".into(),
-            overlay: BootOverlay {
-                vcluster_id: "ml-training".into(),
-                version: 1,
-                data: vec![42; 50],
-                checksum: "test-check".into(),
-            },
+            overlay: BootOverlay::new("ml-training", 1, vec![42; 50]),
         });
     }
 

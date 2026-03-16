@@ -30,12 +30,8 @@ fn make_identity(principal: &str, role: &str) -> Identity {
 async fn given_cached_config(world: &mut PactWorld, node: String, vc: String) {
     // Ensure overlay exists for cache
     if !world.journal.overlays.contains_key(&vc) {
-        let overlay = pact_common::types::BootOverlay {
-            vcluster_id: vc.clone(),
-            version: 1,
-            data: b"cached-config".to_vec(),
-            checksum: "sha256:cached".into(),
-        };
+        let overlay =
+            pact_common::types::BootOverlay::new(vc.clone(), 1, b"cached-config".to_vec());
         world
             .journal
             .apply_command(JournalCommand::SetOverlay { vcluster_id: vc.clone(), overlay });
