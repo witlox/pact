@@ -149,6 +149,18 @@ pub struct PactWorld {
     pub conflict_local_value: Option<String>,
     pub conflict_journal_value: Option<String>,
 
+    // --- Resource isolation ---
+    pub cgroup_manager: Option<Box<dyn hpc_node::CgroupManager>>,
+
+    // --- Identity mapping ---
+    pub uid_map: Option<pact_common::types::UidMap>,
+    pub identity_mode: pact_common::types::IdentityMode,
+    pub last_auth_subject: Option<String>,
+    pub last_assigned_uid: Option<u32>,
+
+    // --- Workload integration ---
+    pub mount_manager: Option<pact_agent::handoff::MountRefManager>,
+
     // --- Auth (hpc-auth) ---
     /// Auth server URL for test scenarios.
     pub auth_server_url: Option<String>,
@@ -394,6 +406,18 @@ impl PactWorld {
             // Merge conflict
             conflict_local_value: None,
             conflict_journal_value: None,
+
+            // Resource isolation
+            cgroup_manager: None,
+
+            // Identity mapping
+            uid_map: None,
+            identity_mode: pact_common::types::IdentityMode::OnDemand,
+            last_auth_subject: None,
+            last_assigned_uid: None,
+
+            // Workload integration
+            mount_manager: None,
 
             // Auth (hpc-auth)
             auth_server_url: None,

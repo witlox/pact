@@ -17,11 +17,14 @@ mod drift; // DriftEvaluator
 mod emergency; // EmergencyManager
 mod enrollment; // Node enrollment, domain membership, certificate lifecycle
 mod federation;
+mod identity_mapping; // UidMap + identity assignment
 mod journal; // JournalState::apply_command()
 mod mcp; // MCP tools: all_tools() + dispatch_tool()
 mod observability; // Prometheus metrics + health + Loki events
 mod overlay; // Overlay management + staleness + promote/conflict
 mod partition; // ConflictManager + cached config/policy
 mod policy; // RbacEngine + DefaultPolicyEngine + RBAC authorization
+mod resource_isolation; // cgroup management
 mod shell; // ShellServer + WhitelistManager + SessionManager + execute_command
-mod supervisor; // PactSupervisor + ServiceManager // FederationState + MockFederationSync // hpc-auth: login, logout, token refresh, cache, multi-server
+mod supervisor; // PactSupervisor + ServiceManager
+mod workload_integration; // Namespace handoff + mount refcounting // FederationState + MockFederationSync // hpc-auth: login, logout, token refresh, cache, multi-server
