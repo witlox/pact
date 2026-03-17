@@ -178,7 +178,6 @@ impl ServiceManager for SystemdBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pact_common::types::HealthCheck;
 
     fn test_service() -> ServiceDecl {
         ServiceDecl {

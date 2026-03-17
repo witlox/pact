@@ -75,12 +75,10 @@ async fn supervision_loop_full_lifecycle() {
         !events.is_empty(),
         "supervision loop should have emitted audit events"
     );
-    let crash_events: Vec<_> = events
-        .iter()
-        .filter(|e| e.action == hpc_audit::actions::SERVICE_CRASH)
-        .collect();
     assert!(
-        !crash_events.is_empty(),
+        events
+            .iter()
+            .any(|e| e.action == hpc_audit::actions::SERVICE_CRASH),
         "should have crash audit events for crasher"
     );
 
@@ -99,7 +97,7 @@ async fn supervision_loop_never_policy_stays_stopped() {
     });
 
     let oneshot = service_decl("oneshot", "echo", &["done"], RestartPolicy::Never);
-    sup.start_all(&[oneshot.clone()]).await.unwrap();
+    sup.start_all(std::slice::from_ref(&oneshot)).await.unwrap();
 
     let audit = Arc::new(MemoryAuditSink::new());
     let loop_handle = sup.start_supervision_loop(
@@ -131,7 +129,7 @@ async fn supervision_loop_on_failure_restarts_nonzero() {
 
     // `false` exits with code 1 (non-zero) — should trigger OnFailure restart
     let failing = service_decl("failing", "false", &[], RestartPolicy::OnFailure);
-    sup.start_all(&[failing.clone()]).await.unwrap();
+    sup.start_all(std::slice::from_ref(&failing)).await.unwrap();
 
     let audit = Arc::new(MemoryAuditSink::new());
     let loop_handle = sup.start_supervision_loop(

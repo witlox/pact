@@ -1,3 +1,4 @@
+#![allow(clippy::needless_pass_by_value)]
 //! BDD step definitions for node enrollment, domain membership, and certificate lifecycle.
 
 use cucumber::{given, then, when};
@@ -182,7 +183,7 @@ fn then_all_nodes_state(world: &mut PactWorld, count: u32, expected_state: Strin
 fn given_csv_partial_failure(world: &mut PactWorld) {
     // Enroll 3 nodes first (they'll conflict)
     for i in 0..3 {
-        let mac = format!("ff:ff:ff:ff:ff:{:02x}", i);
+        let mac = format!("ff:ff:ff:ff:ff:{i:02x}");
         let enrollment =
             make_enrollment(&format!("existing-{i}"), &mac, None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
@@ -190,17 +191,14 @@ fn given_csv_partial_failure(world: &mut PactWorld) {
     // Now try to register 10 nodes, 3 of which will have same MACs
     for i in 0..10 {
         let mac = if i < 3 {
-            format!("ff:ff:ff:ff:ff:{:02x}", i) // duplicate
+            format!("ff:ff:ff:ff:ff:{i:02x}") // duplicate
         } else {
-            format!("aa:bb:cc:dd:ee:{:02x}", i)
+            format!("aa:bb:cc:dd:ee:{i:02x}")
         };
         let enrollment = make_enrollment(&format!("batch-{i}"), &mac, None, "pact-platform-admin");
         let resp = world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
-        match resp {
-            JournalResponse::ValidationError { .. } => {
-                // Expected for duplicates
-            }
-            _ => {}
+        if let JournalResponse::ValidationError { .. } = resp {
+            // Expected for duplicates
         }
     }
     world.cli_exit_code = Some(0);
@@ -357,7 +355,7 @@ fn then_csr_public_key(_world: &mut PactWorld) {}
 fn then_no_private_key_in_journal(world: &mut PactWorld) {
     // Verify no enrollment record contains private key material
     for e in world.journal.enrollments.values() {
-        assert!(e.cert_serial.as_ref().map_or(true, |s| !s.contains("PRIVATE")));
+        assert!(e.cert_serial.as_ref().is_none_or(|s| !s.contains("PRIVATE")));
     }
 }
 
@@ -366,12 +364,11 @@ fn then_journal_rejects(world: &mut PactWorld, expected_error: String) {
     let has_error = world
         .last_error
         .as_ref()
-        .map(|e| {
+        .is_some_and(|e| {
             format!("{e}").contains(&expected_error) || format!("{e:?}").contains(&expected_error)
-        })
-        .unwrap_or(false);
+        });
     let has_output =
-        world.cli_output.as_ref().map(|o| o.contains(&expected_error)).unwrap_or(false);
+        world.cli_output.as_ref().is_some_and(|o| o.contains(&expected_error));
     assert!(
         has_error || has_output || world.cli_exit_code == Some(1),
         "expected rejection with '{expected_error}', got error={:?}, output={:?}",
@@ -402,7 +399,7 @@ fn given_node_in_state(world: &mut PactWorld, node_id: String, state: String) {
     }
     if state == "Active" {
         world.journal.apply_command(JournalCommand::ActivateNode {
-            node_id: node_id.clone(),
+            node_id,
             cert_serial: "test-serial".to_string(),
             cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
         });
@@ -426,7 +423,7 @@ fn given_previously_active(world: &mut PactWorld, node_id: String) {
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     world.journal.apply_command(JournalCommand::ActivateNode {
-        node_id: node_id.clone(),
+        node_id,
         cert_serial: "old-serial".to_string(),
         cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
     });
@@ -570,7 +567,7 @@ fn given_active_with_stream(world: &mut PactWorld, node_id: String, state: Strin
     if state == "Active" {
         // Ensure node is active with recent last_seen
         let _ = world.journal.apply_command(JournalCommand::ActivateNode {
-            node_id: node_id.clone(),
+            node_id,
             cert_serial: "stream-serial".to_string(),
             cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
         });
@@ -668,7 +665,7 @@ fn given_cert_expiring(world: &mut PactWorld, node_id: String, hours: u32) {
             make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
-            node_id: node_id.clone(),
+            node_id,
             cert_serial: "expiring-serial".to_string(),
             cert_expires_at: (chrono::Utc::now() + chrono::Duration::hours(i64::from(hours)))
                 .to_rfc3339(),
@@ -824,7 +821,7 @@ fn when_assign_node(world: &mut PactWorld, node_id: String, vcluster: String) {
 
     // RBAC: platform-admin can assign anywhere, ops-{vc} only to their vc
     let allowed = role == "pact-platform-admin"
-        || (role.starts_with("pact-ops-") && role.ends_with(&vcluster.replace('-', "-")));
+        || (role.starts_with("pact-ops-") && role.ends_with(&vcluster));
 
     if !allowed {
         world.last_error = Some(pact_common::error::PactError::Unauthorized {
@@ -835,8 +832,8 @@ fn when_assign_node(world: &mut PactWorld, node_id: String, vcluster: String) {
     }
 
     let resp = world.journal.apply_command(JournalCommand::AssignNodeToVCluster {
-        node_id: node_id.clone(),
-        vcluster_id: vcluster.clone(),
+        node_id,
+        vcluster_id: vcluster,
     });
     match resp {
         JournalResponse::Ok => {
@@ -1353,7 +1350,7 @@ fn when_list_by_vc(world: &mut PactWorld, vcluster: String) {
 #[then(regex = r#"I should see "(.+)""#)]
 fn then_see_node(world: &mut PactWorld, node_id: String) {
     assert!(
-        world.cli_output.as_ref().map_or(false, |o| o.contains(&node_id))
+        world.cli_output.as_ref().is_some_and(|o| o.contains(&node_id))
             || world.journal.enrollments.contains_key(&node_id)
     );
 }

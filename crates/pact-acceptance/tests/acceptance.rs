@@ -307,6 +307,7 @@ pub enum AuthTokenState {
 // ---------------------------------------------------------------------------
 
 impl PactWorld {
+    #[allow(clippy::too_many_lines)]
     fn new() -> Self {
         let blacklist = BlacklistConfig::default();
         let weights = DriftWeights::default();

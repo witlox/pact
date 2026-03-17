@@ -1,19 +1,11 @@
-//! E2E test: SPIRE identity acquisition via testcontainer.
+//! E2E test: SPIRE identity provider and cascade behavior.
 //!
-//! Starts a SPIRE server + agent pair and tests the full
-//! SpireProvider flow: socket → SVID → WorkloadIdentity.
-//!
-//! Requires Docker. Marked #[ignore] for manual/CI execution.
-//!
-//! Note: SPIRE server+agent setup is complex (requires attestation
-//! configuration, registration entries, etc.). This test verifies
-//! the container setup and basic connectivity. Full SVID acquisition
-//! requires the `spire` feature flag on pact-agent.
+//! Tests the SpireProvider availability checks and cascade fallthrough
+//! behavior. Full SVID acquisition requires the `spire` feature flag
+//! on pact-agent and a running SPIRE server+agent pair.
 
 use hpc_identity::{IdentityProvider, IdentitySource};
 use pact_agent::identity_cascade::SpireProvider;
-use std::time::Duration;
-use tokio::time::sleep;
 
 /// Test that SpireProvider correctly reports unavailable when no socket exists.
 #[tokio::test]
@@ -23,24 +15,18 @@ async fn spire_provider_unavailable_without_socket() {
     assert_eq!(provider.source_type(), IdentitySource::Spire);
 }
 
-/// Test that SpireProvider reports available when a socket file exists
-/// and the `spire` feature is enabled. Without the feature, the stub
-/// always reports unavailable.
+/// Test that SpireProvider reports unavailable without the spire feature.
+/// (The stub impl always returns false for is_available.)
 #[tokio::test]
-async fn spire_provider_detects_socket_file() {
+async fn spire_provider_stub_always_unavailable() {
     let dir = tempfile::TempDir::new().unwrap();
     let socket_path = dir.path().join("agent.sock");
-
-    // Create a regular file (not a socket) — just for availability check
     std::fs::write(&socket_path, b"").unwrap();
 
     let provider = SpireProvider::new(socket_path.to_str().unwrap());
-
-    // With spire feature: checks path existence → true
-    // Without spire feature: stub always returns false
-    #[cfg(feature = "spire")]
-    assert!(provider.is_available().await);
-    #[cfg(not(feature = "spire"))]
+    // Without spire feature compiled into pact-agent, stub returns false
+    // With spire feature, this would check path existence → true
+    // pact-e2e doesn't enable the spire feature, so this is always the stub
     assert!(!provider.is_available().await);
 }
 
@@ -82,30 +68,3 @@ async fn cascade_falls_through_to_bootstrap_when_spire_unavailable() {
     assert_eq!(identity.source, IdentitySource::Bootstrap);
     assert_eq!(identity.cert_chain_pem, b"BOOTSTRAP CERT");
 }
-
-// The following test requires Docker and the spire feature.
-// It starts a real SPIRE server + agent and acquires an SVID.
-// This is the "full integration" test — uncomment when SPIRE
-// container setup is validated.
-//
-// #[tokio::test]
-// #[ignore]
-// async fn spire_svid_acquisition_via_testcontainer() {
-//     use testcontainers::runners::AsyncRunner;
-//     use pact_e2e::containers::spire::{SpireServer, SpireAgent};
-//
-//     // Start SPIRE server
-//     let server = SpireServer::default()
-//         .start()
-//         .await
-//         .expect("SPIRE server started");
-//
-//     // Start SPIRE agent (needs server connection)
-//     // This requires volume mounts for the agent socket
-//     // and network configuration between server and agent.
-//     // TODO: configure attestation + registration entries
-//
-//     // let provider = SpireProvider::new("/path/to/agent.sock");
-//     // let identity = provider.get_identity().await.unwrap();
-//     // assert_eq!(identity.source, IdentitySource::Spire);
-// }

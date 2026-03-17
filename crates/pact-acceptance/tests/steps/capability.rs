@@ -150,10 +150,8 @@ async fn given_stable_report(world: &mut PactWorld) {
 #[given(regex = r#"^node "([\w-]+)" is in state "([\w]+)"$"#)]
 async fn given_node_state(world: &mut PactWorld, node: String, state_str: String) {
     // Handle enrollment states (Inactive, Revoked, etc.)
-    if state_str == "Inactive" {
-        if world.journal.enrollments.contains_key(&node) {
-            world.journal.apply_command(JournalCommand::DeactivateNode { node_id: node.clone() });
-        }
+    if state_str == "Inactive" && world.journal.enrollments.contains_key(&node) {
+        world.journal.apply_command(JournalCommand::DeactivateNode { node_id: node.clone() });
     }
     let state = super::helpers::parse_config_state(&state_str);
     world.journal.apply_command(JournalCommand::UpdateNodeState { node_id: node, state });

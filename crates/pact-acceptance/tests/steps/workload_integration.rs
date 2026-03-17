@@ -1,3 +1,4 @@
+#![allow(clippy::needless_pass_by_value)]
 //! Workload integration steps — namespace handoff and mount refcounting.
 
 use cucumber::{given, then, when};
@@ -77,11 +78,12 @@ fn when_last_alloc_releases(world: &mut PactWorld) {
 // THEN
 // ---------------------------------------------------------------------------
 
-#[then(regex = r#"^MountRef refcount should (?:be|increase to|decrease to) (\d+)$"#)]
+#[then(regex = r"^MountRef refcount should (?:be|increase to|decrease to) (\d+)$")]
 fn then_refcount(world: &mut PactWorld, expected: String) {
     let expected: u32 = expected.parse().unwrap();
     let mgr = world.mount_manager.as_ref().expect("no mount manager");
-    let state = mgr.states().first().expect("no mounts tracked");
+    let binding = mgr.states();
+    let state = binding.first().expect("no mounts tracked");
     assert_eq!(
         state.refcount, expected,
         "expected refcount {expected}, got {}",
@@ -89,7 +91,7 @@ fn then_refcount(world: &mut PactWorld, expected: String) {
     );
 }
 
-#[then(regex = r#"^no new `SquashFS` mount should occur$"#)]
+#[then(regex = r"^no new `SquashFS` mount should occur$")]
 fn then_no_new_mount(world: &mut PactWorld) {
     let mgr = world.mount_manager.as_ref().expect("no mount manager");
     assert_eq!(mgr.mount_count(), 1, "should still be 1 mount");
@@ -98,7 +100,8 @@ fn then_no_new_mount(world: &mut PactWorld) {
 #[then("a cache hold timer should start")]
 fn then_hold_timer_started(world: &mut PactWorld) {
     let mgr = world.mount_manager.as_ref().expect("no mount manager");
-    let state = mgr.states().first().expect("no mounts");
+    let binding = mgr.states();
+    let state = binding.first().expect("no mounts");
     assert_eq!(state.refcount, 0);
     assert!(state.hold_start.is_some());
 }

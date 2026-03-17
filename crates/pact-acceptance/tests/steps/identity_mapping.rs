@@ -1,3 +1,4 @@
+#![allow(clippy::needless_pass_by_value)]
 //! Identity mapping steps — wired to identity module and UidMap.
 
 use cucumber::{given, then, when};
@@ -21,7 +22,7 @@ fn given_identity_mode(world: &mut PactWorld, mode: String) {
 
 #[given(regex = r#"^org "(.+)" has org_index (\d+) with stride (\d+) and base_uid (\d+)$"#)]
 fn given_org_config(world: &mut PactWorld, org: String, index: String, stride: String, base: String) {
-    let mut map = world.uid_map.take().unwrap_or_else(UidMap::new);
+    let mut map = world.uid_map.take().unwrap_or_default();
     map.stride = stride.parse().unwrap();
     map.base_uid = base.parse().unwrap();
     map.base_gid = base.parse().unwrap();
@@ -51,7 +52,7 @@ fn when_authenticates(world: &mut PactWorld, subject: String) {
 fn when_assign_uid(world: &mut PactWorld, subject: String) {
     let map = world.uid_map.as_mut().expect("UidMap not initialized");
     let username = subject.split('@').next().unwrap_or("user");
-    let org = map.org_indices.first().map(|o| o.org.clone()).unwrap_or_else(|| "local".into());
+    let org = map.org_indices.first().map_or_else(|| "local".into(), |o| o.org.clone());
     match map.assign_uid(&subject, username, &org, &format!("/users/{username}"), "/bin/bash") {
         Ok(entry) => world.last_assigned_uid = Some(entry.uid),
         Err(e) => world.last_error = Some(e),
@@ -62,14 +63,14 @@ fn when_assign_uid(world: &mut PactWorld, subject: String) {
 // THEN
 // ---------------------------------------------------------------------------
 
-#[then(regex = r#"^a UidEntry should be created with uid in range (\d+)-(\d+)$"#)]
+#[then(regex = r"^a UidEntry should be created with uid in range (\d+)-(\d+)$")]
 fn then_uid_in_range(world: &mut PactWorld, min: String, max: String) {
     let min: u32 = min.parse().unwrap();
     let max: u32 = max.parse().unwrap();
     let map = world.uid_map.as_mut().expect("UidMap not initialized");
     let subject = world.last_auth_subject.as_ref().expect("no auth subject");
     let username = subject.split('@').next().unwrap_or("user");
-    let org = map.org_indices.first().map(|o| o.org.clone()).unwrap_or_else(|| "local".into());
+    let org = map.org_indices.first().map_or_else(|| "local".into(), |o| o.org.clone());
     let entry = map
         .assign_uid(subject, username, &org, &format!("/users/{username}"), "/bin/bash")
         .unwrap();
@@ -82,7 +83,7 @@ fn then_uid_in_range(world: &mut PactWorld, min: String, max: String) {
     );
 }
 
-#[then(regex = r#"^the assigned UID should be (\d+)$"#)]
+#[then(regex = r"^the assigned UID should be (\d+)$")]
 fn then_assigned_uid(world: &mut PactWorld, expected: String) {
     let expected: u32 = expected.parse().unwrap();
     assert_eq!(
