@@ -49,3 +49,6 @@
 - [ADR-012: Merge Conflict Grace Period](decisions/ADR-012-merge-conflict-grace-period.md)
 - [ADR-013: Two-Person Approval State Machine](decisions/ADR-013-two-person-approval-state-machine.md)
 - [ADR-014: Optimistic Concurrency & Commit Windows](decisions/ADR-014-optimistic-concurrency-commit-windows.md)
+- [ADR-015: hpc-core Shared Contracts](decisions/ADR-015-hpc-core-shared-contracts.md)
+- [ADR-016: Identity Mapping (OIDC→POSIX)](decisions/ADR-016-identity-mapping-nfs-shim.md)
+- [ADR-017: Network Topology (Mgmt vs HSN)](decisions/ADR-017-network-topology-management-vs-hsn.md)
