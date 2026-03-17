@@ -8,6 +8,7 @@
 //! Skipped on non-Linux platforms and when not running as root.
 
 #![cfg(target_os = "linux")]
+#![allow(unused_imports)] // Some imports only used in specific test paths
 
 use std::fs;
 use std::path::Path;
@@ -61,9 +62,7 @@ async fn cgroup_hierarchy_creation() {
         cpu_weight: Some(200),
         io_max: None,
     };
-    let handle = mgr
-        .create_scope(slices::PACT_INFRA, "e2e-test-svc", &limits)
-        .unwrap();
+    let handle = mgr.create_scope(slices::PACT_INFRA, "e2e-test-svc", &limits).unwrap();
 
     // Verify scope exists
     let scope_path = Path::new("/sys/fs/cgroup").join(&handle.path);
@@ -153,16 +152,12 @@ async fn cgroup_scope_with_process() {
     let mgr = LinuxCgroupManager::new("/sys/fs/cgroup");
     mgr.create_hierarchy().unwrap();
 
-    let handle = mgr
-        .create_scope(slices::PACT_INFRA, "e2e-proc-test", &ResourceLimits::default())
-        .unwrap();
+    let handle =
+        mgr.create_scope(slices::PACT_INFRA, "e2e-proc-test", &ResourceLimits::default()).unwrap();
 
     // Spawn a sleep process in the cgroup
     let scope_path = Path::new("/sys/fs/cgroup").join(&handle.path);
-    let mut child = Command::new("sleep")
-        .arg("300")
-        .spawn()
-        .expect("spawn sleep");
+    let mut child = Command::new("sleep").arg("300").spawn().expect("spawn sleep");
 
     // Move process into the cgroup
     let pid = child.id();

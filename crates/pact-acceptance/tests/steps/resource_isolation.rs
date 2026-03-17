@@ -1,8 +1,8 @@
 //! Resource isolation steps — wired to isolation module (cgroup management).
 
 use cucumber::{given, then, when};
+use hpc_node::{cgroup::slice_owner, cgroup::slices, CgroupManager, ResourceLimits, SliceOwner};
 use pact_agent::isolation::{create_cgroup_manager, StubCgroupManager};
-use hpc_node::{CgroupManager, ResourceLimits, cgroup::slices, cgroup::slice_owner, SliceOwner};
 
 use crate::PactWorld;
 

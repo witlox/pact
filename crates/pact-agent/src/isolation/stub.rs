@@ -16,9 +16,7 @@ pub struct StubCgroupManager {
 impl StubCgroupManager {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            scopes: std::sync::Mutex::new(std::collections::HashSet::new()),
-        }
+        Self { scopes: std::sync::Mutex::new(std::collections::HashSet::new()) }
     }
 }
 
@@ -55,19 +53,13 @@ impl CgroupManager for StubCgroupManager {
             cpu_weight = ?limits.cpu_weight,
             "stub: creating cgroup scope (no-op)"
         );
-        self.scopes
-            .lock()
-            .expect("stub scope lock poisoned")
-            .insert(path.clone());
+        self.scopes.lock().expect("stub scope lock poisoned").insert(path.clone());
         Ok(CgroupHandle { path })
     }
 
     fn destroy_scope(&self, handle: &CgroupHandle) -> Result<(), CgroupError> {
         info!(path = %handle.path, "stub: destroying cgroup scope (no-op)");
-        self.scopes
-            .lock()
-            .expect("stub scope lock poisoned")
-            .remove(&handle.path);
+        self.scopes.lock().expect("stub scope lock poisoned").remove(&handle.path);
         Ok(())
     }
 
@@ -77,11 +69,7 @@ impl CgroupManager for StubCgroupManager {
     }
 
     fn is_scope_empty(&self, handle: &CgroupHandle) -> Result<bool, CgroupError> {
-        let exists = self
-            .scopes
-            .lock()
-            .expect("stub scope lock poisoned")
-            .contains(&handle.path);
+        let exists = self.scopes.lock().expect("stub scope lock poisoned").contains(&handle.path);
         // Stub: scope is "empty" if it doesn't exist (was destroyed)
         Ok(!exists)
     }
@@ -102,9 +90,8 @@ mod tests {
         let mgr = StubCgroupManager::new();
         mgr.create_hierarchy().unwrap();
 
-        let handle = mgr
-            .create_scope(slices::PACT_GPU, "nvidia", &ResourceLimits::default())
-            .unwrap();
+        let handle =
+            mgr.create_scope(slices::PACT_GPU, "nvidia", &ResourceLimits::default()).unwrap();
         assert_eq!(handle.path, "pact.slice/gpu.slice/nvidia.scope");
 
         // Scope exists → not empty

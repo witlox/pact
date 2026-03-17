@@ -21,15 +21,18 @@ fn given_identity_mode(world: &mut PactWorld, mode: String) {
 }
 
 #[given(regex = r#"^org "(.+)" has org_index (\d+) with stride (\d+) and base_uid (\d+)$"#)]
-fn given_org_config(world: &mut PactWorld, org: String, index: String, stride: String, base: String) {
+fn given_org_config(
+    world: &mut PactWorld,
+    org: String,
+    index: String,
+    stride: String,
+    base: String,
+) {
     let mut map = world.uid_map.take().unwrap_or_default();
     map.stride = stride.parse().unwrap();
     map.base_uid = base.parse().unwrap();
     map.base_gid = base.parse().unwrap();
-    map.org_indices.push(OrgIndex {
-        org,
-        index: index.parse().unwrap(),
-    });
+    map.org_indices.push(OrgIndex { org, index: index.parse().unwrap() });
     world.uid_map = Some(map);
 }
 
@@ -74,31 +77,18 @@ fn then_uid_in_range(world: &mut PactWorld, min: String, max: String) {
     let entry = map
         .assign_uid(subject, username, &org, &format!("/users/{username}"), "/bin/bash")
         .unwrap();
-    assert!(
-        entry.uid >= min && entry.uid <= max,
-        "UID {} not in range {}-{}",
-        entry.uid,
-        min,
-        max
-    );
+    assert!(entry.uid >= min && entry.uid <= max, "UID {} not in range {}-{}", entry.uid, min, max);
 }
 
 #[then(regex = r"^the assigned UID should be (\d+)$")]
 fn then_assigned_uid(world: &mut PactWorld, expected: String) {
     let expected: u32 = expected.parse().unwrap();
-    assert_eq!(
-        world.last_assigned_uid,
-        Some(expected),
-        "expected UID {expected}"
-    );
+    assert_eq!(world.last_assigned_uid, Some(expected), "expected UID {expected}");
 }
 
 #[then(regex = r#"^the assignment should fail with "(.+)"$"#)]
 fn then_assignment_fails(world: &mut PactWorld, expected_msg: String) {
     let err = world.last_error.as_ref().expect("expected an error");
     let err_str = err.to_string();
-    assert!(
-        err_str.contains(&expected_msg),
-        "error '{err_str}' does not contain '{expected_msg}'"
-    );
+    assert!(err_str.contains(&expected_msg), "error '{err_str}' does not contain '{expected_msg}'");
 }

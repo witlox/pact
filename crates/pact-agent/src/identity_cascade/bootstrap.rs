@@ -32,8 +32,8 @@ impl IdentityProvider for BootstrapProvider {
     async fn get_identity(&self) -> Result<WorkloadIdentity, IdentityError> {
         info!("loading bootstrap identity from filesystem");
 
-        let cert = std::fs::read(&self.cert_path).map_err(|e| IdentityError::BootstrapNotFound {
-            path: format!("{}: {e}", self.cert_path),
+        let cert = std::fs::read(&self.cert_path).map_err(|e| {
+            IdentityError::BootstrapNotFound { path: format!("{}: {e}", self.cert_path) }
         })?;
         let key = std::fs::read(&self.key_path).map_err(|e| IdentityError::BootstrapNotFound {
             path: format!("{}: {e}", self.key_path),
@@ -108,13 +108,15 @@ mod tests {
 
     #[tokio::test]
     async fn bootstrap_not_available_missing_files() {
-        let provider = BootstrapProvider::new("/nonexistent/cert", "/nonexistent/key", "/nonexistent/ca");
+        let provider =
+            BootstrapProvider::new("/nonexistent/cert", "/nonexistent/key", "/nonexistent/ca");
         assert!(!provider.is_available().await);
     }
 
     #[tokio::test]
     async fn bootstrap_get_identity_fails_missing() {
-        let provider = BootstrapProvider::new("/nonexistent/cert", "/nonexistent/key", "/nonexistent/ca");
+        let provider =
+            BootstrapProvider::new("/nonexistent/cert", "/nonexistent/key", "/nonexistent/ca");
         let err = provider.get_identity().await.unwrap_err();
         assert!(matches!(err, IdentityError::BootstrapNotFound { .. }));
     }

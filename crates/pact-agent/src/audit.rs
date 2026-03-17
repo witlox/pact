@@ -24,10 +24,7 @@ pub struct AgentAuditSink {
 impl AgentAuditSink {
     #[must_use]
     pub fn new(node_id: &str) -> Self {
-        Self {
-            buffer: std::sync::Mutex::new(Vec::new()),
-            node_id: node_id.to_string(),
-        }
+        Self { buffer: std::sync::Mutex::new(Vec::new()), node_id: node_id.to_string() }
     }
 
     /// Get buffered events count.
@@ -52,10 +49,7 @@ impl AgentAuditSink {
 impl AuditSink for AgentAuditSink {
     fn emit(&self, event: AuditEvent) {
         tracing::debug!(action = %event.action, "audit event emitted");
-        self.buffer
-            .lock()
-            .expect("audit lock poisoned")
-            .push(event);
+        self.buffer.lock().expect("audit lock poisoned").push(event);
     }
 
     fn flush(&self) -> Result<(), hpc_audit::AuditError> {
@@ -169,12 +163,7 @@ mod tests {
         let sink = AgentAuditSink::new("node-001");
         assert_eq!(sink.buffered_count(), 0);
 
-        sink.emit(system_event(
-            actions::BOOT_READY,
-            "node-001",
-            AuditOutcome::Success,
-            "test",
-        ));
+        sink.emit(system_event(actions::BOOT_READY, "node-001", AuditOutcome::Success, "test"));
         assert_eq!(sink.buffered_count(), 1);
 
         let events = sink.drain();
@@ -186,23 +175,13 @@ mod tests {
     #[test]
     fn agent_audit_sink_flush_ok() {
         let sink = AgentAuditSink::new("node-001");
-        sink.emit(system_event(
-            actions::SERVICE_START,
-            "node-001",
-            AuditOutcome::Success,
-            "test",
-        ));
+        sink.emit(system_event(actions::SERVICE_START, "node-001", AuditOutcome::Success, "test"));
         assert!(sink.flush().is_ok());
     }
 
     #[test]
     fn system_event_has_correct_source() {
-        let event = system_event(
-            actions::BOOT_READY,
-            "node-001",
-            AuditOutcome::Success,
-            "ready",
-        );
+        let event = system_event(actions::BOOT_READY, "node-001", AuditOutcome::Success, "ready");
         assert_eq!(event.source, AuditSource::PactAgent);
         assert_eq!(event.scope.node_id.as_deref(), Some("node-001"));
     }

@@ -361,14 +361,10 @@ fn then_no_private_key_in_journal(world: &mut PactWorld) {
 
 #[then(regex = r#"the journal should reject with "(.+)""#)]
 fn then_journal_rejects(world: &mut PactWorld, expected_error: String) {
-    let has_error = world
-        .last_error
-        .as_ref()
-        .is_some_and(|e| {
-            format!("{e}").contains(&expected_error) || format!("{e:?}").contains(&expected_error)
-        });
-    let has_output =
-        world.cli_output.as_ref().is_some_and(|o| o.contains(&expected_error));
+    let has_error = world.last_error.as_ref().is_some_and(|e| {
+        format!("{e}").contains(&expected_error) || format!("{e:?}").contains(&expected_error)
+    });
+    let has_output = world.cli_output.as_ref().is_some_and(|o| o.contains(&expected_error));
     assert!(
         has_error || has_output || world.cli_exit_code == Some(1),
         "expected rejection with '{expected_error}', got error={:?}, output={:?}",
@@ -831,10 +827,9 @@ fn when_assign_node(world: &mut PactWorld, node_id: String, vcluster: String) {
         return;
     }
 
-    let resp = world.journal.apply_command(JournalCommand::AssignNodeToVCluster {
-        node_id,
-        vcluster_id: vcluster,
-    });
+    let resp = world
+        .journal
+        .apply_command(JournalCommand::AssignNodeToVCluster { node_id, vcluster_id: vcluster });
     match resp {
         JournalResponse::Ok => {
             world.cli_exit_code = Some(0);

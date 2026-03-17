@@ -20,9 +20,7 @@ impl LinuxCgroupManager {
     /// Create a new manager rooted at the given cgroup v2 mount point.
     #[must_use]
     pub fn new(root: &str) -> Self {
-        Self {
-            root: PathBuf::from(root),
-        }
+        Self { root: PathBuf::from(root) }
     }
 
     /// Full filesystem path for a cgroup path.
@@ -63,10 +61,7 @@ impl LinuxCgroupManager {
         let control_file = path.join("cgroup.subtree_control");
         if control_file.exists() {
             fs::write(&control_file, controllers).map_err(|e| CgroupError::CreationFailed {
-                reason: format!(
-                    "enable controllers at {}: {e}",
-                    control_file.display()
-                ),
+                reason: format!("enable controllers at {}: {e}", control_file.display()),
             })?;
             debug!(path = %path.display(), "enabled cgroup controllers");
         }
@@ -196,9 +191,7 @@ impl CgroupManager for LinuxCgroupManager {
         let full = self.full_path(path);
 
         if !full.exists() {
-            return Err(CgroupError::NotFound {
-                path: path.to_string(),
-            });
+            return Err(CgroupError::NotFound { path: path.to_string() });
         }
 
         // Read memory.current
@@ -208,16 +201,14 @@ impl CgroupManager for LinuxCgroupManager {
             .unwrap_or(0);
 
         // Read memory.max
-        let memory_max = Self::read_control(&full, "memory.max")
-            .ok()
-            .and_then(|s| {
-                let trimmed = s.trim();
-                if trimmed == "max" {
-                    None
-                } else {
-                    trimmed.parse().ok()
-                }
-            });
+        let memory_max = Self::read_control(&full, "memory.max").ok().and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed == "max" {
+                None
+            } else {
+                trimmed.parse().ok()
+            }
+        });
 
         // Read cpu.stat → usage_usec
         let cpu_usage_usec = Self::read_control(&full, "cpu.stat")
@@ -233,21 +224,10 @@ impl CgroupManager for LinuxCgroupManager {
         // Count processes in cgroup.procs
         let nr_processes = Self::read_control(&full, "cgroup.procs")
             .ok()
-            .map(|s| {
-                s.lines()
-                    .filter(|l| !l.is_empty())
-                    .count()
-                    .try_into()
-                    .unwrap_or(u32::MAX)
-            })
+            .map(|s| s.lines().filter(|l| !l.is_empty()).count().try_into().unwrap_or(u32::MAX))
             .unwrap_or(0);
 
-        Ok(CgroupMetrics {
-            memory_current,
-            memory_max,
-            cpu_usage_usec,
-            nr_processes,
-        })
+        Ok(CgroupMetrics { memory_current, memory_max, cpu_usage_usec, nr_processes })
     }
 
     fn is_scope_empty(&self, handle: &CgroupHandle) -> Result<bool, CgroupError> {
@@ -315,9 +295,8 @@ mod tests {
         let parent = mgr.full_path(slices::PACT_GPU);
         fs::create_dir_all(&parent).unwrap();
 
-        let handle = mgr
-            .create_scope(slices::PACT_GPU, "nvidia", &ResourceLimits::default())
-            .unwrap();
+        let handle =
+            mgr.create_scope(slices::PACT_GPU, "nvidia", &ResourceLimits::default()).unwrap();
 
         assert_eq!(handle.path, "pact.slice/gpu.slice/nvidia.scope");
         assert!(mgr.full_path(&handle.path).exists());
@@ -335,9 +314,7 @@ mod tests {
             io_max: None,
         };
 
-        let handle = mgr
-            .create_scope(slices::PACT_INFRA, "chronyd", &limits)
-            .unwrap();
+        let handle = mgr.create_scope(slices::PACT_INFRA, "chronyd", &limits).unwrap();
 
         // Check memory.max was written
         let mem_max = fs::read_to_string(mgr.full_path(&handle.path).join("memory.max")).unwrap();
@@ -410,9 +387,7 @@ mod tests {
         fs::create_dir_all(&full).unwrap();
         fs::write(full.join("cgroup.procs"), "").unwrap();
 
-        let handle = CgroupHandle {
-            path: scope_path.to_string(),
-        };
+        let handle = CgroupHandle { path: scope_path.to_string() };
         assert!(mgr.is_scope_empty(&handle).unwrap());
     }
 
@@ -424,27 +399,21 @@ mod tests {
         fs::create_dir_all(&full).unwrap();
         fs::write(full.join("cgroup.procs"), "1234\n").unwrap();
 
-        let handle = CgroupHandle {
-            path: scope_path.to_string(),
-        };
+        let handle = CgroupHandle { path: scope_path.to_string() };
         assert!(!mgr.is_scope_empty(&handle).unwrap());
     }
 
     #[test]
     fn is_scope_empty_nonexistent_is_true() {
         let (_dir, mgr) = setup_fake_cgroup();
-        let handle = CgroupHandle {
-            path: "does/not/exist".to_string(),
-        };
+        let handle = CgroupHandle { path: "does/not/exist".to_string() };
         assert!(mgr.is_scope_empty(&handle).unwrap());
     }
 
     #[test]
     fn destroy_nonexistent_scope_is_ok() {
         let (_dir, mgr) = setup_fake_cgroup();
-        let handle = CgroupHandle {
-            path: "does/not/exist".to_string(),
-        };
+        let handle = CgroupHandle { path: "does/not/exist".to_string() };
         assert!(mgr.destroy_scope(&handle).is_ok());
     }
 

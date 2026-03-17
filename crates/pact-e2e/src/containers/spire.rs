@@ -28,9 +28,7 @@ impl SpireServer {
 
 impl Default for SpireServer {
     fn default() -> Self {
-        Self {
-            tag: "1.12.0".into(),
-        }
+        Self { tag: "1.12.0".into() }
     }
 }
 
@@ -75,9 +73,7 @@ impl SpireAgent {
 
 impl Default for SpireAgent {
     fn default() -> Self {
-        Self {
-            tag: "1.12.0".into(),
-        }
+        Self { tag: "1.12.0".into() }
     }
 }
 
@@ -129,8 +125,9 @@ pub async fn generate_join_token(
     let stdout_str = String::from_utf8_lossy(&stdout);
 
     // Parse JSON output to extract token
-    let parsed: serde_json::Value = serde_json::from_str(&stdout_str)
-        .map_err(|e| anyhow::anyhow!("failed to parse join token output: {e}\nstdout: {stdout_str}"))?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout_str).map_err(|e| {
+        anyhow::anyhow!("failed to parse join token output: {e}\nstdout: {stdout_str}")
+    })?;
 
     parsed["value"]
         .as_str()

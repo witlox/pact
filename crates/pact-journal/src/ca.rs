@@ -33,12 +33,10 @@ impl CaKeyManager {
     pub fn generate(domain_id: &str, cert_lifetime_seconds: u32) -> anyhow::Result<Self> {
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params
-            .distinguished_name
-            .push(DnType::CommonName, format!("pact-ca-{domain_id}"));
+        ca_params.distinguished_name.push(DnType::CommonName, format!("pact-ca-{domain_id}"));
 
-        let ca_key = KeyPair::generate()
-            .map_err(|e| anyhow::anyhow!("CA key generation failed: {e}"))?;
+        let ca_key =
+            KeyPair::generate().map_err(|e| anyhow::anyhow!("CA key generation failed: {e}"))?;
         let ca_cert = ca_params
             .self_signed(&ca_key)
             .map_err(|e| anyhow::anyhow!("CA self-signing failed: {e}"))?;
@@ -70,9 +68,7 @@ impl CaKeyManager {
 
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params
-            .distinguished_name
-            .push(DnType::CommonName, "pact-ca");
+        ca_params.distinguished_name.push(DnType::CommonName, "pact-ca");
         let ca_cert = ca_params
             .self_signed(&ca_key_pair)
             .map_err(|e| anyhow::anyhow!("failed to reconstruct CA cert: {e}"))?;

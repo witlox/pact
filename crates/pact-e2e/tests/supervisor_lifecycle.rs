@@ -41,15 +41,10 @@ async fn supervision_loop_full_lifecycle() {
     // Start a service that runs forever
     let stable = service_decl("stable", "sleep", &["300"], RestartPolicy::Never);
 
-    sup.start_all(&[crasher.clone(), stable.clone()])
-        .await
-        .unwrap();
+    sup.start_all(&[crasher.clone(), stable.clone()]).await.unwrap();
 
     // Verify both started
-    assert_eq!(
-        sup.status(&stable).await.unwrap().state,
-        ServiceState::Running
-    );
+    assert_eq!(sup.status(&stable).await.unwrap().state, ServiceState::Running);
 
     // Start supervision loop with audit sink
     let audit = Arc::new(MemoryAuditSink::new());
@@ -64,21 +59,13 @@ async fn supervision_loop_full_lifecycle() {
     sleep(Duration::from_millis(500)).await;
 
     // Stable service should still be running
-    assert_eq!(
-        sup.status(&stable).await.unwrap().state,
-        ServiceState::Running
-    );
+    assert_eq!(sup.status(&stable).await.unwrap().state, ServiceState::Running);
 
     // Audit sink should have crash events for the crasher
     let events = audit.events();
+    assert!(!events.is_empty(), "supervision loop should have emitted audit events");
     assert!(
-        !events.is_empty(),
-        "supervision loop should have emitted audit events"
-    );
-    assert!(
-        events
-            .iter()
-            .any(|e| e.action == hpc_audit::actions::SERVICE_CRASH),
+        events.iter().any(|e| e.action == hpc_audit::actions::SERVICE_CRASH),
         "should have crash audit events for crasher"
     );
 
@@ -143,14 +130,9 @@ async fn supervision_loop_on_failure_restarts_nonzero() {
 
     // Should have been restarted (crash events emitted)
     let events = audit.events();
-    let crash_count = events
-        .iter()
-        .filter(|e| e.action == hpc_audit::actions::SERVICE_CRASH)
-        .count();
-    assert!(
-        crash_count >= 1,
-        "OnFailure policy should have triggered at least 1 restart"
-    );
+    let crash_count =
+        events.iter().filter(|e| e.action == hpc_audit::actions::SERVICE_CRASH).count();
+    assert!(crash_count >= 1, "OnFailure policy should have triggered at least 1 restart");
 
     loop_handle.abort();
 }

@@ -71,9 +71,7 @@ impl SystemdBackend {
     /// Run a systemctl command.
     #[cfg(target_os = "linux")]
     fn systemctl(args: &[&str]) -> anyhow::Result<String> {
-        let output = std::process::Command::new("systemctl")
-            .args(args)
-            .output()?;
+        let output = std::process::Command::new("systemctl").args(args).output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("systemctl {} failed: {}", args.join(" "), stderr.trim());
@@ -230,10 +228,7 @@ mod tests {
 
     #[test]
     fn generate_unit_never_restart() {
-        let svc = ServiceDecl {
-            restart: RestartPolicy::Never,
-            ..test_service()
-        };
+        let svc = ServiceDecl { restart: RestartPolicy::Never, ..test_service() };
         let unit = SystemdBackend::generate_unit(&svc);
         assert!(unit.contains("Restart=no"));
     }

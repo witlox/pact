@@ -41,11 +41,7 @@ impl IdentityManager {
     /// `active` should be true only when `SupervisorBackend::Pact` and NFS is used.
     #[must_use]
     pub fn new(base_dir: &str, active: bool) -> Self {
-        Self {
-            base_dir: PathBuf::from(base_dir),
-            uid_map: UidMap::new(),
-            active,
-        }
+        Self { base_dir: PathBuf::from(base_dir), uid_map: UidMap::new(), active }
     }
 
     /// Update the cached UidMap (from journal subscription).
@@ -162,14 +158,9 @@ mod tests {
 
     fn test_uid_map() -> UidMap {
         let mut map = UidMap::new();
-        map.org_indices.push(OrgIndex {
-            org: "local".into(),
-            index: 0,
-        });
-        map.assign_uid("user1@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
-            .unwrap();
-        map.assign_uid("user2@cscs.ch", "jdoe", "local", "/users/jdoe", "/bin/bash")
-            .unwrap();
+        map.org_indices.push(OrgIndex { org: "local".into(), index: 0 });
+        map.assign_uid("user1@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash").unwrap();
+        map.assign_uid("user2@cscs.ch", "jdoe", "local", "/users/jdoe", "/bin/bash").unwrap();
         map.groups.insert(
             "lp16".into(),
             GroupEntry {

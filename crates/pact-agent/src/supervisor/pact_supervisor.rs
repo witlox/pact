@@ -55,10 +55,7 @@ pub struct SupervisionConfig {
 
 impl Default for SupervisionConfig {
     fn default() -> Self {
-        Self {
-            idle_interval_ms: 500,
-            active_interval_ms: 2000,
-        }
+        Self { idle_interval_ms: 500, active_interval_ms: 2000 }
     }
 }
 
@@ -90,10 +87,7 @@ impl PactSupervisor {
     /// Create with custom supervision config.
     #[must_use]
     pub fn with_config(supervision_config: SupervisionConfig) -> Self {
-        Self {
-            supervision_config,
-            ..Self::new()
-        }
+        Self { supervision_config, ..Self::new() }
     }
 
     /// Create with a cgroup manager for resource isolation.
@@ -114,10 +108,7 @@ impl PactSupervisor {
 
     /// Get the cgroup slice for a service (defaults to infra).
     fn cgroup_slice(service: &ServiceDecl) -> &str {
-        service
-            .cgroup_slice
-            .as_deref()
-            .unwrap_or(hpc_node::cgroup::slices::PACT_INFRA)
+        service.cgroup_slice.as_deref().unwrap_or(hpc_node::cgroup::slices::PACT_INFRA)
     }
 
     /// Start the background supervision loop.
@@ -148,11 +139,8 @@ impl PactSupervisor {
             loop {
                 // Determine workload state and poll interval (PS1)
                 let is_active = workload_active();
-                let interval_ms = if is_active {
-                    config.active_interval_ms
-                } else {
-                    config.idle_interval_ms
-                };
+                let interval_ms =
+                    if is_active { config.active_interval_ms } else { config.idle_interval_ms };
 
                 // Pet the watchdog (PS2 — coupled to loop tick)
                 if let Some(ref pet) = watchdog_pet {
@@ -173,12 +161,8 @@ impl PactSupervisor {
                         };
 
                         // Emit audit event for crash
-                        let event = Self::crash_audit_event(
-                            name,
-                            *exit_code,
-                            &node_id,
-                            should_restart,
-                        );
+                        let event =
+                            Self::crash_audit_event(name, *exit_code, &node_id, should_restart);
                         audit_sink.emit(event);
 
                         if should_restart {
@@ -199,7 +183,8 @@ impl PactSupervisor {
 
                             // Restart (with cgroup scope creation)
                             if let Err(e) =
-                                Self::do_restart(&processes, decl, grace_secs, cgroup_mgr.as_ref()).await
+                                Self::do_restart(&processes, decl, grace_secs, cgroup_mgr.as_ref())
+                                    .await
                             {
                                 error!(service = %name, "supervision restart failed: {e}");
                             }
@@ -850,10 +835,7 @@ mod tests {
 
         // Audit sink should have crash events
         let events = audit.events();
-        assert!(
-            !events.is_empty(),
-            "supervision loop should emit crash audit events"
-        );
+        assert!(!events.is_empty(), "supervision loop should emit crash audit events");
         assert!(events.iter().any(|e| e.action == hpc_audit::actions::SERVICE_CRASH));
     }
 

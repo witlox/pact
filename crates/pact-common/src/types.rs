@@ -850,12 +850,7 @@ impl UidMap {
     /// Create with default configuration.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            base_uid: 10_000,
-            base_gid: 10_000,
-            stride: 10_000,
-            ..Default::default()
-        }
+        Self { base_uid: 10_000, base_gid: 10_000, stride: 10_000, ..Default::default() }
     }
 
     /// Compute UID precursor for an org.
@@ -930,12 +925,7 @@ impl UidMap {
     pub fn gc_org(&mut self, org: &str) {
         self.users.retain(|_, e| e.org != org);
         self.groups.retain(|_, g| {
-            g.members.retain(|m| {
-                !self
-                    .users
-                    .values()
-                    .any(|u| &u.username == m && u.org == org)
-            });
+            g.members.retain(|m| !self.users.values().any(|u| &u.username == m && u.org == org));
             true
         });
         self.next_uid_offset.remove(org);
@@ -968,22 +958,17 @@ fn uid_map_precursor_computation() {
 #[test]
 fn uid_map_assign_and_lookup() {
     let mut map = UidMap::new();
-    map.org_indices.push(OrgIndex {
-        org: "local".into(),
-        index: 0,
-    });
+    map.org_indices.push(OrgIndex { org: "local".into(), index: 0 });
 
-    let entry = map
-        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
-        .unwrap();
+    let entry =
+        map.assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash").unwrap();
     assert_eq!(entry.uid, 10_000);
     assert_eq!(entry.gid, 10_000);
     assert_eq!(entry.username, "pwitlox");
 
     // Second user
-    let entry2 = map
-        .assign_uid("user2@cscs.ch", "jdoe", "local", "/users/jdoe", "/bin/bash")
-        .unwrap();
+    let entry2 =
+        map.assign_uid("user2@cscs.ch", "jdoe", "local", "/users/jdoe", "/bin/bash").unwrap();
     assert_eq!(entry2.uid, 10_001);
 
     // Lookup by UID
@@ -994,30 +979,19 @@ fn uid_map_assign_and_lookup() {
 #[test]
 fn uid_map_idempotent_assign() {
     let mut map = UidMap::new();
-    map.org_indices.push(OrgIndex {
-        org: "local".into(),
-        index: 0,
-    });
+    map.org_indices.push(OrgIndex { org: "local".into(), index: 0 });
 
-    let e1 = map
-        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
-        .unwrap();
-    let e2 = map
-        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
-        .unwrap();
+    let e1 =
+        map.assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash").unwrap();
+    let e2 =
+        map.assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash").unwrap();
     assert_eq!(e1.uid, e2.uid); // Same UID, idempotent
 }
 
 #[test]
 fn uid_map_range_exhaustion() {
-    let mut map = UidMap {
-        stride: 2,
-        ..UidMap::new()
-    };
-    map.org_indices.push(OrgIndex {
-        org: "small".into(),
-        index: 0,
-    });
+    let mut map = UidMap { stride: 2, ..UidMap::new() };
+    map.org_indices.push(OrgIndex { org: "small".into(), index: 0 });
 
     map.assign_uid("u1@x", "u1", "small", "/u1", "/bin/bash").unwrap();
     map.assign_uid("u2@x", "u2", "small", "/u2", "/bin/bash").unwrap();

@@ -18,9 +18,7 @@ pub struct SpireProvider {
 impl SpireProvider {
     #[must_use]
     pub fn new(agent_socket: &str) -> Self {
-        Self {
-            agent_socket: agent_socket.to_string(),
-        }
+        Self { agent_socket: agent_socket.to_string() }
     }
 }
 
@@ -33,13 +31,12 @@ impl IdentityProvider for SpireProvider {
         use spiffe::workload_api::x509::X509Source;
 
         // Connect to SPIRE Workload API
-        let source = X509Source::builder()
-            .with_socket_path(&self.agent_socket)
-            .build()
-            .await
-            .map_err(|e| IdentityError::SpireUnavailable {
-                reason: format!("failed to connect to SPIRE agent: {e}"),
-            })?;
+        let source =
+            X509Source::builder().with_socket_path(&self.agent_socket).build().await.map_err(
+                |e| IdentityError::SpireUnavailable {
+                    reason: format!("failed to connect to SPIRE agent: {e}"),
+                },
+            )?;
 
         // Get the default SVID
         let svid = source.svid().map_err(|e| IdentityError::SpireUnavailable {
@@ -47,28 +44,27 @@ impl IdentityProvider for SpireProvider {
         })?;
 
         // Extract cert chain, private key, and trust bundle as PEM
-        let cert_chain_pem = svid.cert_chain_pem().map_err(|e| IdentityError::SpireUnavailable {
-            reason: format!("failed to encode cert chain: {e}"),
+        let cert_chain_pem = svid.cert_chain_pem().map_err(|e| {
+            IdentityError::SpireUnavailable { reason: format!("failed to encode cert chain: {e}") }
         })?;
-        let private_key_pem = svid.private_key_pem().map_err(|e| IdentityError::SpireUnavailable {
-            reason: format!("failed to encode private key: {e}"),
+        let private_key_pem = svid.private_key_pem().map_err(|e| {
+            IdentityError::SpireUnavailable { reason: format!("failed to encode private key: {e}") }
         })?;
 
         // Get trust bundle
         let bundle = source.bundle().map_err(|e| IdentityError::SpireUnavailable {
             reason: format!("failed to get trust bundle: {e}"),
         })?;
-        let trust_bundle_pem = bundle.authorities_pem().map_err(|e| IdentityError::SpireUnavailable {
-            reason: format!("failed to encode trust bundle: {e}"),
-        })?;
+        let trust_bundle_pem =
+            bundle.authorities_pem().map_err(|e| IdentityError::SpireUnavailable {
+                reason: format!("failed to encode trust bundle: {e}"),
+            })?;
 
         // Parse expiry from the leaf cert
         let expires_at = svid
             .x509_svid()
             .not_after()
-            .and_then(|t| {
-                chrono::DateTime::from_timestamp(t.unix_timestamp(), 0)
-            })
+            .and_then(|t| chrono::DateTime::from_timestamp(t.unix_timestamp(), 0))
             .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
 
         info!(

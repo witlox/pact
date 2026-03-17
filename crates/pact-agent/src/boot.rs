@@ -74,10 +74,7 @@ pub async fn boot(
             if let Err(e) = mgr.create_hierarchy() {
                 warn!("cgroup hierarchy creation failed (non-fatal on macOS dev): {e}");
             }
-            debug!(
-                elapsed_ms = start.elapsed().as_millis(),
-                "InitHardware complete"
-            );
+            debug!(elapsed_ms = start.elapsed().as_millis(), "InitHardware complete");
             Some(Arc::from(mgr))
         } else {
             info!("Boot phase 0: skipping InitHardware (systemd mode)");
@@ -128,9 +125,7 @@ pub async fn boot(
             // Store identity source for audit trail.
         }
         Err(e) => {
-            warn!(
-                "identity acquisition failed: {e} — will retry with journal connection"
-            );
+            warn!("identity acquisition failed: {e} — will retry with journal connection");
             // Not fatal: agent can still attempt enrollment during journal connect phase
         }
     }

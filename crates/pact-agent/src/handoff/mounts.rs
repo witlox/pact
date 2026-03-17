@@ -68,11 +68,7 @@ impl MountRefManager {
         let mount_point = format!(
             "{}/{}",
             self.mount_base,
-            image_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(image_path)
-                .replace(".sqfs", "")
+            image_path.rsplit('/').next().unwrap_or(image_path).replace(".sqfs", "")
         );
 
         // On Linux: would call mount(2) here
@@ -171,11 +167,7 @@ impl MountRefManager {
             let mount_point = format!(
                 "{}/{}",
                 self.mount_base,
-                image_path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(image_path)
-                    .replace(".sqfs", "")
+                image_path.rsplit('/').next().unwrap_or(image_path).replace(".sqfs", "")
             );
 
             self.mounts.insert(
@@ -184,18 +176,11 @@ impl MountRefManager {
                     image_path: (*image_path).to_string(),
                     mount_point,
                     refcount: *count,
-                    hold_start: if *count == 0 {
-                        Some(Instant::now())
-                    } else {
-                        None
-                    },
+                    hold_start: if *count == 0 { Some(Instant::now()) } else { None },
                 },
             );
         }
-        info!(
-            mounts = self.mounts.len(),
-            "mount refcounts reconstructed"
-        );
+        info!(mounts = self.mounts.len(), "mount refcounts reconstructed");
     }
 
     /// Get the current state of all mounts.

@@ -57,8 +57,7 @@ impl HandoffServer {
 
     /// Signal that the node is ready for allocation requests.
     pub fn set_ready(&self) {
-        self.ready
-            .store(true, std::sync::atomic::Ordering::Release);
+        self.ready.store(true, std::sync::atomic::Ordering::Release);
         info!("handoff server: node ready for allocation requests");
     }
 
@@ -110,9 +109,7 @@ impl NamespaceProvider for HandoffServer {
         request: &NamespaceRequest,
     ) -> Result<NamespaceResponse, NamespaceError> {
         if !self.is_ready() {
-            return Err(NamespaceError::SocketUnavailable {
-                reason: "node not ready".to_string(),
-            });
+            return Err(NamespaceError::SocketUnavailable { reason: "node not ready".to_string() });
         }
 
         info!(
@@ -219,11 +216,7 @@ mod tests {
         server.create_namespaces(&request).unwrap();
         assert_eq!(server.active_allocation_count().await, 1);
 
-        server
-            .on_allocation_ended(&AllocationEnded {
-                allocation_id: "alloc-1".into(),
-            })
-            .await;
+        server.on_allocation_ended(&AllocationEnded { allocation_id: "alloc-1".into() }).await;
         assert_eq!(server.active_allocation_count().await, 0);
     }
 

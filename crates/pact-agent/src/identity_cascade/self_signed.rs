@@ -72,7 +72,9 @@ impl IdentityProvider for SelfSignedProvider {
             "self-signed provider: no cached enrollment, journal enrollment needed"
         );
         Err(IdentityError::CsrSigningFailed {
-            reason: "no cached enrollment result and live enrollment not yet implemented in cascade".to_string(),
+            reason:
+                "no cached enrollment result and live enrollment not yet implemented in cascade"
+                    .to_string(),
         })
     }
 
