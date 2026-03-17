@@ -213,11 +213,19 @@ Typical services pact-agent supervises on diskless compute nodes. Derived from r
 | **Heartbeat** | Node liveness detected via config subscription stream. Disconnect + grace period (default 5 minutes) → Active to Inactive transition. |
 | **Decommission** | Permanent removal of a node from the domain. Sets enrollment state to Revoked, adds cert serial to Raft revocation registry. Requires `--force` if active sessions exist. |
 
+## Network Topology
+
+| Term | Definition |
+|------|-----------|
+| **Management network** | 1G Ethernet network for control plane traffic. Carries PXE boot (OpenCHAMI), BMC/IPMI, pact journal gRPC, admin CLI, SPIRE server. Always available — it is the PXE boot network. All pact traffic runs here. |
+| **High-speed network (HSN)** | Slingshot/Ultra Ethernet (200G+) for workload and lattice traffic. Carries MPI/NCCL, storage data plane, lattice quorum Raft, lattice node-agent communication. Requires `cxi_rh` to be running — comes up after pact starts it as a supervised service. |
+| **Network-agnostic identity** | X.509 certificates (SPIRE SVIDs) authenticate identity, not network interfaces. The same SVID works on both management and HSN. SPIRE agent is node-local (unix socket) — no network dependency for identity acquisition. |
+
 ## Deployment
 
 | Term | Definition |
 |------|-----------|
 | **Standalone mode** | Journal runs on dedicated nodes (3-5), separate from lattice quorum. |
-| **Co-located mode** | Journal and lattice quorum on same physical nodes but independent Raft groups, separate ports, separate state. |
+| **Co-located mode** | Journal and lattice quorum on same physical nodes but independent Raft groups, separate ports, separate networks. Pact journal on management net (:9443/:9444), lattice quorum on HSN (:50051/:9000). |
 | **Observe-only mode** | Initial deployment mode. Drift detected and logged but not enforced. `enforcement_mode = "observe"`. |
 | **Enforce mode** | Production mode. Drift triggers commit windows and auto-rollback. `enforcement_mode = "enforce"`. |

@@ -15,8 +15,8 @@ Certificate lifecycle is pact's responsibility (ADR-008). Journal generates an e
 ### A-I3: 3-5 journal nodes available [Accepted]
 Raft quorum requires 3 (tolerates 1 failure) or 5 (tolerates 2 failures) nodes. These are either dedicated or co-located with lattice management nodes.
 
-### A-I4: Network fabric available at boot [Accepted]
-pact-agent can reach journal nodes via network at boot time. If network is unavailable, agent falls back to cached config (degraded boot).
+### A-I4: Management network available at boot [Accepted — updated for ADR-017]
+pact-agent can reach journal nodes via the management network (1G Ethernet) at boot time. The management network is always available (PXE boot network). If management net is unavailable, agent falls back to cached config (degraded boot). The high-speed network (Slingshot/HSN) is NOT available during early boot — it comes up after pact starts `cxi_rh` (a supervised service). All pact traffic runs on management net. Lattice traffic runs on HSN.
 
 ### A-I5: cgroup v2 filesystem available [Validated]
 PactSupervisor uses cgroup v2 for service isolation. Modern kernels (5.x+) have cgroup v2 by default. SquashFS images include cgroup2 mount.

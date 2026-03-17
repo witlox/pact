@@ -233,3 +233,4 @@ See `docs/decisions/` for full ADRs:
 - ADR-014: Optimistic concurrency with commit windows
 - ADR-015: hpc-core shared contracts (hpc-node, hpc-audit, hpc-identity)
 - ADR-016: Identity mapping — OIDC-to-POSIX UID/GID shim for NFS
+- ADR-017: Network topology — management network for pact, HSN for lattice
