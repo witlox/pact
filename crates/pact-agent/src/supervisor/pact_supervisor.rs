@@ -400,8 +400,8 @@ impl ServiceManager for PactSupervisor {
                     Some(handle)
                 }
                 Err(e) => {
-                    error!(service = %service.name, "cgroup scope creation failed: {e}");
-                    return Err(anyhow::anyhow!("cgroup scope creation failed: {e}"));
+                    warn!(service = %service.name, "cgroup scope creation failed (continuing without isolation): {e}");
+                    None
                 }
             }
         } else {
