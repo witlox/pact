@@ -767,3 +767,291 @@ mod tests {
         assert_eq!(decoded.memory.numa_nodes, 2);
     }
 }
+
+// --- Identity Mapping types (ADR-016) ---
+
+/// Single OIDC → POSIX UID/GID mapping entry.
+///
+/// Immutable once assigned within a federation membership (IM1).
+/// Assigned sequentially within the org's precursor range (IM3).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UidEntry {
+    /// OIDC subject identifier (e.g., "user@cscs.ch").
+    pub subject: String,
+    /// POSIX user ID.
+    pub uid: u32,
+    /// Primary POSIX group ID.
+    pub gid: u32,
+    /// Username for NSS (e.g., "pwitlox").
+    pub username: String,
+    /// Home directory.
+    pub home: String,
+    /// Login shell.
+    pub shell: String,
+    /// Organization identifier (for federation).
+    pub org: String,
+}
+
+/// Group mapping entry for full supplementary group resolution (IM4).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GroupEntry {
+    /// Group name.
+    pub name: String,
+    /// POSIX group ID.
+    pub gid: u32,
+    /// Member usernames.
+    pub members: Vec<String>,
+}
+
+/// Federated org index for UID/GID precursor range computation (IM2).
+///
+/// `precursor = base_uid + org_index * stride`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrgIndex {
+    /// Organization identifier.
+    pub org: String,
+    /// Sequential index assigned on federation join (0 = local).
+    pub index: u32,
+}
+
+/// Complete OIDC → POSIX mapping table.
+///
+/// Stored in journal Raft state, cached on agents as tmpfs .db files.
+/// Only active when `SupervisorBackend::Pact` and NFS in use (IM6).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UidMap {
+    /// User entries keyed by OIDC subject.
+    pub users: HashMap<String, UidEntry>,
+    /// Group entries keyed by group name.
+    pub groups: HashMap<String, GroupEntry>,
+    /// Organization indices for federation.
+    pub org_indices: Vec<OrgIndex>,
+    /// Base UID for precursor computation. Default: 10000.
+    pub base_uid: u32,
+    /// Base GID for precursor computation. Default: 10000.
+    pub base_gid: u32,
+    /// Stride (max users per org). Default: 10000.
+    pub stride: u32,
+    /// Next UID to assign per org (org name → next offset within range).
+    pub next_uid_offset: HashMap<String, u32>,
+}
+
+/// Identity assignment mode per vCluster.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdentityMode {
+    /// On-demand: unknown subjects get UIDs assigned automatically.
+    #[default]
+    OnDemand,
+    /// Pre-provisioned: unknown subjects rejected (IM4).
+    PreProvisioned,
+}
+
+impl UidMap {
+    /// Create with default configuration.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            base_uid: 10_000,
+            base_gid: 10_000,
+            stride: 10_000,
+            ..Default::default()
+        }
+    }
+
+    /// Compute UID precursor for an org.
+    #[must_use]
+    pub fn uid_precursor(&self, org_index: u32) -> u32 {
+        self.base_uid + org_index * self.stride
+    }
+
+    /// Compute GID precursor for an org.
+    #[must_use]
+    pub fn gid_precursor(&self, org_index: u32) -> u32 {
+        self.base_gid + org_index * self.stride
+    }
+
+    /// Get org index for an org name.
+    #[must_use]
+    pub fn org_index(&self, org: &str) -> Option<u32> {
+        self.org_indices.iter().find(|o| o.org == org).map(|o| o.index)
+    }
+
+    /// Assign a new UID for a subject in the given org.
+    ///
+    /// Returns the assigned `UidEntry` or an error if the range is exhausted.
+    pub fn assign_uid(
+        &mut self,
+        subject: &str,
+        username: &str,
+        org: &str,
+        home: &str,
+        shell: &str,
+    ) -> Result<UidEntry, crate::error::PactError> {
+        // Check if already assigned
+        if let Some(existing) = self.users.get(subject) {
+            return Ok(existing.clone());
+        }
+
+        // Get org index
+        let idx = self
+            .org_index(org)
+            .ok_or_else(|| crate::error::PactError::OrgNotRegistered(org.to_string()))?;
+
+        // Get next offset within range
+        let offset = self.next_uid_offset.get(org).copied().unwrap_or(0);
+        if offset >= self.stride {
+            return Err(crate::error::PactError::UidRangeExhausted {
+                org: org.to_string(),
+                stride: self.stride,
+                assigned: offset,
+            });
+        }
+
+        let uid = self.uid_precursor(idx) + offset;
+        let gid = self.gid_precursor(idx) + offset;
+
+        let entry = UidEntry {
+            subject: subject.to_string(),
+            uid,
+            gid,
+            username: username.to_string(),
+            home: home.to_string(),
+            shell: shell.to_string(),
+            org: org.to_string(),
+        };
+
+        self.users.insert(subject.to_string(), entry.clone());
+        self.next_uid_offset.insert(org.to_string(), offset + 1);
+
+        Ok(entry)
+    }
+
+    /// Remove all entries for an org (federation departure GC).
+    pub fn gc_org(&mut self, org: &str) {
+        self.users.retain(|_, e| e.org != org);
+        self.groups.retain(|_, g| {
+            g.members.retain(|m| {
+                !self
+                    .users
+                    .values()
+                    .any(|u| &u.username == m && u.org == org)
+            });
+            true
+        });
+        self.next_uid_offset.remove(org);
+        self.org_indices.retain(|o| o.org != org);
+    }
+
+    /// Look up a user by UID.
+    #[must_use]
+    pub fn get_by_uid(&self, uid: u32) -> Option<&UidEntry> {
+        self.users.values().find(|e| e.uid == uid)
+    }
+
+    /// Look up a user by username.
+    #[must_use]
+    pub fn get_by_username(&self, username: &str) -> Option<&UidEntry> {
+        self.users.values().find(|e| e.username == username)
+    }
+}
+
+#[test]
+fn uid_map_precursor_computation() {
+    let map = UidMap::new();
+    assert_eq!(map.uid_precursor(0), 10_000); // local
+    assert_eq!(map.uid_precursor(1), 20_000); // partner-a
+    assert_eq!(map.uid_precursor(2), 30_000); // partner-b
+    assert_eq!(map.gid_precursor(0), 10_000);
+    assert_eq!(map.gid_precursor(1), 20_000);
+}
+
+#[test]
+fn uid_map_assign_and_lookup() {
+    let mut map = UidMap::new();
+    map.org_indices.push(OrgIndex {
+        org: "local".into(),
+        index: 0,
+    });
+
+    let entry = map
+        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
+        .unwrap();
+    assert_eq!(entry.uid, 10_000);
+    assert_eq!(entry.gid, 10_000);
+    assert_eq!(entry.username, "pwitlox");
+
+    // Second user
+    let entry2 = map
+        .assign_uid("user2@cscs.ch", "jdoe", "local", "/users/jdoe", "/bin/bash")
+        .unwrap();
+    assert_eq!(entry2.uid, 10_001);
+
+    // Lookup by UID
+    assert_eq!(map.get_by_uid(10_000).unwrap().username, "pwitlox");
+    assert_eq!(map.get_by_username("jdoe").unwrap().uid, 10_001);
+}
+
+#[test]
+fn uid_map_idempotent_assign() {
+    let mut map = UidMap::new();
+    map.org_indices.push(OrgIndex {
+        org: "local".into(),
+        index: 0,
+    });
+
+    let e1 = map
+        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
+        .unwrap();
+    let e2 = map
+        .assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash")
+        .unwrap();
+    assert_eq!(e1.uid, e2.uid); // Same UID, idempotent
+}
+
+#[test]
+fn uid_map_range_exhaustion() {
+    let mut map = UidMap {
+        stride: 2,
+        ..UidMap::new()
+    };
+    map.org_indices.push(OrgIndex {
+        org: "small".into(),
+        index: 0,
+    });
+
+    map.assign_uid("u1@x", "u1", "small", "/u1", "/bin/bash").unwrap();
+    map.assign_uid("u2@x", "u2", "small", "/u2", "/bin/bash").unwrap();
+    let err = map.assign_uid("u3@x", "u3", "small", "/u3", "/bin/bash");
+    assert!(err.is_err());
+    assert!(err.unwrap_err().to_string().contains("exhausted"));
+}
+
+#[test]
+fn uid_map_federation_gc() {
+    let mut map = UidMap::new();
+    map.org_indices.push(OrgIndex { org: "local".into(), index: 0 });
+    map.org_indices.push(OrgIndex { org: "partner".into(), index: 1 });
+
+    map.assign_uid("u1@local", "u1", "local", "/u1", "/bin/bash").unwrap();
+    map.assign_uid("u2@partner", "u2", "partner", "/u2", "/bin/bash").unwrap();
+
+    assert_eq!(map.users.len(), 2);
+
+    map.gc_org("partner");
+    assert_eq!(map.users.len(), 1);
+    assert!(map.get_by_username("u1").is_some());
+    assert!(map.get_by_username("u2").is_none());
+    assert!(map.org_index("partner").is_none());
+}
+
+#[test]
+fn uid_map_serialization_roundtrip() {
+    let mut map = UidMap::new();
+    map.org_indices.push(OrgIndex { org: "local".into(), index: 0 });
+    map.assign_uid("user@cscs.ch", "pwitlox", "local", "/users/pwitlox", "/bin/bash").unwrap();
+
+    let json = serde_json::to_string(&map).unwrap();
+    let deser: UidMap = serde_json::from_str(&json).unwrap();
+    assert_eq!(deser.users.len(), 1);
+    assert_eq!(deser.get_by_username("pwitlox").unwrap().uid, 10_000);
+}

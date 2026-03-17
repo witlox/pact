@@ -70,4 +70,13 @@ pub enum PactError {
 
     #[error("certificate error: {0}")]
     CertificateError(String),
+
+    #[error("UID range exhausted for org {org}: stride={stride}, assigned={assigned}")]
+    UidRangeExhausted { org: String, stride: u32, assigned: u32 },
+
+    #[error("org not registered: {0}")]
+    OrgNotRegistered(String),
+
+    #[error("identity not provisioned: {0}")]
+    IdentityNotProvisioned(String),
 }
