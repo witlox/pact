@@ -11,6 +11,7 @@
 //!
 //! See `docs/architecture/agent-design.md` for design documentation.
 
+pub mod audit;
 pub mod boot;
 pub mod capability;
 pub mod cert_rotation;
@@ -21,6 +22,7 @@ pub mod emergency;
 pub mod enrollment;
 pub mod isolation;
 pub mod journal_client;
+pub mod network;
 pub mod observer;
 pub mod shell;
 pub mod subscription;
