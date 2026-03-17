@@ -22,6 +22,7 @@ pub mod emergency;
 pub mod enrollment;
 pub mod handoff;
 pub mod identity;
+pub mod identity_cascade;
 pub mod isolation;
 pub mod journal_client;
 pub mod network;
