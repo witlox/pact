@@ -13,6 +13,7 @@ pub mod emergency;
 pub mod exec;
 pub mod execute;
 pub mod log;
+pub mod node;
 pub mod rollback;
 pub mod service;
 pub mod status;

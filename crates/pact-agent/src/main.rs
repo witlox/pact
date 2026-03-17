@@ -60,12 +60,12 @@ async fn main() -> anyhow::Result<()> {
         agent_config.node_id = node_id;
     }
     if let Some(vcluster) = args.vcluster {
-        agent_config.vcluster = vcluster;
+        agent_config.vcluster = Some(vcluster);
     }
 
     info!(
         node_id = %agent_config.node_id,
-        vcluster = %agent_config.vcluster,
+        vcluster = agent_config.vcluster.as_deref().unwrap_or("(none)"),
         enforcement_mode = %agent_config.enforcement_mode,
         "Agent configured"
     );
@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         auth_config,
         ExecConfig::default(),
         agent_config.node_id.clone(),
-        agent_config.vcluster.clone(),
+        agent_config.vcluster.clone().unwrap_or_default(),
         agent_config.shell.whitelist_mode == "learning",
         10, // max concurrent sessions
     );

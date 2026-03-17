@@ -27,6 +27,14 @@ Recorded as `ConfigEntry` in the immutable Raft log. Each has `EntryType`, `Scop
 | MergeConflictResolved | Agent/CLI | Journal, Loki | Admin resolves merge conflict — accept local or journal (CR2) | Node |
 | GracePeriodOverwrite | Agent (ConflictManager) | Journal, CLI (active sessions), Loki | Grace period expired, journal-wins applied (CR3) | Node |
 | PromoteConflictDetected | CLI (promote workflow) | Journal, Loki | Promote blocked by conflicting local changes on target nodes (CR4) | vCluster |
+| NodeEnrolled | CLI (admin) | Journal, Loki | Admin registered a node in enrollment registry (ADR-008) | Global |
+| NodeActivated | Agent (boot enrollment) | Journal, Loki | Node booted and received cert (ADR-008) | Node |
+| NodeDeactivated | Journal (heartbeat timeout) | Journal, Loki | Node disappeared — heartbeat timeout (ADR-008) | Node |
+| NodeDecommissioned | CLI (admin) | Journal, Loki, Vault CRL | Admin decommissioned node, cert revoked (ADR-008) | Node |
+| NodeAssigned | CLI (admin/ops) | Journal, agents (via subscription), Loki | Node assigned to vCluster (ADR-008) | Node |
+| NodeUnassigned | CLI (admin/ops) | Journal, agents (via subscription), Loki | Node removed from vCluster → maintenance mode (ADR-008) | Node |
+| CertSigned | Journal (CaKeyManager) | Journal (Raft state) | CSR signed by journal intermediate CA — new or renewed cert (ADR-008) | Node |
+| CertRevoked | Journal (VaultCrlClient) | Journal, Vault CRL | Certificate revoked on decommission (ADR-008) | Node |
 
 **Invariants enforced:**
 - J3: Every entry has authenticated Identity (non-empty principal + role)

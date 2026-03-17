@@ -13,12 +13,16 @@ use raft_hpc_core::{FileLogStore, GrpcNetworkFactory, HpcStateMachine, RaftTrans
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
+use pact_common::proto::enrollment::enrollment_service_server::EnrollmentServiceServer;
 use pact_common::proto::journal::config_service_server::ConfigServiceServer;
 use pact_common::proto::policy::policy_service_server::PolicyServiceServer;
 use pact_common::proto::stream::boot_config_service_server::BootConfigServiceServer;
 use pact_journal::auth::auth_interceptor;
 use pact_journal::boot_service::{BootConfigServiceImpl, ConfigUpdateNotifier};
+use pact_journal::ca::CaKeyManager;
+use pact_journal::enrollment_service::EnrollmentServiceImpl;
 use pact_journal::policy_service::PolicyServiceImpl;
+use pact_journal::rate_limiter::RateLimiter;
 use pact_journal::service::ConfigServiceImpl;
 use pact_journal::telemetry::{telemetry_router, JournalMetrics, TelemetryState};
 use pact_journal::{JournalState, JournalTypeConfig};
@@ -146,6 +150,32 @@ async fn main() -> anyhow::Result<()> {
     // Shared notifier for live config push to subscribers
     let notifier = ConfigUpdateNotifier::default();
 
+    // Optional: enrollment service (requires CA key configuration)
+    let enrollment_ca_cert = std::env::var("PACT_CA_CERT").ok().map(PathBuf::from);
+    let enrollment_ca_key = std::env::var("PACT_CA_KEY").ok().map(PathBuf::from);
+    let enrollment_domain = std::env::var("PACT_DOMAIN_ID").unwrap_or_else(|_| "default".to_string());
+    let enrollment_service = if let (Some(ca_cert), Some(ca_key)) = (enrollment_ca_cert, enrollment_ca_key) {
+        match CaKeyManager::load(&ca_cert, &ca_key, 259_200) {
+            Ok(ca) => {
+                let rate_limiter = Arc::new(RateLimiter::new(100));
+                Some(EnrollmentServiceImpl::new(
+                    raft.clone(),
+                    Arc::clone(&state),
+                    Arc::new(ca),
+                    rate_limiter,
+                    enrollment_domain,
+                ))
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to load CA key — enrollment service disabled");
+                None
+            }
+        }
+    } else {
+        info!("No CA cert/key configured — enrollment service disabled");
+        None
+    };
+
     // Start gRPC transport server with application services
     let raft_server = RaftTransportServer::new(raft.clone());
     let config_service = ConfigServiceImpl::new(raft.clone(), Arc::clone(&state), notifier.clone());
@@ -156,14 +186,27 @@ async fn main() -> anyhow::Result<()> {
     info!(%addr, "gRPC server listening");
 
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-    tonic::transport::Server::builder()
+    let mut server = tonic::transport::Server::builder();
+    let router = server
         .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(raft_server))
         .add_service(ConfigServiceServer::with_interceptor(config_service, auth_interceptor))
         .add_service(PolicyServiceServer::with_interceptor(policy_service, auth_interceptor))
-        .add_service(BootConfigServiceServer::with_interceptor(boot_service, auth_interceptor))
-        .serve_with_incoming(incoming)
-        .await
-        .inspect_err(|e| error!("gRPC server error: {e}"))?;
+        .add_service(BootConfigServiceServer::with_interceptor(boot_service, auth_interceptor));
+
+    // EnrollmentService registered WITHOUT auth interceptor — per-method auth inside service
+    if let Some(enrollment_svc) = enrollment_service {
+        info!("Enrollment service enabled");
+        router
+            .add_service(EnrollmentServiceServer::new(enrollment_svc))
+            .serve_with_incoming(incoming)
+            .await
+            .inspect_err(|e| error!("gRPC server error: {e}"))?;
+    } else {
+        router
+            .serve_with_incoming(incoming)
+            .await
+            .inspect_err(|e| error!("gRPC server error: {e}"))?;
+    }
 
     Ok(())
 }

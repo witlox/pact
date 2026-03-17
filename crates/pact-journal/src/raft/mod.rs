@@ -4,7 +4,7 @@
 //! command type), `JournalResponse` (the response type), and the openraft
 //! `TypeConfig` declaration.
 
-mod state;
+pub mod state;
 pub mod types;
 
 pub use state::{ConflictEntry, HomogeneityWarning, JournalState};

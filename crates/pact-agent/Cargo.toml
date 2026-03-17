@@ -37,6 +37,7 @@ async-trait = { workspace = true }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 prometheus = { workspace = true }
+rcgen = { workspace = true }
 
 # Optional: eBPF observers
 aya = { workspace = true, optional = true }

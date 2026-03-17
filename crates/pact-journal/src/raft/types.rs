@@ -4,8 +4,8 @@ use std::fmt;
 use std::io::Cursor;
 
 use pact_common::types::{
-    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, Identity, NodeId,
-    PendingApproval, VClusterId, VClusterPolicy,
+    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, EnrollmentState,
+    Identity, NodeEnrollment, NodeId, PendingApproval, VClusterId, VClusterPolicy,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,22 @@ pub enum JournalCommand {
     CreateApproval(PendingApproval),
     /// Decide on a pending approval (approve or reject).
     DecideApproval { approval_id: String, approver: Identity, decision: ApprovalStatus },
+    /// Register a node for enrollment (admin pre-enrollment).
+    RegisterNode { enrollment: NodeEnrollment },
+    /// Activate a node (agent presented valid hardware identity + CSR).
+    ActivateNode { node_id: NodeId, cert_serial: String, cert_expires_at: String },
+    /// Deactivate a node (heartbeat timeout).
+    DeactivateNode { node_id: NodeId },
+    /// Revoke a node (decommission).
+    RevokeNode { node_id: NodeId },
+    /// Assign a node to a vCluster.
+    AssignNodeToVCluster { node_id: NodeId, vcluster_id: VClusterId },
+    /// Unassign a node from its vCluster.
+    UnassignNode { node_id: NodeId },
+    /// Move a node between vClusters.
+    MoveNodeVCluster { node_id: NodeId, from_vcluster_id: VClusterId, to_vcluster_id: VClusterId },
+    /// Update node's last-seen timestamp.
+    UpdateNodeLastSeen { node_id: NodeId, timestamp: String },
 }
 
 impl fmt::Display for JournalCommand {
@@ -50,6 +66,22 @@ impl fmt::Display for JournalCommand {
             Self::DecideApproval { approval_id, decision, .. } => {
                 write!(f, "DecideApproval({approval_id}, {decision:?})")
             }
+            Self::RegisterNode { enrollment } => {
+                write!(f, "RegisterNode({})", enrollment.node_id)
+            }
+            Self::ActivateNode { node_id, .. } => write!(f, "ActivateNode({node_id})"),
+            Self::DeactivateNode { node_id } => write!(f, "DeactivateNode({node_id})"),
+            Self::RevokeNode { node_id } => write!(f, "RevokeNode({node_id})"),
+            Self::AssignNodeToVCluster { node_id, vcluster_id } => {
+                write!(f, "AssignNodeToVCluster({node_id} → {vcluster_id})")
+            }
+            Self::UnassignNode { node_id } => write!(f, "UnassignNode({node_id})"),
+            Self::MoveNodeVCluster { node_id, to_vcluster_id, .. } => {
+                write!(f, "MoveNodeVCluster({node_id} → {to_vcluster_id})")
+            }
+            Self::UpdateNodeLastSeen { node_id, .. } => {
+                write!(f, "UpdateNodeLastSeen({node_id})")
+            }
         }
     }
 }
@@ -63,6 +95,8 @@ pub enum JournalResponse {
     EntryAppended { sequence: u64 },
     /// Validation failed — deterministic rejection (same on all replicas).
     ValidationError { reason: String },
+    /// Enrollment-specific result with enrollment details.
+    EnrollmentResult { node_id: NodeId, state: EnrollmentState, vcluster_id: Option<VClusterId> },
 }
 
 impl fmt::Display for JournalResponse {
@@ -71,6 +105,9 @@ impl fmt::Display for JournalResponse {
             Self::Ok => write!(f, "Ok"),
             Self::EntryAppended { sequence } => write!(f, "EntryAppended(seq={sequence})"),
             Self::ValidationError { reason } => write!(f, "ValidationError({reason})"),
+            Self::EnrollmentResult { node_id, state, .. } => {
+                write!(f, "EnrollmentResult({node_id}, {state:?})")
+            }
         }
     }
 }

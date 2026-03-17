@@ -42,3 +42,4 @@
 - [ADR-005: No Agent Prometheus](decisions/ADR-005-no-agent-prometheus.md)
 - [ADR-006: Pact as Init](decisions/ADR-006-pact-as-init.md)
 - [ADR-007: No SSH](decisions/ADR-007-no-ssh.md)
+- [ADR-008: Node Enrollment & Certificate Lifecycle](decisions/ADR-008-node-enrollment-certificate-lifecycle.md)

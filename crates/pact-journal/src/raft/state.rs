@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use pact_common::types::{
-    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, EntrySeq, NodeId,
-    PendingApproval, Scope, VClusterId, VClusterPolicy,
+    AdminOperation, ApprovalStatus, BootOverlay, ConfigEntry, ConfigState, EnrollmentState,
+    EntrySeq, NodeEnrollment, NodeId, PendingApproval, Scope, VClusterId, VClusterPolicy,
 };
 use raft_hpc_core::StateMachineState;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,10 @@ pub struct JournalState {
     pub node_assignments: HashMap<NodeId, VClusterId>,
     /// Pending two-person approval requests.
     pub pending_approvals: HashMap<String, PendingApproval>,
+    /// Node enrollment records indexed by node ID.
+    pub enrollments: HashMap<NodeId, NodeEnrollment>,
+    /// Hardware identity index: canonical hw key → node ID (for duplicate detection).
+    pub hw_index: HashMap<String, NodeId>,
 }
 
 /// A conflict between a local entry and journal state on the same config key.
@@ -129,6 +133,11 @@ impl JournalState {
         }
         warnings
     }
+}
+
+/// Compute a canonical key from hardware identity for duplicate detection.
+pub fn hw_canonical_key(hw: &pact_common::types::HardwareIdentity) -> String {
+    format!("mac:{}", hw.mac_address.to_lowercase())
 }
 
 /// Minimum TTL: 15 minutes (ND1).
@@ -235,6 +244,139 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                     }
                     None => JournalResponse::ValidationError {
                         reason: format!("approval {approval_id} not found"),
+                    },
+                }
+            }
+            // --- Enrollment commands ---
+            JournalCommand::RegisterNode { enrollment } => {
+                // E1: reject if node already enrolled
+                if self.enrollments.contains_key(&enrollment.node_id) {
+                    return JournalResponse::ValidationError {
+                        reason: format!("NODE_ALREADY_ENROLLED: {}", enrollment.node_id),
+                    };
+                }
+                // E2: reject if hardware identity already registered
+                let hw_key = hw_canonical_key(&enrollment.hardware_identity);
+                if let Some(existing) = self.hw_index.get(&hw_key) {
+                    return JournalResponse::ValidationError {
+                        reason: format!(
+                            "HARDWARE_IDENTITY_CONFLICT: hardware already registered to {existing}"
+                        ),
+                    };
+                }
+                let node_id = enrollment.node_id.clone();
+                self.hw_index.insert(hw_key, node_id.clone());
+                self.enrollments.insert(node_id.clone(), enrollment);
+                JournalResponse::EnrollmentResult {
+                    node_id,
+                    state: EnrollmentState::Registered,
+                    vcluster_id: None,
+                }
+            }
+            JournalCommand::ActivateNode { node_id, cert_serial, cert_expires_at } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        // E7: reject revoked nodes
+                        if enrollment.state == EnrollmentState::Revoked {
+                            return JournalResponse::ValidationError {
+                                reason: format!("NODE_REVOKED: {node_id}"),
+                            };
+                        }
+                        // Reject if already active
+                        if enrollment.state == EnrollmentState::Active {
+                            return JournalResponse::ValidationError {
+                                reason: format!("ALREADY_ACTIVE: {node_id}"),
+                            };
+                        }
+                        enrollment.state = EnrollmentState::Active;
+                        enrollment.cert_serial = Some(cert_serial);
+                        enrollment.cert_expires_at =
+                            chrono::DateTime::parse_from_rfc3339(&cert_expires_at)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc));
+                        enrollment.last_seen = Some(chrono::Utc::now());
+                        let vc = enrollment.vcluster_id.clone();
+                        JournalResponse::EnrollmentResult {
+                            node_id,
+                            state: EnrollmentState::Active,
+                            vcluster_id: vc,
+                        }
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::DeactivateNode { node_id } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.state = EnrollmentState::Inactive;
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::RevokeNode { node_id } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.state = EnrollmentState::Revoked;
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::AssignNodeToVCluster { node_id, vcluster_id } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.vcluster_id = Some(vcluster_id.clone());
+                        // Also update the legacy node_assignments map
+                        self.node_assignments.insert(node_id.clone(), vcluster_id);
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::UnassignNode { node_id } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.vcluster_id = None;
+                        self.node_assignments.remove(&node_id);
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::MoveNodeVCluster { node_id, from_vcluster_id: _, to_vcluster_id } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.vcluster_id = Some(to_vcluster_id.clone());
+                        self.node_assignments.insert(node_id.clone(), to_vcluster_id);
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::UpdateNodeLastSeen { node_id, timestamp } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.last_seen =
+                            chrono::DateTime::parse_from_rfc3339(&timestamp)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc));
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
                     },
                 }
             }

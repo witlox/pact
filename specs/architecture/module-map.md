@@ -29,6 +29,10 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - ConfigService gRPC handlers (journal.proto)
 - PolicyService gRPC handlers (policy.proto) — delegates to pact-policy library
 - BootConfigService gRPC handlers (stream.proto)
+- EnrollmentService gRPC handlers (enrollment.proto) — node enrollment, CSR signing (ADR-008)
+- Enrollment registry (NodeEnrollment records in Raft state)
+- CaKeyManager — intermediate CA key, local CSR signing (ADR-008)
+- VaultCrlClient — cert revocation on decommission (ADR-008)
 - Overlay pre-computation and caching
 - Telemetry: Prometheus metrics + health endpoint (axum on port 9091)
 - Loki event forwarding
@@ -36,6 +40,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Submodules:**
 - `raft/` — state machine, types, Raft type config
 - `service/` — ConfigService, PolicyService, BootConfigService handlers
+- `enrollment/` — EnrollmentService handlers, CaKeyManager, VaultCrlClient (ADR-008)
 - `overlay/` — overlay builder, cache, staleness detection
 - `telemetry/` — metrics, health, Loki forwarding
 
@@ -78,6 +83,8 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - Shell server (exec endpoint + interactive shell)
 - Emergency mode manager
 - Boot sequence orchestration
+- Boot enrollment: hardware identity detection, cert receipt, mTLS setup (ADR-008)
+- Dual-channel gRPC client with hot-swap cert rotation (ADR-008, E6)
 - Config subscription (live updates from journal)
 - Local config/policy cache for partition resilience
 
@@ -89,6 +96,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - `capability/` — GpuBackend trait, CapabilityReport builder
 - `shell/` — ShellService gRPC, exec handler, interactive shell, whitelist
 - `emergency/` — EmergencySession lifecycle
+- `enrollment/` — HardwareIdentity detection, EnrollmentClient, DualChannelClient (ADR-008)
 - `subscription/` — config update stream consumer
 - `cache/` — local config + policy cache
 
@@ -102,7 +110,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 
 **Owns:**
 - Command parsing (clap derive)
-- gRPC client connections (journal ConfigService/PolicyService/BootConfigService, agent ShellService)
+- gRPC client connections (journal ConfigService/PolicyService/BootConfigService/EnrollmentService, agent ShellService)
 - OIDC token acquisition
 - Output formatting (table, JSON)
 - Exit code semantics

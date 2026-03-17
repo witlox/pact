@@ -83,7 +83,9 @@ impl ConfigService for ConfigServiceImpl {
                 Ok(Response::new(AppendEntryResponse { sequence }))
             }
             JournalResponse::ValidationError { reason } => Err(Status::failed_precondition(reason)),
-            JournalResponse::Ok => Err(Status::internal("unexpected Ok for AppendEntry")),
+            JournalResponse::Ok | JournalResponse::EnrollmentResult { .. } => {
+                Err(Status::internal("unexpected response for AppendEntry"))
+            }
         }
     }
 
@@ -345,6 +347,14 @@ pub fn config_entry_to_proto(entry: &pact_common::types::ConfigEntry) -> ProtoCo
         pact_common::types::EntryType::ShellSession => 11,
         pact_common::types::EntryType::ServiceLifecycle => 12,
         pact_common::types::EntryType::PendingApproval => 13,
+        pact_common::types::EntryType::NodeEnrolled => 14,
+        pact_common::types::EntryType::NodeActivated => 15,
+        pact_common::types::EntryType::NodeDeactivated => 16,
+        pact_common::types::EntryType::NodeDecommissioned => 17,
+        pact_common::types::EntryType::NodeAssigned => 18,
+        pact_common::types::EntryType::NodeUnassigned => 19,
+        pact_common::types::EntryType::CertSigned => 20,
+        pact_common::types::EntryType::CertRevoked => 21,
     };
 
     let scope = match &entry.scope {

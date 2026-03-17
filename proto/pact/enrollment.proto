@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package pact.enrollment;
+
+// EnrollmentService — node enrollment, domain membership, and certificate lifecycle.
+//
+// The Enroll RPC is unauthenticated (agents have no cert yet).
+// All other RPCs require Bearer token authentication.
+service EnrollmentService {
+  // Agent-initiated: present hardware identity + CSR, get signed cert.
+  // Unauthenticated — server-TLS-only channel.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Admin: register a node before it boots (pre-enrollment).
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+
+  // Admin: batch register multiple nodes.
+  rpc BatchRegisterNodes(BatchRegisterNodesRequest) returns (BatchRegisterNodesResponse);
+
+  // Admin: decommission a node (revoke cert, mark Revoked).
+  rpc DecommissionNode(DecommissionNodeRequest) returns (DecommissionNodeResponse);
+
+  // Admin: assign a node to a vCluster.
+  rpc AssignNode(AssignNodeRequest) returns (AssignNodeResponse);
+
+  // Admin: unassign a node from its vCluster.
+  rpc UnassignNode(UnassignNodeRequest) returns (UnassignNodeResponse);
+
+  // Admin: move a node between vClusters.
+  rpc MoveNode(MoveNodeRequest) returns (MoveNodeResponse);
+
+  // Agent-initiated: renew certificate with a new CSR.
+  rpc RenewCert(RenewCertRequest) returns (RenewCertResponse);
+
+  // Query: list enrolled nodes (with optional filters).
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+
+  // Query: inspect a single node's enrollment details.
+  rpc InspectNode(InspectNodeRequest) returns (InspectNodeResponse);
+}
+
+// --- Enroll (Agent CSR) ---
+
+message HardwareIdentity {
+  string mac_address = 1;
+  string bmc_serial = 2;
+  map<string, string> extra = 3;
+}
+
+message EnrollRequest {
+  HardwareIdentity hardware_identity = 1;
+  // DER-encoded PKCS#10 CSR.
+  bytes csr = 2;
+}
+
+message EnrollResponse {
+  string node_id = 1;
+  string domain_id = 2;
+  // PEM-encoded signed certificate.
+  bytes signed_cert = 3;
+  // PEM-encoded CA certificate chain.
+  bytes ca_chain = 4;
+  // vCluster assignment (empty = maintenance mode).
+  string vcluster_id = 5;
+  // Certificate serial number.
+  string cert_serial = 6;
+  // Certificate expiry (RFC 3339).
+  string cert_expires_at = 7;
+}
+
+// --- RegisterNode (Admin) ---
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  HardwareIdentity hardware_identity = 2;
+}
+
+message RegisterNodeResponse {
+  string node_id = 1;
+  string enrollment_state = 2;
+}
+
+// --- BatchRegisterNodes ---
+
+message BatchRegisterNodesRequest {
+  repeated RegisterNodeRequest nodes = 1;
+}
+
+message BatchNodeResult {
+  string node_id = 1;
+  bool success = 2;
+  string enrollment_state = 3;
+  string error = 4;
+}
+
+message BatchRegisterNodesResponse {
+  repeated BatchNodeResult results = 1;
+  uint32 succeeded = 2;
+  uint32 failed = 3;
+}
+
+// --- DecommissionNode ---
+
+message DecommissionNodeRequest {
+  string node_id = 1;
+  bool force = 2;
+}
+
+message DecommissionNodeResponse {
+  string node_id = 1;
+  string enrollment_state = 2;
+  uint32 sessions_terminated = 3;
+  string cert_serial_revoked = 4;
+}
+
+// --- AssignNode ---
+
+message AssignNodeRequest {
+  string node_id = 1;
+  string vcluster_id = 2;
+}
+
+message AssignNodeResponse {
+  string node_id = 1;
+  string vcluster_id = 2;
+}
+
+// --- UnassignNode ---
+
+message UnassignNodeRequest {
+  string node_id = 1;
+}
+
+message UnassignNodeResponse {
+  string node_id = 1;
+}
+
+// --- MoveNode ---
+
+message MoveNodeRequest {
+  string node_id = 1;
+  string to_vcluster_id = 2;
+}
+
+message MoveNodeResponse {
+  string node_id = 1;
+  string from_vcluster_id = 2;
+  string to_vcluster_id = 3;
+}
+
+// --- RenewCert ---
+
+message RenewCertRequest {
+  string current_cert_serial = 1;
+  // DER-encoded PKCS#10 CSR.
+  bytes csr = 2;
+}
+
+message RenewCertResponse {
+  // PEM-encoded new signed certificate.
+  bytes signed_cert = 1;
+  bytes ca_chain = 2;
+  string cert_serial = 3;
+  string cert_expires_at = 4;
+}
+
+// --- ListNodes ---
+
+message ListNodesRequest {
+  // Filter by enrollment state (empty = all).
+  string state_filter = 1;
+  // Filter by vCluster (empty = all).
+  string vcluster_filter = 2;
+  // Show only unassigned nodes.
+  bool unassigned_only = 3;
+}
+
+message NodeSummary {
+  string node_id = 1;
+  string enrollment_state = 2;
+  string vcluster_id = 3;
+  string last_seen = 4;
+  string mac_address = 5;
+}
+
+message ListNodesResponse {
+  repeated NodeSummary nodes = 1;
+}
+
+// --- InspectNode ---
+
+message InspectNodeRequest {
+  string node_id = 1;
+}
+
+message InspectNodeResponse {
+  string node_id = 1;
+  string domain_id = 2;
+  string enrollment_state = 3;
+  HardwareIdentity hardware_identity = 4;
+  string vcluster_id = 5;
+  string cert_serial = 6;
+  string cert_expires_at = 7;
+  string last_seen = 8;
+  string enrolled_at = 9;
+  string enrolled_by = 10;
+  uint32 active_sessions = 11;
+}

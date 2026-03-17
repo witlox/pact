@@ -3,6 +3,8 @@
 //! All public types derive `Debug, Clone, Serialize, Deserialize` where possible.
 //! Algebraic types (enums) for state, not strings.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,6 +12,7 @@ use uuid::Uuid;
 /// Semantic type aliases for clarity.
 pub type NodeId = String;
 pub type VClusterId = String;
+pub type DomainId = String;
 pub type EntrySeq = u64;
 
 /// Configuration state of a node.
@@ -43,6 +46,14 @@ pub enum EntryType {
     ShellSession,
     ServiceLifecycle,
     PendingApproval,
+    NodeEnrolled,
+    NodeActivated,
+    NodeDeactivated,
+    NodeDecommissioned,
+    NodeAssigned,
+    NodeUnassigned,
+    CertSigned,
+    CertRevoked,
 }
 
 /// Scope of a configuration entry.
@@ -489,6 +500,13 @@ pub enum AdminOperationType {
     EmergencyStart,
     EmergencyEnd,
     ApprovalDecision,
+    NodeEnroll,
+    NodeDecommission,
+    NodeAssign,
+    NodeUnassign,
+    NodeMove,
+    CertRenew,
+    CertRevoke,
 }
 
 /// Status of a pending approval request.
@@ -512,6 +530,56 @@ pub struct PendingApproval {
     pub status: ApprovalStatus,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+}
+
+/// Enrollment state of a node in the pact domain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EnrollmentState {
+    /// Admin has registered the node but agent has not yet connected.
+    Registered,
+    /// Agent has connected, CSR signed, mTLS established.
+    Active,
+    /// Heartbeat timeout — agent has not been seen within the timeout window.
+    Inactive,
+    /// Administratively decommissioned — certificate revoked.
+    Revoked,
+}
+
+/// Hardware identity presented by a node during enrollment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HardwareIdentity {
+    /// Primary MAC address.
+    pub mac_address: String,
+    /// BMC/IPMI serial number (optional — not all hardware exposes this).
+    #[serde(default)]
+    pub bmc_serial: Option<String>,
+    /// Additional hardware identifiers (SMBIOS UUID, etc.).
+    #[serde(default)]
+    pub extra: HashMap<String, String>,
+}
+
+/// Enrollment record for a node in the pact domain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeEnrollment {
+    pub node_id: NodeId,
+    pub domain_id: DomainId,
+    pub state: EnrollmentState,
+    pub hardware_identity: HardwareIdentity,
+    /// vCluster assignment (None = maintenance mode).
+    pub vcluster_id: Option<VClusterId>,
+    /// Signed certificate serial number (set after CSR signing).
+    pub cert_serial: Option<String>,
+    /// Certificate expiry (set after CSR signing).
+    pub cert_expires_at: Option<DateTime<Utc>>,
+    /// Last time the node was seen (heartbeat).
+    pub last_seen: Option<DateTime<Utc>>,
+    /// When the enrollment record was created.
+    pub enrolled_at: DateTime<Utc>,
+    /// Who enrolled this node.
+    pub enrolled_by: Identity,
+    /// Number of active shell/exec sessions on this node.
+    #[serde(default)]
+    pub active_sessions: u32,
 }
 
 #[cfg(test)]

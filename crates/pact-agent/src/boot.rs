@@ -108,7 +108,7 @@ pub async fn boot(
     let cached_policy = Arc::new(RwLock::new(None));
     if let Some(client) = journal_client {
         info!("Boot phase 7: streaming boot config from journal");
-        match stream_boot_config(client, &config.node_id, &config.vcluster).await {
+        match stream_boot_config(client, &config.node_id, config.vcluster.as_deref().unwrap_or("default")).await {
             Ok(boot_config) => {
                 debug!(
                     overlay_bytes = boot_config.overlay_data.len(),
@@ -169,7 +169,7 @@ pub async fn boot(
     info!(
         elapsed_ms = elapsed.as_millis(),
         node_id = %config.node_id,
-        vcluster = %config.vcluster,
+        vcluster = config.vcluster.as_deref().unwrap_or("(none)"),
         enforcement_mode = %config.enforcement_mode,
         config_state = ?config_state,
         "Boot sequence complete"
@@ -265,7 +265,7 @@ pub fn start_subscription(
 
     let sub_config = SubscriptionConfig {
         node_id: config.node_id.clone(),
-        vcluster_id: config.vcluster.clone(),
+        vcluster_id: config.vcluster.clone().unwrap_or_default(),
         ..Default::default()
     };
 
@@ -542,7 +542,7 @@ mod tests {
     fn test_config() -> AgentConfig {
         AgentConfig {
             node_id: "test-node-001".into(),
-            vcluster: "ml-training".into(),
+            vcluster: Some("ml-training".into()),
             enforcement_mode: "observe".into(),
             supervisor: SupervisorConfig { backend: SupervisorBackend::Pact },
             journal: JournalConnectionConfig {
@@ -557,6 +557,7 @@ mod tests {
             commit_window: CommitWindowConfig::default(),
             blacklist: BlacklistConfig::default(),
             capability: None,
+            enrollment: None,
         }
     }
 

@@ -38,10 +38,14 @@ The journal is the single source of truth for declared configuration state. All 
 
 Each compute node runs pact-agent as its init system. The agent observes system state, detects drift, manages commit windows, supervises services, and provides remote access.
 
+Nodes must be enrolled in the pact domain before they can connect. Enrollment is managed by the journal's enrollment registry (ADR-008). vCluster assignment is independent of enrollment — an enrolled node with no vCluster is in maintenance mode.
+
 **Aggregate Root: Agent (per-node singleton)**
 
 | Entity | Description | Lifecycle |
 |--------|-------------|-----------|
+| `NodeEnrollment` | Domain membership record: hardware identity, enrollment state, pre-signed cert | Created by admin, persists until decommission |
+| `HardwareIdentity` | MAC addresses, BMC serial, optional TPM attestation | Read from SMBIOS/DMI at boot |
 | `ServiceDecl` | Declaration of a service to supervise | From boot config, persists until overlay changes |
 | `ServiceInstance` | Running instance of a declared service | Started/stopped/restarted by supervisor |
 | `CommitWindow` | Time-limited window after drift detection | Opens on drift, closes on commit/rollback/expiry |
@@ -56,6 +60,7 @@ Each compute node runs pact-agent as its init system. The agent observes system 
 | `ServiceState` | Starting/Running/Stopping/Stopped/Failed/Restarting |
 | `ConfigState` | ObserveOnly/Committed/Drifted/Converging/Emergency |
 | `RestartPolicy` | Always/OnFailure/Never |
+| `EnrollmentState` | Registered/Active/Inactive/Revoked |
 | `SupervisorBackend` | Pact (default) / Systemd (fallback) |
 | `GpuHealth` | Healthy/Degraded/Failed |
 | `GpuCapability` | Index, vendor, model, memory, health, PCI bus |
@@ -110,11 +115,14 @@ JournalState ──1:N──▶ NodeState (per node)
 JournalState ──1:N──▶ VClusterPolicy (per vCluster)
 JournalState ──1:N──▶ BootOverlay (per vCluster)
 JournalState ──1:N──▶ AdminOperation (audit log)
-JournalState ──1:N──▶ NodeAssignment (node → vCluster)
+JournalState ──1:N──▶ NodeEnrollment (domain membership + cert)
+JournalState ──1:N──▶ NodeAssignment (node → vCluster, optional)
 
 VClusterPolicy ──1:N──▶ RoleBinding
 VClusterPolicy ──────▶ exec_whitelist, shell_whitelist
 
+Agent ──1:1──▶ NodeEnrollment (domain membership)
+Agent ──0:1──▶ vCluster assignment (None = maintenance mode)
 Agent ──1:N──▶ ServiceDecl (from boot config)
 Agent ──1:N──▶ ServiceInstance (running processes)
 Agent ──0:1──▶ CommitWindow (at most one active)
@@ -148,6 +156,16 @@ CapabilityReport ──1:1──▶ SoftwareCapability
 ---
 
 ## State Machines
+
+### EnrollmentState (per node, per domain)
+```
+Registered ──boot(hw match)──▶ Active
+Active ──heartbeat timeout──▶ Inactive
+Inactive ──boot(hw match)──▶ Active
+Registered ──decommission──▶ Revoked
+Active ──decommission──▶ Revoked
+Inactive ──decommission──▶ Revoked
+```
 
 ### ConfigState (per node)
 ```

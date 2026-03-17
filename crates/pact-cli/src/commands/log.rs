@@ -61,6 +61,14 @@ fn format_entry_type(et: &EntryType) -> &'static str {
         EntryType::ShellSession => "SHELL",
         EntryType::ServiceLifecycle => "SERVICE",
         EntryType::PendingApproval => "APPROVAL",
+        EntryType::NodeEnrolled => "NODE_ENROLLED",
+        EntryType::NodeActivated => "NODE_ACTIVATED",
+        EntryType::NodeDeactivated => "NODE_DEACTIVATED",
+        EntryType::NodeDecommissioned => "NODE_DECOMMISSIONED",
+        EntryType::NodeAssigned => "NODE_ASSIGNED",
+        EntryType::NodeUnassigned => "NODE_UNASSIGNED",
+        EntryType::CertSigned => "CERT_SIGNED",
+        EntryType::CertRevoked => "CERT_REVOKED",
     }
 }
 

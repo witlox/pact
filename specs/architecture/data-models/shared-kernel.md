@@ -47,6 +47,14 @@ pub enum EntryType {
     EmergencyStart, EmergencyEnd,
     ExecLog, ShellSession, ServiceLifecycle,
     PendingApproval,  // Two-person approval workflow
+    NodeEnrolled,     // Node registered in enrollment registry (ADR-008)
+    NodeActivated,    // Node boot enrollment succeeded (ADR-008)
+    NodeDeactivated,  // Node heartbeat timeout (ADR-008)
+    NodeDecommissioned, // Node revoked and removed (ADR-008)
+    NodeAssigned,     // Node assigned to vCluster (ADR-008)
+    NodeUnassigned,   // Node removed from vCluster (ADR-008)
+    CertSigned,       // CSR signed by journal intermediate CA (ADR-008)
+    CertRevoked,      // Certificate revoked via Vault CRL (ADR-008)
 }
 // Proto fix needed: add ENTRY_TYPE_PENDING_APPROVAL to config.proto
 
@@ -275,6 +283,56 @@ pub struct SupervisorStatus {
 }
 ```
 
+## Node Enrollment & Domain Membership (ADR-008)
+
+```rust
+/// Source: ADR-008, domain-model.md Node Management context, invariants E1-E10
+
+pub enum EnrollmentState {
+    Registered,  // Enrolled by admin, cert pre-signed, awaiting first boot
+    Active,      // Node connected, cert served, mTLS established
+    Inactive,    // Node disconnected (heartbeat timeout), cert may still be valid
+    Revoked,     // Admin decommissioned, cert revoked via Vault CRL
+}
+
+pub struct HardwareIdentity {
+    pub mac_addresses: Vec<String>,       // Primary NIC MAC(s)
+    pub bmc_serial: String,               // SMBIOS/DMI BMC serial
+    pub tpm_ek_hash: Option<String>,      // TPM endorsement key hash (optional)
+}
+// Detection: mac from /sys/class/net/*/address, bmc from /sys/class/dmi/id/board_serial
+
+pub struct NodeEnrollment {
+    pub node_id: NodeId,
+    pub hardware_identity: HardwareIdentity,
+    pub domain_id: String,                // Which pact domain
+    pub enrolled_by: Identity,            // Admin who enrolled (E10)
+    pub enrolled_at: DateTime<Utc>,
+    pub state: EnrollmentState,
+    pub vcluster_id: Option<VClusterId>,  // None = maintenance mode (E8)
+    pub assigned_by: Option<Identity>,
+    pub assigned_at: Option<DateTime<Utc>>,
+    pub cert_serial: Option<String>,      // Serial of last signed cert (public info)
+    pub cert_not_after: Option<DateTime<Utc>>,
+    pub last_seen: Option<DateTime<Utc>>, // Subscription stream liveness
+}
+// Invariant E2: hardware_identity unique within a domain
+// Invariant E3: Active in at most one domain (physical constraint)
+// Invariant E4: CSR signed locally by journal intermediate CA — no private keys stored
+// Invariant E8: vcluster_id is independent of enrollment state
+// Note: NO private key material in this struct or in Raft state
+
+pub struct SignedCert {
+    pub cert_pem: String,       // Signed by journal's intermediate CA (public)
+    pub serial: String,
+    pub not_before: DateTime<Utc>,
+    pub not_after: DateTime<Utc>,
+}
+// No key_pem — agent holds its own private key in RAM only
+```
+
+---
+
 ## Admin Operations & Audit
 
 ```rust
@@ -292,6 +350,11 @@ pub enum AdminOperationType {
     ServiceStart, ServiceStop, ServiceRestart,
     EmergencyStart, EmergencyEnd,
     ApprovalDecision,
+    NodeEnroll,         // Admin enrolled a node (ADR-008)
+    NodeDecommission,   // Admin decommissioned a node (ADR-008)
+    NodeAssign,         // Admin assigned node to vCluster (ADR-008)
+    NodeUnassign,       // Admin unassigned node from vCluster (ADR-008)
+    NodeMove,           // Admin moved node between vClusters (ADR-008)
 }
 // Proto fix needed: define AdminOperationType enum in proto
 

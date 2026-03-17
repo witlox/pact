@@ -9,8 +9,8 @@ Assumptions underlying pact's design. Each is classified as **Validated** (confi
 ### A-I1: Diskless compute nodes [Validated]
 Compute nodes boot from SquashFS images provisioned by OpenCHAMI. No persistent local storage. All persistent state lives in the journal.
 
-### A-I2: mTLS certificates provisioned by OpenCHAMI [Accepted]
-Base images include mTLS certificates for pact-agent → journal authentication. Certificate provisioning is OpenCHAMI's responsibility. Certificate rotation is out of scope for initial implementation.
+### A-I2: mTLS certificates managed by pact via CSR + journal intermediate CA [Accepted — supersedes original A-I2]
+Certificate lifecycle is pact's responsibility (ADR-008). Vault issues an intermediate CA cert to journal nodes. Agents generate their own keypairs at boot and submit CSRs to the journal, which signs them locally (~1ms, CPU only). No private key material is stored in Raft or transmitted over the wire. Vault is never on the boot path or renewal path for individual agent certs — only for journal CA management. Certificate rotation uses dual-channel swap (3-day default lifetime, renewal at 2/3). OpenCHAMI/Manta is not involved in certificate provisioning.
 
 ### A-I3: 3-5 journal nodes available [Accepted]
 Raft quorum requires 3 (tolerates 1 failure) or 5 (tolerates 2 failures) nodes. These are either dedicated or co-located with lattice management nodes.

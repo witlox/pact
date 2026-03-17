@@ -31,3 +31,8 @@ pub mod stream {
 pub mod journal {
     tonic::include_proto!("pact.journal");
 }
+
+#[allow(clippy::all, clippy::pedantic, clippy::nursery)]
+pub mod enrollment {
+    tonic::include_proto!("pact.enrollment");
+}

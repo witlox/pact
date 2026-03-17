@@ -13,10 +13,12 @@
 
 pub mod boot;
 pub mod capability;
+pub mod cert_rotation;
 pub mod commit;
 pub mod conflict;
 pub mod drift;
 pub mod emergency;
+pub mod enrollment;
 pub mod journal_client;
 pub mod observer;
 pub mod shell;

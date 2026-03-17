@@ -187,6 +187,65 @@ Integration points between bounded contexts and external systems.
 
 ---
 
+### I15: Agent → Journal (Boot Enrollment) — ADR-008
+
+**Direction:** Agent presents hardware identity + CSR to journal at boot, receives signed cert.
+**Protocol:** gRPC unary (`EnrollmentService.Enroll`) — server-TLS-only, rate-limited
+**Data flow:**
+- Agent sends: HardwareIdentity (MAC, BMC serial) + CSR (agent-generated public key)
+- Journal matches hardware identity → signs CSR locally with intermediate CA
+- Journal returns: signed cert (PEM) + vCluster assignment + node_id
+- Agent builds mTLS channel using own private key + signed cert
+**Failure mode:** F20 (hardware identity mismatch) — agent rejected, retries periodically
+**Invariants:** E1 (enrollment required), E4 (CSR, no private keys in journal), E7 (state governs signing)
+**Security:** Rate-limited. Once-Active rejection prevents concurrent enrollment race. All attempts audit-logged.
+
+### I16: Agent → Journal (Cert Renewal) — ADR-008
+
+**Direction:** Agent submits new CSR before current cert expires, receives new signed cert.
+**Protocol:** gRPC unary (`EnrollmentService.RenewCert`) — mTLS authenticated
+**Data flow:**
+- Agent generates new keypair + CSR
+- Agent sends: node_id, current cert serial, new CSR
+- Journal validates caller identity → signs new CSR locally
+- Agent performs dual-channel rotation (E6)
+**Failure mode:** F19 (journal unreachable) — active channel continues, agent retries
+**Invariants:** E5 (cert lifetime), E6 (dual-channel rotation)
+
+### I17: Journal → Vault (CA Management + CRL) — ADR-008
+
+**Direction:** Journal obtains intermediate CA key from Vault; publishes revocations to CRL.
+**Protocol:** REST (Vault PKI secrets engine API)
+**Data flow:**
+- CA rotation: Vault issues intermediate CA cert + signing key to journal nodes (periodic)
+- Decommission: journal publishes revoked cert serial to Vault CRL
+- CRL reload: journal nodes periodically fetch updated CRL to reject revoked client certs
+**Failure mode:** F18 (Vault unreachable for CA rotation) — current CA key continues
+**Invariants:** E9 (revocation)
+**Note:** Vault is NOT contacted for per-node cert operations — all signing is local.
+
+### I19: Journal heartbeat detection via subscription stream — ADR-008
+
+**Direction:** Journal detects node liveness from config subscription stream state.
+**Protocol:** gRPC streaming (`BootConfigService.SubscribeConfigUpdates`) — connection state
+**Data flow:**
+- Active node maintains long-lived subscription stream
+- Journal tracks `last_seen` per node
+- On stream disconnect + heartbeat grace period (default 5min): Active → Inactive
+**Invariants:** EnrollmentState machine (Active → Inactive transition)
+
+### I18: CLI → Journal (Node Management) — ADR-008
+
+**Direction:** Admin manages node enrollment, assignment, decommission.
+**Protocol:** gRPC unary (`EnrollmentService.RegisterNode/DecommissionNode/AssignNode/etc.`) — mTLS + OIDC
+**Data flow:**
+- Admin sends: node registration, assignment, or decommission request
+- Journal validates RBAC (E10), writes Raft command, returns result
+**Failure mode:** F1 (quorum loss) — write blocked, retry
+**Invariants:** E10 (platform-admin for enroll/decommission), E8 (assignment independent)
+
+---
+
 ## Interaction Summary Matrix
 
 | Source | Target | Protocol | Direction | Failure Handling |
@@ -205,3 +264,8 @@ Integration points between bounded contexts and external systems.
 | Sovra | pact-policy | mTLS REST | Pull | Cached templates |
 | Journal | Loki | HTTP push | Push | Buffer/drop (optional) |
 | Prometheus | Journal | HTTP pull | Scrape | Alert on failure |
+| Agent | Journal (enrollment) | gRPC unary | Request (server-TLS) | Retry periodically (F20) |
+| Agent | Journal (cert renewal) | gRPC unary | Request (mTLS) | Active channel continues (F19) |
+| Journal | Vault | REST | Request | CA key continues; retry CRL (F18) |
+| Journal | Agent (heartbeat) | gRPC stream | Connection state | Active → Inactive on timeout |
+| CLI | Journal (node mgmt) | gRPC unary | Request | Block until available (F1) |

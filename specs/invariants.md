@@ -212,6 +212,40 @@ Pact Raft port: 9444. Pact gRPC port: 9443. These are separate from lattice port
 
 ---
 
+## Enrollment & Certificate Invariants (ADR-008)
+
+### E1: No connection without enrollment
+A node cannot establish an mTLS connection to the journal without a matching enrollment record. The enrollment endpoint is the only unauthenticated gRPC endpoint.
+
+### E2: Hardware identity uniqueness per domain
+Within a single domain, each hardware identity (MAC + BMC serial) maps to at most one enrollment record. Duplicate hardware identities are rejected.
+
+### E3: Multi-domain enrollment, single activation
+A node may be enrolled in multiple domains but can be Active in at most one at a time. This is enforced by physics (single boot target), not by distributed locks.
+
+### E4: CSR model — no private keys in journal
+Agents generate their own keypair and submit a CSR to the journal. The journal signs CSRs locally using its intermediate CA key. No private key material is stored in Raft state, transmitted over the wire, or held by the journal. Compromise of a journal node does not expose agent private keys.
+
+### E5: Certificate lifetime and renewal
+Default certificate lifetime is 3 days. Renewal triggers at 2/3 of lifetime. Renewal is agent-driven: agent generates new keypair + CSR, journal signs locally. No Vault traffic for per-node certs.
+
+### E6: Dual-channel rotation
+Certificate rotation uses a passive channel built with the new cert, health-checked, then atomically swapped with the active channel. In-flight operations are not interrupted.
+
+### E7: Enrollment state governs CSR signing
+Only nodes in Registered or Inactive enrollment state have their CSR signed on boot. Active nodes are rejected with ALREADY_ACTIVE (prevents concurrent enrollment race). Revoked nodes are rejected with NODE_REVOKED.
+
+### E8: vCluster assignment is independent of enrollment
+vCluster assignment is a separate operation from enrollment. An enrolled node may have no vCluster (maintenance mode). Moving between vClusters does not affect the certificate.
+
+### E9: Decommission revokes certificate
+Decommissioning a node sets enrollment state to Revoked and triggers certificate revocation via Vault CRL. The node's mTLS connection is terminated.
+
+### E10: Only platform-admin can enroll and decommission
+Node enrollment and decommission operations require pact-platform-admin role. vCluster assignment may be performed by pact-ops-{vcluster} for their own vCluster.
+
+---
+
 ## Authentication Invariants (hpc-auth crate)
 
 ### Auth1: No unauthenticated commands

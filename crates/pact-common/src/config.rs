@@ -26,7 +26,9 @@ pub struct PactConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub node_id: String,
-    pub vcluster: String,
+    /// vCluster — now optional (set via enrollment or maintained in maintenance mode).
+    #[serde(default)]
+    pub vcluster: Option<String>,
     #[serde(default = "default_enforcement_mode")]
     pub enforcement_mode: String,
     #[serde(default)]
@@ -42,6 +44,32 @@ pub struct AgentConfig {
     pub blacklist: BlacklistConfig,
     #[serde(default)]
     pub capability: Option<CapabilityConfig>,
+    /// Enrollment configuration (enables enrollment workflow if present).
+    #[serde(default)]
+    pub enrollment: Option<EnrollmentConfig>,
+}
+
+/// Agent-side enrollment configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentConfig {
+    /// Journal endpoints for enrollment (server-TLS-only, no client cert).
+    pub journal_endpoints: Vec<String>,
+    /// Path to CA certificate for validating the journal's server cert.
+    pub ca_cert: PathBuf,
+    /// Directory to store the agent's keypair and signed certificate.
+    #[serde(default = "default_cert_dir")]
+    pub cert_dir: PathBuf,
+    /// Certificate renewal interval in seconds (default: 12 hours before expiry).
+    #[serde(default = "default_renewal_before_expiry")]
+    pub renewal_before_expiry_seconds: u32,
+}
+
+fn default_cert_dir() -> PathBuf {
+    PathBuf::from("/var/lib/pact/certs")
+}
+
+const fn default_renewal_before_expiry() -> u32 {
+    43200 // 12 hours
 }
 
 fn default_enforcement_mode() -> String {
@@ -225,6 +253,39 @@ pub struct JournalConfig {
     pub raft: Option<RaftConfig>,
     #[serde(default)]
     pub streaming: Option<StreamingConfig>,
+    /// Enrollment and CA configuration (enables enrollment service if present).
+    #[serde(default)]
+    pub enrollment: Option<EnrollmentJournalConfig>,
+}
+
+/// Journal-side enrollment and CA signing configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentJournalConfig {
+    /// Path to intermediate CA certificate (PEM).
+    pub ca_cert: PathBuf,
+    /// Path to intermediate CA private key (PEM).
+    pub ca_key: PathBuf,
+    /// Certificate lifetime in seconds (default: 3 days = 259200).
+    #[serde(default = "default_cert_lifetime")]
+    pub cert_lifetime_seconds: u32,
+    /// Enrollment rate limit: max requests per minute.
+    #[serde(default = "default_enrollment_rate_limit")]
+    pub rate_limit_per_minute: u32,
+    /// Heartbeat timeout in seconds (default: 300 = 5 minutes).
+    #[serde(default = "default_heartbeat_timeout")]
+    pub heartbeat_timeout_seconds: u32,
+}
+
+const fn default_cert_lifetime() -> u32 {
+    259_200 // 3 days
+}
+
+const fn default_enrollment_rate_limit() -> u32 {
+    100
+}
+
+const fn default_heartbeat_timeout() -> u32 {
+    300 // 5 minutes
 }
 
 fn default_journal_listen() -> String {
@@ -352,8 +413,27 @@ mod tests {
         let config: PactConfig = toml::from_str(toml_str).unwrap();
         let agent = config.agent.unwrap();
         assert_eq!(agent.node_id, "dev-node-001");
+        assert_eq!(agent.vcluster.as_deref(), Some("dev-sandbox"));
         assert_eq!(agent.enforcement_mode, "observe");
         assert_eq!(agent.supervisor.backend, SupervisorBackend::Pact);
+    }
+
+    #[test]
+    fn config_without_vcluster_deserializes() {
+        let toml_str = r#"
+            [agent]
+            node_id = "dev-node-001"
+
+            [agent.journal]
+            endpoints = ["localhost:9443"]
+
+            [telemetry]
+            log_level = "debug"
+        "#;
+        let config: PactConfig = toml::from_str(toml_str).unwrap();
+        let agent = config.agent.unwrap();
+        assert_eq!(agent.node_id, "dev-node-001");
+        assert!(agent.vcluster.is_none());
     }
 
     #[test]

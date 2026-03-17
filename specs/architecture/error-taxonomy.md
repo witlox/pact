@@ -36,6 +36,14 @@ pub enum PactError {
     TtlOutOfBounds { value: u32, min: u32, max: u32 },
     PromoteConflict { node: String, conflicting_nodes: Vec<String>, keys: Vec<String> },
 
+    // --- Enrollment errors (ADR-008) ---
+    NodeNotEnrolled(String),
+    NodeAlreadyEnrolled(String),
+    HardwareIdentityConflict { existing_node: String, mac: String },
+    NodeRevoked(String),
+    AlreadyActive(String),
+    RateLimited,
+
     // --- Serialization/Transport ---
     Serialization(String),
     Transport(tonic::Status),     // #[from]
@@ -65,6 +73,12 @@ pub enum PactError {
 | PromoteConflict | FAILED_PRECONDITION | Promote blocked — target nodes have conflicting local changes |
 | Serialization | INTERNAL | Protobuf or serde encoding failure |
 | Transport | (preserved) | Underlying tonic status passed through |
+| NodeNotEnrolled | NOT_FOUND | Hardware identity has no matching enrollment record (E1) |
+| NodeAlreadyEnrolled | ALREADY_EXISTS | Duplicate enrollment attempt |
+| HardwareIdentityConflict | ALREADY_EXISTS | Same MAC/BMC already enrolled under different node_id (E2) |
+| NodeRevoked | PERMISSION_DENIED | Node was decommissioned, cert revoked (E7) |
+| AlreadyActive | FAILED_PRECONDITION | Node is already Active — concurrent enrollment rejected (E7) |
+| RateLimited | RESOURCE_EXHAUSTED | Enrollment endpoint rate limit exceeded |
 | Internal | INTERNAL | Unexpected internal failure |
 
 ### Error → CLI Exit Code Mapping
@@ -80,6 +94,10 @@ pub enum PactError {
 | TTL out of bounds | 8 | TtlOutOfBounds | "TTL {value}s out of range [{min}, {max}]" |
 | Promote conflict | 9 | PromoteConflict | "Promote blocked: nodes {nodes} have local changes on {keys}" |
 | Rollback blocked | 10 | Internal (active consumers) | "Rollback blocked: active consumers on affected resources" |
+| Node not enrolled | 11 | NodeNotEnrolled | "Node not enrolled: hardware identity not recognized" |
+| Node revoked | 12 | NodeRevoked | "Node decommissioned: {node_id}" |
+| Already active | 13 | AlreadyActive | "Node is already active — wait for heartbeat timeout or decommission" |
+| Rate limited | 14 | RateLimited | "Enrollment rate limit exceeded — retry" |
 | Internal | 99 | Internal, Serialization | "Internal error: {detail}" |
 
 ---
@@ -180,6 +198,35 @@ When operating in degraded mode (journal partition, OPA unreachable), error hand
 | Complex OPA rule needed | Deny (fail-closed) | P7 |
 | Platform admin auth | Authorized from cached role | P7 |
 | Whitelist check | Honored from cached policy | P7 |
+
+---
+
+## VaultError (pact-journal internal)
+
+Errors from the Vault CRL client. Internal to pact-journal — not exposed on gRPC.
+Note: Vault is only contacted for CA key management and CRL updates, not for per-node certs.
+
+| Variant | Meaning | Recovery |
+|---------|---------|----------|
+| `Unreachable(String)` | Vault endpoint not reachable (F18) | Current CA key continues; retry CRL updates |
+| `Unauthorized(String)` | Vault token expired or misconfigured | Alert — requires operator intervention |
+| `RevocationFailed(String)` | CRL update failed on decommission | Retry; node is already Revoked in Raft. Cert remains valid until natural expiry |
+| `CaRotationFailed(String)` | Cannot renew journal intermediate CA cert | Current CA key continues; alert if approaching expiry |
+
+---
+
+## EnrollmentError (pact-agent internal)
+
+Errors from the agent-side enrollment client.
+
+| Variant | Meaning | Recovery |
+|---------|---------|----------|
+| `NotEnrolled` | Journal rejected — hardware identity not in registry | Agent logs and retries periodically |
+| `Revoked` | Journal rejected — node decommissioned | Agent stops; requires re-enrollment |
+| `AlreadyActive` | Node is already Active — concurrent enrollment race | Agent waits for heartbeat timeout or uses existing cert if restarting |
+| `JournalUnreachable` | Cannot reach any journal endpoint | Agent enters degraded mode (A9) |
+| `RenewalFailed(String)` | Journal couldn't sign new CSR | Active channel continues; retry next interval |
+| `RotationFailed(String)` | Passive channel health-check failed | Active channel continues; retry next interval |
 
 ---
 

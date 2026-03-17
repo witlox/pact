@@ -34,6 +34,7 @@ zstd = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
 prometheus = { workspace = true }
+rcgen = { workspace = true }
 
 [dev-dependencies]
 pact-test-harness = { workspace = true }

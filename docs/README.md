@@ -2,7 +2,7 @@
 
 **Promise-based configuration management and admin operations for HPC/AI infrastructure**
 
-pact manages post-boot runtime configuration on large-scale diskless HPC/AI clusters
+pact manages post-boot runtime configuration on large-scale HPC/AI clusters
 and provides the sole admin operations interface to compute nodes — replacing both
 traditional config management tools and SSH.
 

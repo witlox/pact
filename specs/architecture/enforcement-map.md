@@ -130,6 +130,23 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Enrollment & Certificate Invariants (ADR-008)
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| E1 | No connection without enrollment | `EnrollmentService::enroll()` | Hardware identity matched against enrollment registry. No match → reject. Only unauthenticated gRPC method. | `PactError::NodeNotEnrolled` |
+| E2 | Hardware identity uniqueness | `JournalState::apply(EnrollNode)` | Index of `HardwareIdentity → NodeId` in journal state. Duplicate MAC+BMC serial → reject. | `PactError::HardwareIdentityConflict` |
+| E3 | Single activation across domains | Physical constraint | Node can PXE boot from only one Manta at a time. No distributed lock needed. | Advisory: Sovra cross-domain visibility if federated |
+| E4 | CSR model — no private keys in journal | `CaKeyManager::sign_csr()` + `EnrollmentService::enroll()` | Agent generates keypair, sends CSR. Journal signs locally with intermediate CA key. Only signed cert (public) stored in Raft. No private key material anywhere in journal. | Structural — no field or API accepts private keys |
+| E5 | Cert lifetime and renewal | `EnrollmentService::renew_cert()` + `CaKeyManager::sign_csr()` | Agent generates new keypair + CSR at 2/3 of cert lifetime. Journal signs locally. No Vault traffic. No batch sweep needed. | Agent retries if journal unreachable; active channel continues (F19) |
+| E6 | Dual-channel rotation | `DualChannelClient::rotate()` | Passive channel built with new cert, health-checked, atomically swapped. Old channel drains. | `EnrollmentError::RotationFailed` → active channel continues |
+| E7 | Enrollment state governs CSR signing | `EnrollmentService::enroll()` | State machine check: Registered or Inactive → sign CSR. Active → reject ALREADY_ACTIVE (prevents race). Revoked → reject. | `PactError::NodeRevoked` or `PactError::AlreadyActive` |
+| E8 | vCluster independent of enrollment | `JournalState` data model | `NodeEnrollment.vcluster_id: Option<VClusterId>`. Assignment operations are separate Raft commands. Cert CN has no vCluster. | Structural — separate fields, separate operations |
+| E9 | Decommission revokes cert | `EnrollmentService::decommission()` + `VaultPkiClient::revoke_cert()` | Sets state to Revoked. Calls Vault CRL. Journal nodes reload CRL periodically. | `PactError::NodeRevoked` on subsequent access |
+| E10 | Only platform-admin can enroll/decommission | gRPC interceptor + `RbacEngine` | `RegisterNode`, `DecommissionNode` require `pact-platform-admin`. `AssignNode` allows `pact-ops-{vc}` for their vCluster. | `PactError::Unauthorized` |
+
+---
+
 ## Authentication Invariants (hpc-auth crate)
 
 | ID | Invariant | Enforcement Point | Mechanism | Violation Response |
@@ -161,9 +178,9 @@ Summary of how invariants are enforced:
 
 | Category | Count | Invariants | Description |
 |----------|-------|------------|-------------|
-| **Structural** | 13 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3 | Impossible to violate by design (no API exists to break them) |
-| **Validation** | 9 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2 | Checked at input boundary, rejected with error |
-| **Runtime logic** | 20 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5 | Active enforcement in business logic |
+| **Structural** | 16 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8 | Impossible to violate by design (no API exists to break them) |
+| **Validation** | 12 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7 | Checked at input boundary, rejected with error |
+| **Runtime logic** | 25 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4, E5, E6, E9, E10 | Active enforcement in business logic |
 | **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
 | **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
 | **Degraded fallback** | 5 | P7, F2, F3, A9, CR3 | Special behavior when components unavailable |

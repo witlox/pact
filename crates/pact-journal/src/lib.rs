@@ -7,8 +7,12 @@
 
 pub mod auth;
 pub mod boot_service;
+pub mod ca;
+pub mod enrollment_service;
+pub mod heartbeat;
 pub mod policy_service;
 pub mod raft;
+pub mod rate_limiter;
 pub mod service;
 pub mod telemetry;
 

@@ -9,6 +9,8 @@ pub fn parse_config_state(s: &str) -> ConfigState {
         "Drifted" => ConfigState::Drifted,
         "Converging" => ConfigState::Converging,
         "Emergency" => ConfigState::Emergency,
+        // Enrollment states map to ObserveOnly for ConfigState purposes
+        "Inactive" | "Registered" | "Active" | "Revoked" => ConfigState::ObserveOnly,
         _ => panic!("unknown config state: {s}"),
     }
 }

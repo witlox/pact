@@ -127,6 +127,12 @@ enum Commands {
         spec: String,
     },
 
+    /// Node enrollment and management.
+    Node {
+        #[command(subcommand)]
+        action: NodeSubcommand,
+    },
+
     /// Extend commit window.
     Extend {
         /// Additional minutes (default: 15).
@@ -205,6 +211,67 @@ enum ServiceSubcommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum NodeSubcommand {
+    /// Enroll (register) a node.
+    Enroll {
+        /// Node ID.
+        node_id: String,
+        /// Primary MAC address.
+        #[arg(long)]
+        mac: String,
+        /// BMC serial number.
+        #[arg(long)]
+        bmc_serial: Option<String>,
+    },
+    /// Decommission a node.
+    Decommission {
+        /// Node ID.
+        node_id: String,
+        /// Force decommission even with active sessions.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Assign a node to a vCluster.
+    Assign {
+        /// Node ID.
+        node_id: String,
+        /// Target vCluster.
+        #[arg(long)]
+        vcluster: String,
+    },
+    /// Unassign a node from its vCluster.
+    Unassign {
+        /// Node ID.
+        node_id: String,
+    },
+    /// Move a node between vClusters.
+    Move {
+        /// Node ID.
+        node_id: String,
+        /// Target vCluster.
+        #[arg(long)]
+        to_vcluster: String,
+    },
+    /// List enrolled nodes.
+    List {
+        /// Filter by enrollment state (e.g., active, inactive, registered, revoked).
+        #[arg(long)]
+        state: Option<String>,
+        /// Filter by vCluster.
+        #[arg(long)]
+        vcluster: Option<String>,
+        /// Show only unassigned nodes.
+        #[arg(long)]
+        unassigned: bool,
+    },
+    /// Inspect a node's enrollment details.
+    Inspect {
+        /// Node ID.
+        node_id: String,
+    },
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -247,6 +314,7 @@ async fn main() {
             | Commands::Service { .. }
             | Commands::Cap { .. }
             | Commands::Extend { .. }
+            | Commands::Node { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -464,6 +532,47 @@ async fn main() {
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::extend(channel, mins).await,
                 Err(e) => Err(e),
+            }
+        }
+        Commands::Node { action } => {
+            let channel = journal_channel.as_ref().unwrap();
+            match action {
+                NodeSubcommand::Enroll { node_id, mac, bmc_serial } => {
+                    pact_cli::commands::node::enroll(
+                        channel,
+                        &token,
+                        &node_id,
+                        &mac,
+                        bmc_serial.as_deref(),
+                    )
+                    .await
+                }
+                NodeSubcommand::Decommission { node_id, force } => {
+                    pact_cli::commands::node::decommission(channel, &token, &node_id, force).await
+                }
+                NodeSubcommand::Assign { node_id, vcluster } => {
+                    pact_cli::commands::node::assign(channel, &token, &node_id, &vcluster).await
+                }
+                NodeSubcommand::Unassign { node_id } => {
+                    pact_cli::commands::node::unassign(channel, &token, &node_id).await
+                }
+                NodeSubcommand::Move { node_id, to_vcluster } => {
+                    pact_cli::commands::node::move_node(channel, &token, &node_id, &to_vcluster)
+                        .await
+                }
+                NodeSubcommand::List { state, vcluster, unassigned } => {
+                    pact_cli::commands::node::list(
+                        channel,
+                        &token,
+                        state.as_deref(),
+                        vcluster.as_deref(),
+                        unassigned,
+                    )
+                    .await
+                }
+                NodeSubcommand::Inspect { node_id } => {
+                    pact_cli::commands::node::inspect(channel, &token, &node_id).await
+                }
             }
         }
         Commands::Login { server, device_code, service_account } => {

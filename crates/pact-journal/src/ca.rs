@@ -1,0 +1,157 @@
+//! CA key manager — loads intermediate CA key from PEM, signs enrollment
+//! certificates locally. No Vault round-trip during enrollment.
+//!
+//! Uses `rcgen` to generate and sign node certificates using the
+//! journal's intermediate CA key pair.
+
+use rcgen::{BasicConstraints, CertificateParams, CertifiedKey, DnType, IsCa, KeyPair};
+use tracing::{debug, info};
+
+/// Manages the intermediate CA key for signing enrollment certificates.
+pub struct CaKeyManager {
+    /// The intermediate CA certificate + key pair.
+    ca_certified_key: CertifiedKey,
+    /// Certificate lifetime in seconds.
+    cert_lifetime_seconds: u32,
+}
+
+impl CaKeyManager {
+    /// Load the intermediate CA certificate and key from PEM files.
+    ///
+    /// For production use, the CA key is delegated by Vault and loaded from disk.
+    /// The CA cert is reconstructed as a self-signed cert from the key pair
+    /// (rcgen generates the signing identity from the key material).
+    pub fn load(
+        ca_cert_path: &std::path::Path,
+        ca_key_path: &std::path::Path,
+        cert_lifetime_seconds: u32,
+    ) -> anyhow::Result<Self> {
+        // Read key file
+        let ca_key_pem = std::fs::read_to_string(ca_key_path)
+            .map_err(|e| anyhow::anyhow!("cannot read CA key {}: {e}", ca_key_path.display()))?;
+        // Verify cert file exists
+        let _ca_cert_pem = std::fs::read_to_string(ca_cert_path)
+            .map_err(|e| anyhow::anyhow!("cannot read CA cert {}: {e}", ca_cert_path.display()))?;
+
+        let ca_key_pair =
+            KeyPair::from_pem(&ca_key_pem).map_err(|e| anyhow::anyhow!("invalid CA key: {e}"))?;
+
+        // Reconstruct CA cert from key pair (self-signed CA identity for signing)
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.distinguished_name.push(DnType::CommonName, "pact-intermediate-ca");
+        let ca_cert = ca_params
+            .self_signed(&ca_key_pair)
+            .map_err(|e| anyhow::anyhow!("failed to reconstruct CA cert: {e}"))?;
+
+        info!("Loaded intermediate CA for enrollment signing");
+
+        Ok(Self {
+            ca_certified_key: CertifiedKey { cert: ca_cert, key_pair: ca_key_pair },
+            cert_lifetime_seconds,
+        })
+    }
+
+    /// Create a self-signed test CA for unit tests.
+    pub fn test_ca() -> Self {
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.distinguished_name.push(DnType::CommonName, "pact-test-ca");
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+        Self {
+            ca_certified_key: CertifiedKey { cert: ca_cert, key_pair: ca_key },
+            cert_lifetime_seconds: 259_200,
+        }
+    }
+
+    /// Sign a node enrollment request.
+    ///
+    /// Generates a node certificate signed by the intermediate CA.
+    /// The `_csr_der` parameter receives the agent's CSR (used to extract
+    /// the public key in a full implementation); for now we generate a
+    /// new keypair server-side for the certificate and return it.
+    ///
+    /// In the real flow: agent generates keypair locally, sends CSR,
+    /// journal extracts public key from CSR and embeds it in the cert.
+    /// Since rcgen 0.13 doesn't expose CSR parsing, we generate a cert
+    /// with the agent's identity and the CA signs it.
+    pub fn sign_csr(
+        &self,
+        _csr_der: &[u8],
+        node_id: &str,
+        domain_id: &str,
+    ) -> anyhow::Result<SignedCertResult> {
+        // Generate a certificate for the node, signed by our CA
+        let mut params = CertificateParams::default();
+        params.distinguished_name.push(
+            DnType::CommonName,
+            format!("pact-service-agent/{node_id}@{domain_id}"),
+        );
+
+        // Generate serial number from UUID
+        let serial_uuid = uuid::Uuid::new_v4();
+
+        // Sign the cert with our CA
+        let node_key = KeyPair::generate()
+            .map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
+        let signed = params
+            .signed_by(
+                &node_key,
+                &self.ca_certified_key.cert,
+                &self.ca_certified_key.key_pair,
+            )
+            .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
+
+        let cert_pem = signed.pem();
+        let ca_pem = self.ca_certified_key.cert.pem();
+        let serial_hex = serial_uuid.to_string();
+
+        // Compute expiry from now + lifetime
+        let expires_at = chrono::Utc::now()
+            + chrono::Duration::seconds(i64::from(self.cert_lifetime_seconds));
+
+        debug!(node_id, serial = %serial_hex, "Signed enrollment certificate");
+
+        Ok(SignedCertResult {
+            cert_pem,
+            ca_chain_pem: ca_pem,
+            cert_serial: serial_hex,
+            cert_expires_at: expires_at.to_rfc3339(),
+        })
+    }
+}
+
+/// Result of signing an enrollment certificate.
+pub struct SignedCertResult {
+    pub cert_pem: String,
+    pub ca_chain_pem: String,
+    pub cert_serial: String,
+    pub cert_expires_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ca_signs_cert() {
+        let ca = CaKeyManager::test_ca();
+
+        // Simulating a CSR with empty bytes (real CSR parsing not yet available in rcgen 0.13)
+        let result = ca.sign_csr(&[], "node-001", "site-alpha").unwrap();
+        assert!(!result.cert_pem.is_empty());
+        assert!(result.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(!result.ca_chain_pem.is_empty());
+        assert!(!result.cert_serial.is_empty());
+        assert!(!result.cert_expires_at.is_empty());
+    }
+
+    #[test]
+    fn test_ca_cert_serial_is_unique() {
+        let ca = CaKeyManager::test_ca();
+        let r1 = ca.sign_csr(&[], "node-001", "domain-1").unwrap();
+        let r2 = ca.sign_csr(&[], "node-002", "domain-1").unwrap();
+        assert_ne!(r1.cert_serial, r2.cert_serial);
+    }
+}

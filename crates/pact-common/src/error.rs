@@ -46,4 +46,28 @@ pub enum PactError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("node not enrolled: {0}")]
+    NodeNotEnrolled(String),
+
+    #[error("node already enrolled: {0}")]
+    NodeAlreadyEnrolled(String),
+
+    #[error("hardware identity conflict: {0}")]
+    HardwareIdentityConflict(String),
+
+    #[error("node has been revoked: {0}")]
+    NodeRevoked(String),
+
+    #[error("node is already active: {0}")]
+    AlreadyActive(String),
+
+    #[error("rate limited: {0}")]
+    RateLimited(String),
+
+    #[error("active sessions exist on node {node}: {count} session(s)")]
+    ActiveSessionsExist { node: String, count: u32 },
+
+    #[error("certificate error: {0}")]
+    CertificateError(String),
 }
