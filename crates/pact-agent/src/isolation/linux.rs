@@ -280,9 +280,8 @@ mod tests {
         let (dir, mgr) = setup_fake_cgroup();
         // create_hierarchy expects subtree_control to exist — skip controllers
         // Just test directory creation
-        mgr.create_hierarchy().unwrap_or_else(|_| {
-            // Controller enable may fail on tmpfs, that's OK for this test
-        });
+        // Controller enable may fail on tmpfs, that's OK for this test
+        let _ = mgr.create_hierarchy();
 
         // Check that directories were created
         assert!(dir.path().join(slices::PACT_ROOT).exists() || true); // May fail on non-cgroup fs
