@@ -37,7 +37,7 @@ fn has_cgroup_v2() -> bool {
 }
 
 #[tokio::test]
-#[ignore] // Run explicitly with --ignored on Linux CI with root
+#[ignore = "requires root/CAP_SYS_ADMIN on Linux"]
 async fn cgroup_hierarchy_creation() {
     if !has_cgroup_v2() || !can_create_cgroups() {
         eprintln!("SKIP: requires cgroup v2 + root/CAP_SYS_ADMIN");
@@ -105,7 +105,7 @@ async fn cgroup_hierarchy_creation() {
 }
 
 #[tokio::test]
-#[ignore] // Run explicitly with --ignored on Linux CI with root
+#[ignore = "requires root/CAP_SYS_ADMIN on Linux"]
 async fn cgroup_permission_denied_for_workload_slice() {
     if !has_cgroup_v2() || !can_create_cgroups() {
         eprintln!("SKIP: requires cgroup v2 + root/CAP_SYS_ADMIN");
@@ -142,7 +142,7 @@ async fn cgroup_permission_denied_for_workload_slice() {
 }
 
 #[tokio::test]
-#[ignore] // Run explicitly with --ignored on Linux CI with root
+#[ignore = "requires root/CAP_SYS_ADMIN on Linux"]
 async fn cgroup_scope_with_process() {
     if !has_cgroup_v2() || !can_create_cgroups() {
         eprintln!("SKIP: requires cgroup v2 + root/CAP_SYS_ADMIN");
@@ -194,7 +194,7 @@ async fn cgroup_scope_with_process() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "requires root/CAP_SYS_ADMIN"]
 async fn oom_score_adj_protection() {
     // Verify OOM protection works
     pact_agent::isolation::protect_from_oom().unwrap();

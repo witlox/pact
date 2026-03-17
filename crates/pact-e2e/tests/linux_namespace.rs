@@ -22,7 +22,7 @@ fn can_create_namespaces() -> bool {
 }
 
 #[tokio::test]
-#[ignore] // Requires root/CAP_SYS_ADMIN
+#[ignore = "requires root/CAP_SYS_ADMIN"]
 async fn mount_namespace_isolation() {
     if !can_create_namespaces() {
         eprintln!("SKIP: requires CAP_SYS_ADMIN for namespace creation");
@@ -48,7 +48,7 @@ async fn mount_namespace_isolation() {
 }
 
 #[tokio::test]
-#[ignore] // Requires root/CAP_SYS_ADMIN
+#[ignore = "requires root/CAP_SYS_ADMIN"]
 async fn pid_namespace_isolation() {
     if !can_create_namespaces() {
         eprintln!("SKIP: requires CAP_SYS_ADMIN for namespace creation");
@@ -76,7 +76,7 @@ async fn pid_namespace_isolation() {
 }
 
 #[tokio::test]
-#[ignore] // Requires root/CAP_SYS_ADMIN
+#[ignore = "requires root/CAP_SYS_ADMIN"]
 async fn network_namespace_isolation() {
     if !can_create_namespaces() {
         eprintln!("SKIP: requires CAP_SYS_ADMIN for namespace creation");
@@ -101,7 +101,7 @@ async fn network_namespace_isolation() {
 }
 
 #[tokio::test]
-#[ignore] // Requires root/CAP_SYS_ADMIN
+#[ignore = "requires root/CAP_SYS_ADMIN"]
 async fn squashfs_mount_lifecycle() {
     if !can_create_namespaces() {
         eprintln!("SKIP: requires CAP_SYS_ADMIN");

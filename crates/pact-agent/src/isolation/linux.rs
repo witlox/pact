@@ -275,16 +275,11 @@ mod tests {
     }
 
     #[test]
-    fn create_hierarchy_creates_directories() {
-        let (dir, mgr) = setup_fake_cgroup();
-        // create_hierarchy expects subtree_control to exist — skip controllers
-        // Just test directory creation
-        // Controller enable may fail on tmpfs, that's OK for this test
-        let _ = mgr.create_hierarchy();
-
-        // On real cgroup2 fs, directories would be created.
-        // On tmpfs, hierarchy creation may partially fail — that's fine for this test.
+    fn create_hierarchy_does_not_panic() {
+        let (_dir, mgr) = setup_fake_cgroup();
+        // Controller enable may fail on tmpfs, that's OK for this test.
         // We just verify the function doesn't panic.
+        let _ = mgr.create_hierarchy();
     }
 
     #[test]
