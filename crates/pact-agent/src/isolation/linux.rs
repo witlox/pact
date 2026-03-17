@@ -51,7 +51,7 @@ impl LinuxCgroupManager {
     /// Read a value from a cgroup control file.
     fn read_control(path: &Path, file: &str) -> Result<String, CgroupError> {
         let file_path = path.join(file);
-        fs::read_to_string(&file_path).map_err(|e| CgroupError::Io(e))
+        fs::read_to_string(&file_path).map_err(CgroupError::Io)
     }
 
     /// Enable controllers for a cgroup subtree.
@@ -156,11 +156,11 @@ impl CgroupManager for LinuxCgroupManager {
             // cgroup.kill available (Linux 5.14+)
             if let Err(e) = fs::write(&kill_file, "1") {
                 warn!(path = %handle.path, "cgroup.kill failed: {e}, falling back to SIGKILL");
-                self.kill_processes_fallback(&full)?;
+                Self::kill_processes_fallback(&full)?;
             }
         } else {
             // Fallback: iterate cgroup.procs and SIGKILL each
-            self.kill_processes_fallback(&full)?;
+            Self::kill_processes_fallback(&full)?;
         }
 
         // Wait briefly for processes to exit, then remove the directory
@@ -222,10 +222,9 @@ impl CgroupManager for LinuxCgroupManager {
             .unwrap_or(0);
 
         // Count processes in cgroup.procs
-        let nr_processes = Self::read_control(&full, "cgroup.procs")
-            .ok()
-            .map(|s| s.lines().filter(|l| !l.is_empty()).count().try_into().unwrap_or(u32::MAX))
-            .unwrap_or(0);
+        let nr_processes = Self::read_control(&full, "cgroup.procs").ok().map_or(0, |s| {
+            s.lines().filter(|l| !l.is_empty()).count().try_into().unwrap_or(u32::MAX)
+        });
 
         Ok(CgroupMetrics { memory_current, memory_max, cpu_usage_usec, nr_processes })
     }
@@ -244,7 +243,7 @@ impl CgroupManager for LinuxCgroupManager {
 
 impl LinuxCgroupManager {
     /// Fallback process killing: read cgroup.procs and SIGKILL each PID.
-    fn kill_processes_fallback(&self, cgroup_path: &Path) -> Result<(), CgroupError> {
+    fn kill_processes_fallback(cgroup_path: &Path) -> Result<(), CgroupError> {
         let procs_file = cgroup_path.join("cgroup.procs");
         let content = fs::read_to_string(&procs_file).map_err(CgroupError::Io)?;
 
@@ -283,8 +282,9 @@ mod tests {
         // Controller enable may fail on tmpfs, that's OK for this test
         let _ = mgr.create_hierarchy();
 
-        // Check that directories were created
-        assert!(dir.path().join(slices::PACT_ROOT).exists() || true); // May fail on non-cgroup fs
+        // On real cgroup2 fs, directories would be created.
+        // On tmpfs, hierarchy creation may partially fail — that's fine for this test.
+        // We just verify the function doesn't panic.
     }
 
     #[test]
