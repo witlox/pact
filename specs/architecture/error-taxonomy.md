@@ -201,20 +201,6 @@ When operating in degraded mode (journal partition, OPA unreachable), error hand
 
 ---
 
-## VaultError (pact-journal internal)
-
-Errors from the Vault CRL client. Internal to pact-journal — not exposed on gRPC.
-Note: Vault is only contacted for CA key management and CRL updates, not for per-node certs.
-
-| Variant | Meaning | Recovery |
-|---------|---------|----------|
-| `Unreachable(String)` | Vault endpoint not reachable (F18) | Current CA key continues; retry CRL updates |
-| `Unauthorized(String)` | Vault token expired or misconfigured | Alert — requires operator intervention |
-| `RevocationFailed(String)` | CRL update failed on decommission | Retry; node is already Revoked in Raft. Cert remains valid until natural expiry |
-| `CaRotationFailed(String)` | Cannot renew journal intermediate CA cert | Current CA key continues; alert if approaching expiry |
-
----
-
 ## EnrollmentError (pact-agent internal)
 
 Errors from the agent-side enrollment client.

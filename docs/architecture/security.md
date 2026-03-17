@@ -1,4 +1,6 @@
-# STRIDE Threat Model — pact
+# Security
+
+## STRIDE Threat Model — pact
 
 This document applies the STRIDE threat modeling framework to pact's architecture.
 Each section identifies threats by STRIDE category, maps them to components, assesses
@@ -6,18 +8,12 @@ residual risk after existing mitigations, and recommends further hardening where
 remain.
 
 **Scope**: pact-agent, pact-journal (Raft quorum), pact-policy, pact CLI, pact MCP
-server, and the trust boundaries between them. External systems (Vault, OPA, Sovra,
+server, and the trust boundaries between them. External systems (OPA, Sovra,
 OpenCHAMI/Manta, lattice) are modeled as trust boundary crossings.
 
 **Data flow summary** (for threat identification):
 
 ```
-                         ┌───────────────────────────────────────────┐
-                         │            Vault (PKI CA)                  │
-                         │  root CA, intermediate CA issuance         │
-                         └─────────────┬─────────────────────────────┘
-                                       │ intermediate CA key
-                                       ▼
 ┌─────────────┐  mTLS   ┌─────────────────────────────┐  Raft     ┌───────────────┐
 │ pact-agent  │◄───────►│       pact-journal           │◄────────►│ pact-journal   │
 │ (compute    │         │  (leader / follower)          │          │ (other peers)  │
@@ -29,6 +25,8 @@ OpenCHAMI/Manta, lattice) are modeled as trust boundary crossings.
 │ drift eval  │         │  ┌──────────┐                │
 └──────┬──────┘         │  │   OPA    │                │
        │                │  └──────────┘                │
+       │                │  ephemeral CA key (in memory) │
+       │                │  revocation registry (Raft)    │
        │                └──────────────┬───────────────┘
        │                               │
        │  gRPC+OIDC     ┌─────────────┴────────────────┐
@@ -48,11 +46,11 @@ OpenCHAMI/Manta, lattice) are modeled as trust boundary crossings.
 
 | ID | Boundary | Protection |
 |----|----------|------------|
-| TB1 | Agent ↔ Journal | mTLS (X.509, intermediate CA signed by Vault) |
+| TB1 | Agent ↔ Journal | mTLS (X.509, ephemeral intermediate CA generated at journal startup) |
 | TB2 | CLI/MCP ↔ Journal | gRPC + OIDC Bearer JWT |
 | TB3 | CLI/MCP ↔ Agent (shell/exec) | gRPC + OIDC Bearer JWT, routed through journal auth |
 | TB4 | Journal ↔ OPA sidecar | localhost-only (127.0.0.1:8181), no auth |
-| TB5 | Journal ↔ Vault | mTLS or Vault token, periodic (CA renewal only) |
+| TB5 | ~~Journal ↔ Vault~~ | Removed — CA is ephemeral, generated at journal startup. No external CA dependency. |
 | TB6 | Journal ↔ Sovra | mTLS, federation policy sync |
 | TB7 | Agent ↔ OS (eBPF, cgroups, PTY) | Kernel privilege (CAP_SYS_ADMIN, CAP_BPF) |
 | TB8 | Enrollment endpoint | Server-TLS only (unauthenticated gRPC) |
@@ -128,7 +126,7 @@ capture CSRs, or serve malicious overlays.
 - Raft membership changes require quorum agreement.
 
 **Residual risk**: **Low**. Requires compromising the CA bundle in the boot image
-(OpenCHAMI supply chain) or the Vault intermediate CA key.
+(OpenCHAMI supply chain) or the journal's ephemeral intermediate CA key.
 
 ### S-4: AI agent privilege escalation via MCP
 
@@ -342,8 +340,8 @@ platform-admin account can do anything.
 **Recommendations**:
 1. Consider requiring two-person approval for platform-admin on regulated vClusters
    (currently exempt).
-2. Time-bound platform-admin access: use short-lived privilege escalation (e.g., Vault
-   dynamic credentials) rather than permanent role assignment.
+2. Time-bound platform-admin access: use short-lived privilege escalation (e.g.,
+   dynamic credentials from the IdP) rather than permanent role assignment.
 3. Anomaly detection on platform-admin activity: alert on unusual hours, unusual
    volume, unusual target vClusters.
 
@@ -355,25 +353,26 @@ platform-admin account can do anything.
 
 **Target**: Journal intermediate CA signing key.
 
-**Threat**: Compromise of a journal node exposes the intermediate CA key, allowing the
-attacker to sign arbitrary agent certificates.
+**Threat**: Compromise of a journal node exposes the ephemeral intermediate CA key,
+allowing the attacker to sign arbitrary agent certificates.
 
 **Existing mitigations**:
+- Key is ephemeral — generated at journal startup, held in memory only, never persisted
+  to disk. Exposure requires runtime memory access to a journal node.
 - Key is on 3-5 journal nodes (not 10,000 agents) — small blast radius.
-- Key is revocable via Vault CRL.
+- Key is rotated on every journal restart — compromised keys have a limited validity window.
 - Agent private keys are NOT stored on journal nodes (E4).
+- Revoked cert serials tracked in Raft revocation registry, checked on every mTLS connection.
 
-**Residual risk**: **High**. The intermediate CA key is the crown jewel. Compromise
-allows minting certificates for any node identity, enabling full impersonation.
+**Residual risk**: **Medium**. The ephemeral CA key is still sensitive, but the exposure
+risk is significantly lower than a persistent key: it exists only in memory, is rotated
+on restart, and cannot be extracted from disk or backups.
 
 **Recommendations**:
-1. Store intermediate CA key in HSM or TPM on journal nodes (not filesystem).
-2. If HSM is not available, use Vault Agent sidecar with response wrapping — key is
-   held in memory only, never written to disk.
-3. Rotate the intermediate CA more frequently (weekly instead of monthly) to limit
-   exposure window.
-4. Monitor Vault CRL for unexpected revocations or issuances.
-5. Consider short-lived intermediate CA certs (hours) with automatic renewal — limits
+1. Store intermediate CA key in HSM or TPM on journal nodes for defense in depth.
+2. Periodic journal restart (e.g., rolling restart weekly) to force key rotation.
+3. Monitor for unexpected certificate issuances via the Raft audit trail.
+4. Consider short-lived intermediate CA certs (hours) with automatic renewal — limits
    the window even if the key is stolen.
 
 ### I-2: Config overlay data in transit
@@ -643,7 +642,7 @@ no authentication (TB4). A compromised process can push arbitrary policies.
 | R-1: Audit gaps during partition | Repudiation | Medium | Low-Medium | Sign local audit entries |
 | R-2: BMC unaudited access | Repudiation | Medium | Medium | Correlate BMC logs |
 | R-3: Platform admin unchecked | Repudiation | High | Medium | Time-bound escalation |
-| I-1: Intermediate CA key exposure | Info Disclosure | Critical | High | HSM or memory-only key |
+| I-1: Intermediate CA key exposure | Info Disclosure | High | Medium | Ephemeral key (memory-only), HSM for defense in depth |
 | I-2: Config data in transit | Info Disclosure | Medium | Low | No embedded secrets in overlays |
 | I-3: Shell output exposure | Info Disclosure | Medium | Medium | Output redaction in audit |
 | I-4: Raft state at rest | Info Disclosure | Medium | Medium | Encryption at rest |
@@ -658,8 +657,8 @@ no authentication (TB4). A compromised process can push arbitrary policies.
 
 ## Top 5 Hardening Priorities
 
-1. **Intermediate CA key protection** (I-1): Move to HSM or memory-only storage.
-   This is the single highest-impact secret in the system.
+1. **Intermediate CA key protection** (I-1): Key is already ephemeral (memory-only).
+   HSM provides defense in depth. Periodic rolling restarts force key rotation.
 
 2. **OPA sidecar hardening** (T-5, E-4): Disable management API, signed policy
    bundles, enforce built-in RBAC as invariant floor. Currently, localhost access
@@ -674,3 +673,68 @@ no authentication (TB4). A compromised process can push arbitrary policies.
 
 5. **Encryption at rest** (I-4, T-1): WAL, snapshots, and backups should be
    encrypted. Configuration history and audit trails are sensitive operational data.
+# Security Architecture
+
+## Authentication
+
+### OIDC / JWT
+- All API calls authenticated via Bearer JWT tokens in gRPC metadata
+- Development: HS256 with shared secret
+- Production: RS256 with JWKS endpoint (auto-refreshed, 1hr cache)
+- Token claims: `sub` (principal), `pact_role` (authorization role)
+
+### Machine Identity (mTLS)
+- Agent-to-journal: mutual TLS with X.509 certificates
+- Certificate fields: `tls_cert`, `tls_key`, `tls_ca` in agent config
+- Journal validates client certificate against CA bundle
+- Agent validates journal certificate against CA bundle
+
+## Authorization (RBAC)
+
+### Role Model
+| Role | Scope | Permissions |
+|------|-------|-------------|
+| `pact-platform-admin` | Global | Full access, whitelist bypass (S2) |
+| `pact-ops-{vcluster}` | Per-vCluster | Commit, rollback, exec, shell, service mgmt |
+| `pact-viewer-{vcluster}` | Per-vCluster | Read-only: status, log, diff, read-only exec |
+| `pact-regulated-{vcluster}` | Per-vCluster | Like ops, but requires two-person approval (P4) |
+| `pact-service-agent` | Machine | Agent mTLS identity |
+| `pact-service-ai` | Machine | MCP tools, no emergency mode (P8) |
+
+### Policy Invariants
+- **P1**: Identity required on all requests
+- **P2**: Viewers read-only
+- **P3**: Role scoped to correct vCluster
+- **P4**: Regulated roles require two-person approval
+- **P6**: Platform admin always authorized
+- **P8**: AI agents cannot enter/exit emergency mode
+
+### OPA Integration (ADR-003)
+- Rego policies co-located on journal nodes
+- Evaluated via localhost REST (`http://localhost:8181/v1/data/pact/authz`)
+- Federation: policy templates synced via Sovra
+
+## Shell Security (ADR-007)
+
+### No SSH
+- pact shell replaces SSH for all admin access
+- BMC/Redfish console is the only out-of-band fallback
+
+### Whitelist Enforcement
+- Commands restricted via PATH symlinks (not command parsing)
+- Session-specific directory: `/run/pact/shell/{session_id}/bin/`
+- 37 default whitelisted commands (ps, top, nvidia-smi, etc.)
+- State-changing commands classified (systemctl, modprobe → true)
+- Learning mode captures denied commands for review
+
+### PTY Isolation
+- Restricted bash (rbash) prevents PATH modification
+- `BASH_ENV=""`, `ENV=""` prevent startup file injection
+- `HOME=/tmp` prevents home directory access
+- `PROMPT_COMMAND` logs every command for audit
+
+## Audit Trail
+- Every operation logged as a ConfigEntry in the journal
+- Immutable Raft-committed log
+- EntryTypes: ExecLog, ShellSession, ServiceLifecycle, EmergencyStart/End
+- Regulated vClusters: 7-year retention (audit_retention_days=2555)

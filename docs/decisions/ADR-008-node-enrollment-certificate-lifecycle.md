@@ -15,7 +15,7 @@ breaks at scale and in multi-domain deployments:
    them without re-imaging every node.
 
 3. **Multi-domain assignment.** A physical machine may be partitioned across multiple pact
-   domains (each with its own journal quorum and Vault). A node must be enrollable in
+   domains (each with its own journal quorum). A node must be enrollable in
    multiple domains, but active in only one at a time.
 
 4. **Unauthorized enrollment.** No mechanism exists to prevent a node from connecting to
@@ -44,31 +44,29 @@ These compose independently. A node can be:
 - Moved between vClusters without re-enrollment
 - Enrolled in multiple domains, active in only one (shared hardware)
 
-### Certificate authority: Vault with journal as intermediate CA
+### Certificate authority: self-generated ephemeral CA on journal nodes
 
-Vault (HashiCorp) is the root/intermediate certificate authority. Each pact-journal node
-holds a Vault-delegated intermediate CA signing key, enabling local certificate signing
-without Vault on the boot path.
+Each pact-journal node generates an ephemeral intermediate CA key at startup (in memory
+only, never persisted to disk). This eliminates external CA dependencies from the boot
+and renewal paths entirely.
 
 Rationale:
-- Sovra federation already depends on Vault for cross-site trust and policy attestation.
-  Adding PKI is enabling another secrets engine, not introducing a new dependency.
-- Vault manages the CA trust chain, CRL distribution, and audit.
-- Journal nodes sign agent CSRs locally using the intermediate CA key — no Vault traffic
-  during boot or renewal.
+- No external dependency for certificate operations — the journal is fully self-contained.
+- Ephemeral keys reduce exposure risk: key compromise requires runtime access to a journal
+  node's memory, and the key is rotated on every journal restart.
+- Certificate revocation is handled via a Raft revocation registry (replicated to all
+  journal nodes), not an external CRL.
+- Journal nodes sign agent CSRs locally using the ephemeral CA key — a CPU-only operation.
 
 Per-domain topology:
 ```
 ┌─ pact domain ─────────────────────────────────────────────┐
 │                                                            │
-│  Vault cluster (PKI secrets engine)                        │
-│    ├── root CA (offline or Vault-managed)                   │
-│    └── intermediate CA cert issued to journal nodes         │
-│                                                            │
 │  pact-journal quorum (3-5 nodes)                           │
-│    ├── each holds intermediate CA signing key               │
-│    ├── each has own server cert from Vault                  │
-│    └── signs agent CSRs locally (no Vault per-boot)         │
+│    ├── each generates ephemeral CA key at startup           │
+│    ├── CA cert distributed via enrollment responses         │
+│    ├── revocation registry replicated via Raft              │
+│    └── signs agent CSRs locally (CPU-only, no network)      │
 │                                                            │
 │  pact-agents (1000s)                                       │
 │    ├── generate own keypair at boot (in RAM)                │
@@ -94,7 +92,7 @@ This design ensures:
   material. Even if the endpoint is spoofed, the attacker gets a cert for their own key
   — they cannot impersonate the real agent.
 - **Boot storm safe.** CSR signing is ~1ms CPU per cert. 10,000 concurrent CSRs are
-  signed in ~10 seconds on a single core. No Vault traffic.
+  signed in ~10 seconds on a single core. No external traffic.
 
 ### Enrollment registry
 
@@ -133,8 +131,8 @@ establish mTLS connections.
                  │                 ▼            ▼
                  │             Inactive      Revoked
                  │           (node gone,    (cert serial added to
-                 │            signed cert    Vault CRL, record
-                 │            may still      removed, cannot
+                 │            signed cert    Raft revocation registry,
+                 │            may still      record removed, cannot
                  │            be valid)      re-enroll without
                  │                 │          new enrollment)
                  │                 │
@@ -229,26 +227,25 @@ every active agent and its connection state is a natural liveness signal.
 
 ### Local signing eliminates boot storm and renewal batching
 
-Vault is never on the boot path or the renewal path for individual agent certs:
+No external service is on the boot path or the renewal path for individual agent certs:
 
 ```
 Boot storm (T+0, 10,000 nodes simultaneously):
   Agent generates keypair + CSR
   Agent → Journal: Enroll(hardware_id, csr)
-  Journal: match enrollment → sign CSR locally with intermediate CA
-  ^^^^^^ CPU-only operation. ~1ms per signing. No Vault traffic.
+  Journal: match enrollment → sign CSR locally with ephemeral CA key
+  ^^^^^^ CPU-only operation. ~1ms per signing. No network calls.
   Journal: return signed cert + vCluster assignment
 
   Agent → Journal: StreamBootConfig(mTLS)
   ^^^^^^ Already served from local state (existing design).
 ```
 
-Vault traffic during boot storm: zero.
-Vault traffic during cert renewal: zero (agents send new CSR, journal signs locally).
+External traffic during boot storm: zero.
+External traffic during cert renewal: zero (agents send new CSR, journal signs locally).
 
-Vault is contacted only for:
-- Issuing/renewing the journal's intermediate CA cert (periodic, ~monthly)
-- Publishing revoked cert serials to CRL on node decommission
+Certificate revocation is handled entirely within the Raft revocation registry —
+revoked serials are replicated to all journal nodes via consensus.
 
 ### Certificate lifecycle: 3-day default, agent-driven renewal
 
@@ -350,7 +347,7 @@ When decommissioning a node:
 1. If active shell sessions or exec operations exist on the node, the decommission
    command warns the admin and requires `--force` to proceed.
 2. On `--force` (or no active sessions): enrollment state → Revoked, cert serial added
-   to Vault CRL, agent's mTLS connection terminates.
+   to Raft revocation registry, agent's mTLS connection terminates.
 3. Active sessions are terminated. Session audit records are preserved.
 4. The node cannot re-enroll without a new `pact node enroll` command.
 
@@ -365,7 +362,7 @@ an independent Raft command. On partial failure:
 
 ## Trade-offs
 
-- (+) No boot dependency on Vault — journal signs CSRs locally
+- (+) No external CA dependency — journal generates ephemeral CA key at startup
 - (+) No private keys in Raft state or on the wire — agent holds its own key in RAM
 - (+) No dependency on Manta/OpenCHAMI for cert management — pact owns its trust
 - (+) Multi-domain shared hardware without distributed locks
@@ -373,29 +370,31 @@ an independent Raft command. On partial failure:
 - (+) Certificate rotation is invisible to operations (dual-channel swap)
 - (+) Enrollment registry provides inventory and prevents unauthorized nodes
 - (+) Boot storm safe: local signing is CPU-only (~1ms per cert, ~10s for 10,000)
-- (+) Simplified Vault dependency: only CA management, not per-node cert issuance
-- (-) Vault becomes a hard dependency for journal CA (mitigated: Sovra already requires it)
+- (+) Self-contained: no external PKI required for certificate operations
+- (+) Ephemeral CA key reduces exposure risk (rotated on journal restart, memory-only)
 - (-) Enrollment is an additional admin step before first boot
-- (-) Journal intermediate CA key is sensitive (mitigated: same trust level as journal
-  server TLS key; 3-5 nodes, not 10,000; revocable via Vault)
+- (-) Journal intermediate CA key is sensitive (mitigated: ephemeral, memory-only,
+  rotated on restart; same trust level as journal server TLS key; 3-5 nodes, not 10,000)
 - (-) Hardware identity (MAC + BMC serial) is not cryptographically strong without TPM
   (mitigated: sufficient for trusted datacenter environments; TPM optional;
   once-Active rejection limits spoofing window)
+- (-) No external CRL distribution — revocation is checked only by journal nodes via
+  Raft revocation registry (mitigated: journal nodes are the only mTLS terminators)
 
 ## Consequences
 
 - A-I2 (mTLS certificates provisioned by OpenCHAMI) is superseded. Certificate lifecycle
-  is pact's responsibility, using Vault for CA management and journal for local signing.
+  is pact's responsibility, using self-generated ephemeral CA keys on journal nodes.
 - Agent config no longer includes `vcluster`. vCluster assignment comes from the journal.
 - pact-journal gains an `EnrollmentService` gRPC endpoint with one unauthenticated RPC
   (`Enroll`) and authenticated RPCs for admin and renewal operations.
-- pact-journal nodes require an intermediate CA signing key from Vault (provisioned via
-  Vault agent sidecar or manual setup, NOT stored in Raft).
+- pact-journal nodes generate an ephemeral intermediate CA key at startup (in memory only,
+  NOT stored in Raft or on disk).
+- pact-journal Raft state gains a revocation registry for revoked cert serials.
 - pact-cli gains `pact node` subcommands: `enroll`, `decommission`, `assign`, `unassign`,
   `move`, `list`, `inspect`.
 - pact-journal Raft state gains `NodeEnrollment` records (no key material).
 - New invariants E1-E10 for enrollment, cert lifecycle, and domain membership.
-- Vault PKI configuration becomes part of pact deployment documentation.
 - Node heartbeat detected via subscription stream liveness (default timeout: 5 minutes).
 
 ## Amendment (2026-03-17): SPIRE as Primary mTLS Provider
@@ -404,7 +403,7 @@ an independent Raft command. On partial failure:
 
 HPE Cray infrastructure uses SPIRE (SPIFFE Runtime Environment) for mTLS workload
 attestation. `spire-agent` runs on compute nodes. The original ADR-008 design assumed
-pact self-manages all mTLS certificates via Vault intermediate CA. This creates
+pact self-manages all mTLS certificates via an ephemeral intermediate CA. This creates
 unnecessary duplication with the existing SPIRE infrastructure.
 
 Additionally, lattice-node-agent also needs mTLS (to lattice-quorum). Both systems
@@ -413,7 +412,7 @@ provides this.
 
 ### Amendment decision
 
-**SPIRE is the primary mTLS provider. ADR-008's Vault-based self-signed model is the
+**SPIRE is the primary mTLS provider. ADR-008's ephemeral CA self-signed model is the
 fallback when SPIRE is not deployed.**
 
 The identity acquisition is abstracted via `hpc-identity` crate (ADR-015) with an
@@ -430,11 +429,11 @@ The identity acquisition is abstracted via `hpc-identity` crate (ADR-015) with a
 
 | Component | Original ADR-008 | After amendment |
 |-----------|-----------------|-----------------|
-| Primary cert source | Vault intermediate CA via journal | SPIRE SVID |
-| Fallback cert source | N/A | Vault intermediate CA via journal (ADR-008 model) |
+| Primary cert source | Ephemeral CA via journal | SPIRE SVID |
+| Fallback cert source | N/A | Ephemeral CA via journal (ADR-008 model) |
 | Bootstrap | Hardware identity + CSR | Same (unchanged) |
 | Cert rotation | Agent-driven CSR renewal + dual-channel | SPIRE-managed rotation + dual-channel |
-| Vault dependency | Required for all deployments | Required only when SPIRE not deployed |
+| External CA dependency | None (ephemeral CA) | None (SPIRE manages its own CA) |
 | Lattice mTLS | Not addressed | Same IdentityCascade via hpc-identity |
 
 ### What survives unchanged
@@ -450,7 +449,7 @@ The identity acquisition is abstracted via `hpc-identity` crate (ADR-015) with a
 
 ### What is demoted to fallback
 
-- **Vault intermediate CA on journal nodes** — only needed when SPIRE not deployed
+- **Ephemeral CA on journal nodes** — only needed when SPIRE not deployed
 - **Per-agent CSR signing by journal** — only needed when SPIRE not deployed
 - **Journal-side cert lifecycle management** — SPIRE manages this when available
 
@@ -485,10 +484,8 @@ lattice-node-agent uses the same `IdentityCascade` from hpc-identity:
 - If TPM attestation becomes available across the fleet, hardware identity verification
   can be strengthened from MAC+BMC to cryptographic attestation, closing the spoofing
   window entirely.
-- If the journal's intermediate CA key management proves operationally burdensome, Vault
-  Agent sidecar can automate key rotation and distribution to journal nodes.
-- If Vault becomes unacceptable as a dependency, the journal could manage its own CA
-  entirely (generate root key, self-sign) — but this loses Vault's audit, CRL, and
-  federation benefits.
+- If the ephemeral CA model proves insufficient for cross-site trust, an external CA
+  (Vault, step-ca, etc.) can be introduced as the CA key source without changing the
+  enrollment or CSR signing model.
 - If SPIRE is adopted universally across all deployments, the SelfSignedProvider and
-  Vault CA model can be removed entirely, simplifying the architecture.
+  ephemeral CA model can be removed entirely, simplifying the architecture.

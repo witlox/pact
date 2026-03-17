@@ -427,27 +427,27 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
-## F18: Vault unreachable for journal CA key rotation
+## F18: CA key rotation on journal restart
 
-**Trigger:** Journal's intermediate CA cert is approaching expiry and Vault is unavailable to renew it.
+**Trigger:** Journal restarts and regenerates its ephemeral CA (or loads from disk).
 
 **Impact:**
-- Journal can still sign CSRs with current CA key until it expires
-- If CA cert expires: journal cannot sign new CSRs, new boot enrollments and cert renewals fail
-- Existing mTLS connections continue (already established)
+- Previous CA is no longer valid for signing
+- Agents with certs signed by previous CA must re-enroll to get certs from new CA
+- Existing mTLS connections using old certs will fail on next reconnect
 
 **Degradation:**
-- Journal logs warning: "CA cert expiring, Vault unreachable"
-- Boot enrollments and renewals fail with "CA_CERT_EXPIRED" until Vault returns
-- Agents with valid certs continue operating normally
+- Agents detect mTLS failure and trigger re-enrollment automatically
+- Agents with valid SPIRE SVIDs are unaffected (SPIRE is primary identity provider)
+- Brief enrollment storm as agents re-enroll with new CA
 
 **Recovery:**
-- Vault restored → journal obtains renewed CA cert + key
-- Pending enrollments can retry immediately
+- Agents re-enroll automatically: generate new keypair + CSR, journal signs with new CA
+- SPIRE-managed agents unaffected — SPIRE identity continues working
 
 **Detection:**
-- Alert: `pact_ca_cert_days_remaining < 7`
-- Journal health endpoint reports CA cert status
+- Journal logs: "CA regenerated, agents will re-enroll"
+- Spike in enrollment requests after journal restart
 
 ---
 
@@ -941,7 +941,7 @@ The following must NEVER happen, regardless of failure scenario:
 | F15: IdP unreachable | High | Yes (when IdP returns) | No (break-glass for admins) |
 | F16: Cache deleted/corrupted | Low | Yes (re-login) | No |
 | F17: Stale discovery doc | Low | Yes (clear + refetch) | No |
-| F18: Vault unreachable (CA rotation) | Medium | Yes (current CA key continues) | If CA cert expires |
+| F18: CA key rotation on journal restart | Medium | Yes (agents re-enroll) | No (SPIRE-managed agents unaffected) |
 | F19: Journal unreachable (renewal) | High | Partial (1-day buffer) | If prolonged |
 | F20: Hardware identity mismatch | Medium | No | Yes (re-enroll or fix boot) |
 | F21: Supervised service crash | Medium | Yes (supervision loop) | If persistent |

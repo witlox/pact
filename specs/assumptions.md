@@ -9,8 +9,8 @@ Assumptions underlying pact's design. Each is classified as **Validated** (confi
 ### A-I1: Diskless compute nodes [Validated]
 Compute nodes boot from SquashFS images provisioned by OpenCHAMI. No persistent local storage. All persistent state lives in the journal.
 
-### A-I2: mTLS certificates managed by pact via CSR + journal intermediate CA [Accepted — supersedes original A-I2]
-Certificate lifecycle is pact's responsibility (ADR-008). Vault issues an intermediate CA cert to journal nodes. Agents generate their own keypairs at boot and submit CSRs to the journal, which signs them locally (~1ms, CPU only). No private key material is stored in Raft or transmitted over the wire. Vault is never on the boot path or renewal path for individual agent certs — only for journal CA management. Certificate rotation uses dual-channel swap (3-day default lifetime, renewal at 2/3). OpenCHAMI/Manta is not involved in certificate provisioning.
+### A-I2: mTLS certificates managed by pact via CSR + journal CA [Accepted — supersedes original A-I2]
+Certificate lifecycle is pact's responsibility (ADR-008). Journal generates an ephemeral CA at startup (or loads from disk). Agents generate their own keypairs at boot and submit CSRs to the journal, which signs them locally. When SPIRE is deployed, SPIRE is the primary identity provider and journal CA signing is only used as fallback.
 
 ### A-I3: 3-5 journal nodes available [Accepted]
 Raft quorum requires 3 (tolerates 1 failure) or 5 (tolerates 2 failures) nodes. These are either dedicated or co-located with lattice management nodes.
@@ -302,30 +302,19 @@ Assumptions that, if wrong, would invalidate architectural decisions. Ordered by
 | NEW | dbus-daemon actually needed for DCGM? | If not needed, one fewer service | Test nv-hostengine standalone mode |
 | NEW | rpcbind needed for NFSv4? | If NFSv4 only, rpcbind can be dropped | Check VAST NFS version in use |
 | NEW | SPIRE Workload API socket path on HPE Cray? | Needed for N10 integration | Check /run/spire/agent.sock or equivalent |
-| NEW | ADR-008 Vault-based cert model vs SPIRE | See A-mTLS1 below | Design decision needed |
+| NEW | SPIRE Workload API socket path on HPE Cray? | Needed for N10 integration | Check /run/spire/agent.sock or equivalent |
 
 ---
 
-## mTLS Architecture (SPIRE vs ADR-008 — needs resolution)
+## mTLS Architecture (RESOLVED)
 
-### A-mTLS1: SPIRE is the primary mTLS provider [Accepted — invalidates parts of ADR-008]
+### A-mTLS1: SPIRE is the primary mTLS provider, journal self-signed fallback [Resolved]
 
-The current ADR-008 design assumes pact self-manages mTLS certificates:
-- Journal holds Vault intermediate CA
-- Agents generate keypairs, submit CSRs, journal signs locally
-- Dual-channel rotation for cert renewal
-
-The supervisor redesign established that SPIRE is pre-existing in the infrastructure (A-I7) and pact should integrate with it (N10). This means:
-
-**What changes:**
-- **Primary path**: pact-agent gets SVIDs from SPIRE (workload attestation). No Vault, no CSR signing, no intermediate CA for per-agent certs. SPIRE handles rotation.
-- **Fallback path**: ADR-008's journal-signed cert model remains as fallback when SPIRE is not deployed (PB5: no hard SPIRE dependency).
-- **Bootstrap**: OpenCHAMI provisioned identity (bootstrap cert in SquashFS) used for initial journal auth before SPIRE is reachable. This part of ADR-008 is unchanged.
-
-**What is invalidated in ADR-008:**
-- Vault intermediate CA on journal nodes — not needed when SPIRE is primary
-- Per-agent CSR signing by journal — not needed when SPIRE issues SVIDs
-- Journal-side cert lifecycle management — SPIRE manages this
+**Resolution:**
+- **Primary path**: pact-agent gets SVIDs from SPIRE (workload attestation). SPIRE handles rotation.
+- **Fallback path**: Journal generates an ephemeral CA at startup (or loads from disk). Agents generate keypairs, submit CSRs, journal signs locally. No external dependency (no Vault).
+- **Bootstrap**: OpenCHAMI provisioned identity (bootstrap cert in SquashFS) used for initial journal auth before SPIRE is reachable.
+- **Revocation**: Revoked cert serials stored in Raft state (revocation registry). No external CRL service.
 
 **What survives in ADR-008:**
 - Bootstrap identity concept (first auth before SPIRE)
@@ -339,9 +328,7 @@ The supervisor redesign established that SPIRE is pre-existing in the infrastruc
 - If SPIRE is NOT deployed, lattice needs its own cert management
 - This is a shared concern → belongs in hpc-core
 
-**Proposed resolution: hpc-identity crate in hpc-core**
-
-A new `hpc-identity` crate (or extend `hpc-auth`) defining:
+**Resolved via: hpc-identity crate in hpc-core**
 
 | Trait | Purpose |
 |-------|---------|
@@ -353,5 +340,3 @@ Both pact and lattice implement `IdentityProvider`:
 - When SPIRE available: use `SpireProvider`
 - When no SPIRE: pact uses `SelfSignedProvider` (journal CA), lattice uses its own equivalent
 - On first boot: both use `StaticProvider` (bootstrap cert from OpenCHAMI)
-
-**Status: needs ADR update.** ADR-008 should be amended or superseded with an ADR that covers the SPIRE-primary model. The enrollment registry and enrollment state machine remain valid regardless of cert source.

@@ -333,18 +333,6 @@ Integration points between bounded contexts and external systems.
 **Failure mode:** F19 (journal unreachable) — active channel continues, agent retries
 **Invariants:** E5 (cert lifetime), E6 (dual-channel rotation)
 
-### I17: Journal → Vault (CA Management + CRL) — ADR-008
-
-**Direction:** Journal obtains intermediate CA key from Vault; publishes revocations to CRL.
-**Protocol:** REST (Vault PKI secrets engine API)
-**Data flow:**
-- CA rotation: Vault issues intermediate CA cert + signing key to journal nodes (periodic)
-- Decommission: journal publishes revoked cert serial to Vault CRL
-- CRL reload: journal nodes periodically fetch updated CRL to reject revoked client certs
-**Failure mode:** F18 (Vault unreachable for CA rotation) — current CA key continues
-**Invariants:** E9 (revocation)
-**Note:** Vault is NOT contacted for per-node cert operations — all signing is local.
-
 ### I19: Journal heartbeat detection via subscription stream — ADR-008
 
 **Direction:** Journal detects node liveness from config subscription stream state.
@@ -390,7 +378,6 @@ Integration points between bounded contexts and external systems.
 | Prometheus | Journal | HTTP pull | Scrape | Alert on failure |
 | Agent | Journal (enrollment) | gRPC unary | Request (server-TLS) | Retry periodically (F20) |
 | Agent | Journal (cert renewal) | gRPC unary | Request (mTLS) | Active channel continues (F19) |
-| Journal | Vault | REST | Request | CA key continues; retry CRL (F18) |
 | Journal | Agent (heartbeat) | gRPC stream | Connection state | Active → Inactive on timeout |
 | CLI | Journal (node mgmt) | gRPC unary | Request | Block until available (F1) |
 | Supervision | Isolation | Internal callback | Sync/callback | Service start fails (F22) |

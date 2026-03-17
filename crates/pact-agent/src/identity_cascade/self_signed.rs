@@ -15,7 +15,7 @@ use crate::enrollment::EnrollmentResult;
 ///
 /// Uses the enrollment module to generate keypairs and submit CSRs
 /// to the journal CA. The journal signs locally with its intermediate
-/// CA key (no Vault traffic).
+/// CA key (local signing, no external dependency).
 pub struct SelfSignedProvider {
     /// Journal endpoint for CSR signing.
     journal_endpoint: String,

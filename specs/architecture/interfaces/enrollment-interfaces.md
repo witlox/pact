@@ -115,10 +115,10 @@ message NodeRegistrationResult {
 ### Contracts
 
 - `Enroll`: Server-TLS-only (no client cert). MUST reject if no matching enrollment record (E1). MUST reject if state is Active (`ALREADY_ACTIVE`) — prevents concurrent enrollment race. MUST reject if state is Revoked (E7). MUST sign CSR with intermediate CA key. MUST return vCluster assignment in response. MUST set state to Active via Raft write. Rate-limited (default 100/minute). All attempts audit-logged.
-- `RenewCert`: MUST require mTLS. MUST validate caller's mTLS CN matches `node_id`. MUST validate `current_cert_serial` matches stored serial. MUST sign new CSR with intermediate CA. Local CPU operation — no Vault call.
+- `RenewCert`: MUST require mTLS. MUST validate caller's mTLS CN matches `node_id`. MUST validate `current_cert_serial` matches stored serial. MUST sign new CSR with intermediate CA. Local CPU operation — no external calls.
 - `RegisterNode`: MUST require `pact-platform-admin` role (E10). MUST reject duplicate node_id or duplicate hardware identity within the domain (E2).
 - `BatchRegisterNodes`: Same RBAC as RegisterNode. NOT atomic — each node is independent. Returns per-node success/failure.
-- `DecommissionNode`: MUST require `pact-platform-admin` role (E10). If active sessions exist and `force=false`, return warning with session count. On proceed: set state to Revoked, publish cert serial to Vault CRL (E9), terminate agent mTLS connection.
+- `DecommissionNode`: MUST require `pact-platform-admin` role (E10). If active sessions exist and `force=false`, return warning with session count. On proceed: set state to Revoked, add cert serial to Raft revocation registry (E9), terminate agent mTLS connection.
 - `AssignNode`: MUST require `pact-platform-admin` or `pact-ops-{target_vcluster}` role (E10). Node MUST be enrolled (any state except Revoked).
 - `UnassignNode`: Same RBAC as AssignNode. Sets vCluster to None.
 - `MoveNode`: Same RBAC as AssignNode for both source and target vCluster. Atomic via single Raft command.
@@ -129,8 +129,8 @@ message NodeRegistrationResult {
 
 ## CaKeyManager (internal — pact-journal)
 
-Interface for the journal's intermediate CA key. Each journal node holds a signing key
-from Vault. NOT stored in Raft — provisioned via Vault agent sidecar or manual setup.
+Interface for the journal's intermediate CA key. Each journal node generates an ephemeral
+intermediate CA key at startup. NOT stored in Raft — exists in memory only.
 
 ```rust
 /// Source: ADR-008
@@ -158,32 +158,37 @@ pub trait CaKeyManager: Send + Sync {
 ### Contracts
 
 - `sign_csr`: cert CN = `pact-service-agent/{node_id}@{domain_id}`. TTL from domain config (default 3 days). Signs locally — MUST NOT make network calls.
-- CA key is loaded at journal startup from a configured path (e.g., `/etc/pact/ca-key.pem`).
-- CA key rotation is managed by Vault agent sidecar or admin — outside pact's control. Journal reloads key on SIGHUP or periodic check.
+- CA key is generated ephemeral at journal startup (in memory only, never persisted to disk).
+- CA key rotation happens automatically on journal restart. The CA certificate is distributed to agents via the enrollment response chain.
 
 ---
 
-## VaultCrlClient (internal — pact-journal)
+## RevocationRegistry (internal — pact-journal)
 
-Interface for Vault CRL operations. Used only on node decommission.
+Interface for certificate revocation. Used only on node decommission. Revoked cert
+serials are stored in the Raft revocation registry and replicated to all journal nodes.
 
 ```rust
 /// Source: ADR-008, E9
 /// Used only for certificate revocation on decommission.
-pub trait VaultCrlClient: Send + Sync {
-    /// Publish a revoked cert serial to Vault CRL.
+/// Revocation state is stored in Raft — no external dependency.
+pub trait RevocationRegistry: Send + Sync {
+    /// Add a revoked cert serial to the Raft revocation registry.
     /// Called on node decommission (E9).
-    async fn revoke_cert(&self, serial: &str) -> Result<(), VaultError>;
+    async fn revoke_cert(&self, serial: &str) -> Result<(), RevocationError>;
 
-    /// Health check — is Vault reachable?
-    async fn health(&self) -> Result<(), VaultError>;
+    /// Check if a cert serial is revoked.
+    fn is_revoked(&self, serial: &str) -> bool;
+
+    /// List all revoked cert serials.
+    fn revoked_serials(&self) -> Vec<String>;
 }
 ```
 
 ### Contracts
 
-- `revoke_cert`: on Vault unreachable, return `VaultError::Unreachable`. The cert serial is stored locally for retry. The node is already Revoked in Raft state — the CRL update is best-effort.
-- Journal nodes periodically reload the CRL from Vault to reject revoked client certs.
+- `revoke_cert`: writes revocation entry to Raft state. Replicated to all journal nodes via consensus. The node is already Revoked in enrollment state — the revocation registry entry ensures mTLS connections using the revoked cert are rejected.
+- Journal nodes check incoming mTLS client cert serials against the revocation registry on every connection.
 
 ---
 

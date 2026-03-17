@@ -37,6 +37,10 @@ pub struct JournalState {
     pub enrollments: HashMap<NodeId, NodeEnrollment>,
     /// Hardware identity index: canonical hw key → node ID (for duplicate detection).
     pub hw_index: HashMap<String, NodeId>,
+    /// Revoked certificate serials (Raft-replicated revocation registry).
+    /// Populated on node decommission. Checked during mTLS handshake.
+    #[serde(default)]
+    pub revoked_serials: std::collections::HashSet<String>,
 }
 
 /// A conflict between a local entry and journal state on the same config key.

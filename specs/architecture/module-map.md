@@ -32,7 +32,6 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - EnrollmentService gRPC handlers (enrollment.proto) — node enrollment, CSR signing (ADR-008)
 - Enrollment registry (NodeEnrollment records in Raft state)
 - CaKeyManager — intermediate CA key, local CSR signing (ADR-008)
-- VaultCrlClient — cert revocation on decommission (ADR-008)
 - Overlay pre-computation and caching
 - Telemetry: Prometheus metrics + health endpoint (axum on port 9091)
 - Loki event forwarding
@@ -40,7 +39,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Submodules:**
 - `raft/` — state machine, types, Raft type config
 - `service/` — ConfigService, PolicyService, BootConfigService handlers
-- `enrollment/` — EnrollmentService handlers, CaKeyManager, VaultCrlClient (ADR-008)
+- `enrollment/` — EnrollmentService handlers, CaKeyManager (ADR-008)
 - `overlay/` — overlay builder, cache, staleness detection
 - `telemetry/` — metrics, health, Loki forwarding
 
@@ -247,7 +246,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - Provider configs (SpireConfig, SelfSignedConfig, BootstrapConfig)
 - Error types (IdentityError)
 
-**Does NOT own:** Provider implementations. No SPIRE client code. No Vault client code.
+**Does NOT own:** Provider implementations. No SPIRE client code. No CA management code.
 
 **Consumed by:** pact-agent (SpireProvider + SelfSignedProvider + StaticProvider), lattice-node-agent (same providers)
 

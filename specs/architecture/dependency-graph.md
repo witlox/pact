@@ -30,7 +30,6 @@ pact-agent ──gRPC──▶ pact-journal   (ConfigService, BootConfigService,
 pact-cli   ──gRPC──▶ pact-journal   (ConfigService, BootConfigService, PolicyService)
 pact-cli   ──gRPC──▶ pact-agent     (ShellService: exec + shell)
 pact-journal ──REST──▶ OPA sidecar  (localhost:8181, feature-gated, ADR-003)
-pact-journal ──REST──▶ Vault        (CA key rotation + CRL updates only, ADR-008)
 pact-journal ──HTTP──▶ Loki         (event forwarding, optional)
 pact-journal ──mTLS──▶ Sovra        (federation sync, feature-gated)
 pact-agent ──tmpfs──▶ lattice-node-agent (CapabilityReport manifest)
@@ -54,7 +53,6 @@ pact-cli   ──REST──▶ OpenCHAMI      (reboot/reimage delegation, stubbe
 | cli →(gRPC) journal | Config queries (I5): status, diff, log, apply, overlay |
 | cli →(gRPC) agent | Exec/shell (I6): remote command execution, interactive sessions |
 | journal →(REST) OPA | Policy evaluation delegation (I7), ADR-003 |
-| journal →(REST) Vault | Journal intermediate CA key rotation + CRL publication on decommission. NOT contacted for per-node certs — journal signs CSRs locally (ADR-008, E4/E9) |
 | agent →(gRPC) journal EnrollmentService | Boot enrollment (unauthenticated), cert renewal (mTLS) (ADR-008, E1) |
 | agent →(tmpfs) lattice | Capability delivery (E1), assumption A-Int4 |
 | agent → hpc-node | Cgroup, namespace, mount contracts (RI1-6, WI1-6, domain-model §2b/2f) |

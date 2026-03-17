@@ -30,7 +30,7 @@ cargo test -p pact-acceptance --test contracts
 | Invariant | `invariant_contracts/conflict_invariant_contract.rs` | CR1-CR6, ND1-ND3 enforcement (merge conflicts, grace period, promote, notifications, cross-vCluster, TTL bounds, homogeneity) | 14 |
 | Invariant | `invariant_contracts/shell_invariant_contract.rs` | S1-S6 enforcement (whitelist, admin bypass, rbash, audit, state-changing exec, no pre-classify) | 11 |
 | Invariant | `invariant_contracts/auth_invariant_contract.rs` | Auth1-Auth8, PAuth1-PAuth5 enforcement (token validation, cache corruption, concurrent refresh, logout, permissions, isolation, redaction, cascade, strict mode, emergency human-only, discovery, break-glass, two-person) | 15 |
-| Failure | `failure_contracts/enrollment_failure_contract.rs` | F18, F19, F20 degradation (Vault unreachable, cert renewal failure, hardware mismatch) | 6 |
+| Failure | `failure_contracts/enrollment_failure_contract.rs` | F18, F19, F20 degradation (CA key rotation, cert renewal failure, hardware mismatch) | 6 |
 | Failure | `failure_contracts/journal_failure_contract.rs` | F1, F7, F8, F9 degradation (quorum loss, OPA crash, leader failover, stale overlay) | 10 |
 | Failure | `failure_contracts/agent_failure_contract.rs` | F2, F3, F4, F5, F6 degradation (policy unreachable, partition, stale emergency, active consumers, crash recovery) | 13 |
 | Failure | `failure_contracts/auth_failure_contract.rs` | F15, F16, F17 degradation (IdP unreachable, cache corrupted, stale discovery) | 7 |
@@ -367,7 +367,7 @@ cargo test -p pact-acceptance --test contracts
 
 | Contract Source | Contract Description | Test File | Test Name | Status |
 |---|---|---|---|---|
-| failure-modes\.md § F18 | CA signing continues on Vault down | enrollment_failure_contract | `f18_ca_signing_continues_when_vault_unreachable` | :white_large_square: |
+| failure-modes\.md § F18 | CA signing continues during key rotation | enrollment_failure_contract | `f18_ca_signing_continues_during_key_rotation` | :white_large_square: |
 | failure-modes\.md § F18 | CA expiry detected | enrollment_failure_contract | `f18_ca_key_approaching_expiry_detected` | :white_large_square: |
 | failure-modes\.md § F19 | Active channel survives renewal failure | enrollment_failure_contract | `f19_active_channel_survives_renewal_failure` | :white_large_square: |
 | failure-modes\.md § F19 | Degraded only on actual expiry | enrollment_failure_contract | `f19_degraded_mode_only_on_actual_expiry` | :white_large_square: |

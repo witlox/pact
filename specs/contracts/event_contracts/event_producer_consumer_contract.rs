@@ -569,13 +569,13 @@ fn cert_signed_event_produced_on_enroll() {
 }
 
 /// Contract: event-catalog.md § Journal Events — CertRevoked
-/// Spec: ADR-008 — certificate revoked on decommission, added to Vault CRL
+/// Spec: ADR-008 — certificate revoked on decommission, added to Raft revocation registry
 /// If this test didn't exist: decommissioned nodes could retain valid certs.
 #[test]
 fn cert_revoked_event_produced_on_decommission() {
     let producer = stub_event_producer();
     let journal_consumer = stub_event_consumer("journal");
-    let vault_consumer = stub_event_consumer("vault-crl");
+    let revocation_registry = stub_event_consumer("revocation-registry");
 
     let revoke_event = producer.emit_cert_revoked(
         "compute-042",
@@ -591,8 +591,8 @@ fn cert_revoked_event_produced_on_decommission() {
     let journal_result = journal_consumer.apply(revoke_event.clone());
     assert!(journal_result.is_ok());
 
-    // Vault CRL updated
-    let crl_result = vault_consumer.apply(revoke_event);
-    assert!(crl_result.is_ok());
-    assert!(vault_consumer.is_serial_revoked("SERIAL-001"));
+    // Raft revocation registry updated
+    let registry_result = revocation_registry.apply(revoke_event);
+    assert!(registry_result.is_ok());
+    assert!(revocation_registry.is_serial_revoked("SERIAL-001"));
 }

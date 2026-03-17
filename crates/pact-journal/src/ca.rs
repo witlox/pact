@@ -1,55 +1,94 @@
-//! CA key manager — loads intermediate CA key from PEM, signs enrollment
-//! certificates locally. No Vault round-trip during enrollment.
+//! CA key manager — generates or loads CA key, signs enrollment certificates locally.
 //!
-//! Uses `rcgen` to generate and sign node certificates using the
-//! journal's intermediate CA key pair.
+//! Two modes:
+//! - **Generate** (default): creates an ephemeral self-signed CA at journal startup.
+//!   The CA key lives in memory. CA cert is distributed to agents via enrollment response.
+//! - **Load**: reads a pre-provisioned CA key from PEM files on disk (legacy, for
+//!   deployments that manage CA keys externally).
+//!
+//! No external CA dependency (no Vault). When SPIRE is deployed, this entire
+//! module is only used as a fallback for non-SPIRE deployments.
 
 use rcgen::{BasicConstraints, CertificateParams, CertifiedKey, DnType, IsCa, KeyPair};
 use tracing::{debug, info};
 
-/// Manages the intermediate CA key for signing enrollment certificates.
+/// Manages the CA key for signing enrollment certificates.
 pub struct CaKeyManager {
-    /// The intermediate CA certificate + key pair.
+    /// The CA certificate + key pair (self-signed or loaded).
     ca_certified_key: CertifiedKey,
     /// Certificate lifetime in seconds.
     cert_lifetime_seconds: u32,
 }
 
 impl CaKeyManager {
-    /// Load the intermediate CA certificate and key from PEM files.
+    /// Generate an ephemeral self-signed CA.
     ///
-    /// For production use, the CA key is delegated by Vault and loaded from disk.
-    /// The CA cert is reconstructed as a self-signed cert from the key pair
-    /// (rcgen generates the signing identity from the key material).
+    /// The CA key exists only in memory. The CA cert is included in
+    /// enrollment responses so agents can validate the trust chain.
+    /// On journal restart, a new CA is generated (agents re-enroll
+    /// on reconnect, so this is safe).
+    ///
+    /// For persistent CA across journal restarts, use `load()` with
+    /// PEM files on disk, or deploy SPIRE as the primary identity provider.
+    pub fn generate(domain_id: &str, cert_lifetime_seconds: u32) -> anyhow::Result<Self> {
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, format!("pact-ca-{domain_id}"));
+
+        let ca_key = KeyPair::generate()
+            .map_err(|e| anyhow::anyhow!("CA key generation failed: {e}"))?;
+        let ca_cert = ca_params
+            .self_signed(&ca_key)
+            .map_err(|e| anyhow::anyhow!("CA self-signing failed: {e}"))?;
+
+        info!(domain_id, "generated ephemeral CA for enrollment signing");
+
+        Ok(Self {
+            ca_certified_key: CertifiedKey { cert: ca_cert, key_pair: ca_key },
+            cert_lifetime_seconds,
+        })
+    }
+
+    /// Load CA certificate and key from PEM files on disk.
+    ///
+    /// Used when CA keys are managed externally (e.g., provisioned by
+    /// an operator or automation tool). Not required when using `generate()`.
     pub fn load(
         ca_cert_path: &std::path::Path,
         ca_key_path: &std::path::Path,
         cert_lifetime_seconds: u32,
     ) -> anyhow::Result<Self> {
-        // Read key file
         let ca_key_pem = std::fs::read_to_string(ca_key_path)
             .map_err(|e| anyhow::anyhow!("cannot read CA key {}: {e}", ca_key_path.display()))?;
-        // Verify cert file exists
         let _ca_cert_pem = std::fs::read_to_string(ca_cert_path)
             .map_err(|e| anyhow::anyhow!("cannot read CA cert {}: {e}", ca_cert_path.display()))?;
 
         let ca_key_pair =
             KeyPair::from_pem(&ca_key_pem).map_err(|e| anyhow::anyhow!("invalid CA key: {e}"))?;
 
-        // Reconstruct CA cert from key pair (self-signed CA identity for signing)
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params.distinguished_name.push(DnType::CommonName, "pact-intermediate-ca");
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "pact-ca");
         let ca_cert = ca_params
             .self_signed(&ca_key_pair)
             .map_err(|e| anyhow::anyhow!("failed to reconstruct CA cert: {e}"))?;
 
-        info!("Loaded intermediate CA for enrollment signing");
+        info!("loaded CA from disk for enrollment signing");
 
         Ok(Self {
             ca_certified_key: CertifiedKey { cert: ca_cert, key_pair: ca_key_pair },
             cert_lifetime_seconds,
         })
+    }
+
+    /// Get the CA certificate PEM (for distributing to agents in enrollment response).
+    #[must_use]
+    pub fn ca_cert_pem(&self) -> String {
+        self.ca_certified_key.cert.pem()
     }
 
     /// Create a self-signed test CA for unit tests.

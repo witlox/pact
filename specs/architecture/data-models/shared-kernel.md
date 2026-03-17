@@ -54,7 +54,7 @@ pub enum EntryType {
     NodeAssigned,     // Node assigned to vCluster (ADR-008)
     NodeUnassigned,   // Node removed from vCluster (ADR-008)
     CertSigned,       // CSR signed by journal intermediate CA (ADR-008)
-    CertRevoked,      // Certificate revoked via Vault CRL (ADR-008)
+    CertRevoked,      // Certificate revoked via Raft revocation registry (ADR-008)
 }
 // Proto fix needed: add ENTRY_TYPE_PENDING_APPROVAL to config.proto
 
@@ -292,7 +292,7 @@ pub enum EnrollmentState {
     Registered,  // Enrolled by admin, cert pre-signed, awaiting first boot
     Active,      // Node connected, cert served, mTLS established
     Inactive,    // Node disconnected (heartbeat timeout), cert may still be valid
-    Revoked,     // Admin decommissioned, cert revoked via Vault CRL
+    Revoked,     // Admin decommissioned, cert revoked via Raft revocation registry
 }
 
 pub struct HardwareIdentity {

@@ -20,7 +20,7 @@ fn given_pact_domain(world: &mut PactWorld, domain: String) {
     // We'll track domain in a simple way: use the journal as-is
 }
 
-#[given("journal nodes hold an intermediate CA signing key from Vault")]
+#[given("journal nodes hold a CA signing key for enrollment")]
 fn given_ca_key(_world: &mut PactWorld) {
     // CA key is simulated — BDD tests don't do real signing
 }
@@ -653,8 +653,8 @@ fn then_all_csrs_signed(world: &mut PactWorld, count: u32) {
     assert!(active >= count as usize);
 }
 
-#[then("no requests should be made to Vault during enrollment")]
-fn then_no_vault_requests(_world: &mut PactWorld) {}
+#[then("all signing should be local to the journal (no external CA dependency)")]
+fn then_local_signing(_world: &mut PactWorld) {}
 
 #[then(regex = r"all (\d+) agents should establish mTLS connections")]
 fn then_all_mtls(_world: &mut PactWorld, _count: u32) {}
@@ -986,8 +986,8 @@ fn when_decommission(world: &mut PactWorld, node_id: String) {
     world.cli_exit_code = Some(0);
 }
 
-#[then("the certificate serial should be published to Vault CRL")]
-fn then_crl_published(_world: &mut PactWorld) {}
+#[then("the certificate serial should be added to the revocation registry")]
+fn then_revocation_registered(_world: &mut PactWorld) {}
 
 #[then("the agent's mTLS connection should be terminated")]
 fn then_mtls_terminated(_world: &mut PactWorld) {}

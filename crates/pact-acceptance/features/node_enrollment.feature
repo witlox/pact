@@ -15,7 +15,7 @@ Feature: Node enrollment, domain membership, and certificate lifecycle
 
   Background:
     Given a pact domain "site-alpha" with a running journal quorum
-    And journal nodes hold an intermediate CA signing key from Vault
+    And journal nodes hold a CA signing key for enrollment
     And the default certificate lifetime is 3 days
 
   # --- Node Enrollment (Admin) ---
@@ -165,7 +165,7 @@ Feature: Node enrollment, domain membership, and certificate lifecycle
     Given 1000 nodes are enrolled in state "Registered"
     When 1000 agents simultaneously call Enroll with CSRs
     Then all 1000 CSRs should be signed by the journal's intermediate CA
-    And no requests should be made to Vault during enrollment
+    And all signing should be local to the journal (no external CA dependency)
     And all 1000 agents should establish mTLS connections
 
   # --- Certificate Rotation ---
@@ -276,7 +276,7 @@ Feature: Node enrollment, domain membership, and certificate lifecycle
     And I am authenticated as "pact-platform-admin"
     When I run "pact node decommission compute-042"
     Then node "compute-042" should have enrollment state "Revoked"
-    And the certificate serial should be published to Vault CRL
+    And the certificate serial should be added to the revocation registry
     And the agent's mTLS connection should be terminated
 
   Scenario: Decommission warns on active sessions

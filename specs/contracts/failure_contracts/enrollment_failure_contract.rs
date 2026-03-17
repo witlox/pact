@@ -5,21 +5,20 @@
 //! Source: specs/failure-modes.md § F18-F20
 
 // ---------------------------------------------------------------------------
-// F18: Vault unreachable for journal CA key rotation
+// F18: CA key rotation on journal restart
 // ---------------------------------------------------------------------------
 
 /// Contract: failure-modes.md § F18
-/// Spec: current CA key continues signing when Vault is unreachable
-/// If this test didn't exist: CA key rotation failure could block all enrollments.
+/// Spec: CA signing works after journal restart with new ephemeral CA
+/// If this test didn't exist: CA key rotation could block all enrollments.
 #[test]
-fn f18_ca_signing_continues_when_vault_unreachable() {
+fn f18_ca_signing_continues_during_key_rotation() {
     let ca = stub_ca_key_manager_with_valid_key();
-    let vault = stub_vault_crl_client_unreachable();
 
-    // CA key is valid — signing should work regardless of Vault state
+    // CA key is valid — signing should work with ephemeral CA
     let csr = generate_test_csr();
     let result = ca.sign_csr(&csr, "compute-042", "site-alpha", Duration::days(3));
-    assert!(result.is_ok(), "signing must work with valid CA key even when Vault is unreachable");
+    assert!(result.is_ok(), "signing must work with valid ephemeral CA key");
 }
 
 /// Contract: failure-modes.md § F18
