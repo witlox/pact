@@ -84,8 +84,7 @@ impl EnrollmentManager {
             anyhow::anyhow!("cannot read CA cert {}: {e}", self.config.ca_cert.display())
         })?;
 
-        let tls_config =
-            ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_pem));
+        let tls_config = ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_pem));
 
         for endpoint in &self.config.journal_endpoints {
             let uri = if endpoint.starts_with("http") {
@@ -122,18 +121,12 @@ impl EnrollmentManager {
         info!(mac = %hw_identity.mac_address, "Enrolling agent with journal");
 
         let response = client
-            .enroll(EnrollRequest {
-                hardware_identity: Some(hw_identity),
-                csr: csr_der,
-            })
+            .enroll(EnrollRequest { hardware_identity: Some(hw_identity), csr: csr_der })
             .await?
             .into_inner();
 
-        let vcluster_id = if response.vcluster_id.is_empty() {
-            None
-        } else {
-            Some(response.vcluster_id)
-        };
+        let vcluster_id =
+            if response.vcluster_id.is_empty() { None } else { Some(response.vcluster_id) };
 
         info!(
             node_id = %response.node_id,

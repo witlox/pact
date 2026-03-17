@@ -95,8 +95,8 @@ impl DualChannelManager {
     /// Execute dual-channel renewal.
     async fn renew(&self) -> anyhow::Result<()> {
         // 1. Generate new keypair + CSR
-        let new_key = KeyPair::generate()
-            .map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
+        let new_key =
+            KeyPair::generate().map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
         let params = CertificateParams::default();
         let csr = params
             .serialize_request(&new_key)
@@ -120,9 +120,7 @@ impl DualChannelManager {
             csr: csr_der,
         });
         // Add auth header (the mTLS connection serves as auth, but we add the token too)
-        request
-            .metadata_mut()
-            .insert("authorization", "Bearer renewal-token".parse().unwrap());
+        request.metadata_mut().insert("authorization", "Bearer renewal-token".parse().unwrap());
 
         let response = client.renew_cert(request).await?.into_inner();
 
@@ -133,8 +131,7 @@ impl DualChannelManager {
         let passive_tls = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(&self.ca_cert_pem))
             .identity(Identity::from_pem(&new_cert_pem, &new_key_pem));
-        let _passive_channel =
-            connect_first(&self.journal_endpoints, Some(&passive_tls)).await?;
+        let _passive_channel = connect_first(&self.journal_endpoints, Some(&passive_tls)).await?;
 
         // 5. Atomic swap: update stored credentials
         *self.current_cert_serial.write().await = response.cert_serial;

@@ -34,7 +34,7 @@ impl RateLimiter {
         let mut inner = self.inner.lock().unwrap();
         let now = Instant::now();
         let elapsed = now.duration_since(inner.last_refill).as_secs_f64();
-        inner.tokens = (inner.tokens + elapsed * inner.refill_rate).min(inner.max_tokens);
+        inner.tokens = elapsed.mul_add(inner.refill_rate, inner.tokens).min(inner.max_tokens);
         inner.last_refill = now;
 
         if inner.tokens >= 1.0 {

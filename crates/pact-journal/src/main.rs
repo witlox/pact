@@ -73,6 +73,7 @@ fn parse_peers(peers: &[String]) -> BTreeMap<u64, BasicNode> {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -153,28 +154,30 @@ async fn main() -> anyhow::Result<()> {
     // Optional: enrollment service (requires CA key configuration)
     let enrollment_ca_cert = std::env::var("PACT_CA_CERT").ok().map(PathBuf::from);
     let enrollment_ca_key = std::env::var("PACT_CA_KEY").ok().map(PathBuf::from);
-    let enrollment_domain = std::env::var("PACT_DOMAIN_ID").unwrap_or_else(|_| "default".to_string());
-    let enrollment_service = if let (Some(ca_cert), Some(ca_key)) = (enrollment_ca_cert, enrollment_ca_key) {
-        match CaKeyManager::load(&ca_cert, &ca_key, 259_200) {
-            Ok(ca) => {
-                let rate_limiter = Arc::new(RateLimiter::new(100));
-                Some(EnrollmentServiceImpl::new(
-                    raft.clone(),
-                    Arc::clone(&state),
-                    Arc::new(ca),
-                    rate_limiter,
-                    enrollment_domain,
-                ))
+    let enrollment_domain =
+        std::env::var("PACT_DOMAIN_ID").unwrap_or_else(|_| "default".to_string());
+    let enrollment_service =
+        if let (Some(ca_cert), Some(ca_key)) = (enrollment_ca_cert, enrollment_ca_key) {
+            match CaKeyManager::load(&ca_cert, &ca_key, 259_200) {
+                Ok(ca) => {
+                    let rate_limiter = Arc::new(RateLimiter::new(100));
+                    Some(EnrollmentServiceImpl::new(
+                        raft.clone(),
+                        Arc::clone(&state),
+                        Arc::new(ca),
+                        rate_limiter,
+                        enrollment_domain,
+                    ))
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to load CA key — enrollment service disabled");
+                    None
+                }
             }
-            Err(e) => {
-                error!(error = %e, "Failed to load CA key — enrollment service disabled");
-                None
-            }
-        }
-    } else {
-        info!("No CA cert/key configured — enrollment service disabled");
-        None
-    };
+        } else {
+            info!("No CA cert/key configured — enrollment service disabled");
+            None
+        };
 
     // Start gRPC transport server with application services
     let raft_server = RaftTransportServer::new(raft.clone());

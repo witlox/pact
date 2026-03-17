@@ -51,11 +51,7 @@ impl HeartbeatMonitor {
             .enrollments
             .values()
             .filter(|e| e.state == EnrollmentState::Active)
-            .filter(|e| {
-                e.last_seen
-                    .map(|ls| now.signed_duration_since(ls) > timeout)
-                    .unwrap_or(false)
-            })
+            .filter(|e| e.last_seen.is_some_and(|ls| now.signed_duration_since(ls) > timeout))
             .map(|e| e.node_id.clone())
             .collect();
         drop(state);

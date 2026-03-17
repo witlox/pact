@@ -10,12 +10,12 @@ pub mod helpers;
 
 mod auth;
 mod boot; // Boot sequence + boot config streaming
-mod enrollment; // Node enrollment, domain membership, certificate lifecycle
 mod capability; // CapabilityReporter + MockGpuBackend
 mod cli; // CLI formatting + exit codes + delegation
 mod commit_window; // CommitWindowManager
 mod drift; // DriftEvaluator
 mod emergency; // EmergencyManager
+mod enrollment; // Node enrollment, domain membership, certificate lifecycle
 mod federation;
 mod journal; // JournalState::apply_command()
 mod mcp; // MCP tools: all_tools() + dispatch_tool()

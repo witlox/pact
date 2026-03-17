@@ -13,8 +13,8 @@ use tracing::{info, warn};
 
 use pact_common::proto::enrollment::enrollment_service_server::EnrollmentService;
 use pact_common::proto::enrollment::{
-    AssignNodeRequest, AssignNodeResponse, BatchRegisterNodesRequest, BatchRegisterNodesResponse,
-    BatchNodeResult, DecommissionNodeRequest, DecommissionNodeResponse, EnrollRequest,
+    AssignNodeRequest, AssignNodeResponse, BatchNodeResult, BatchRegisterNodesRequest,
+    BatchRegisterNodesResponse, DecommissionNodeRequest, DecommissionNodeResponse, EnrollRequest,
     EnrollResponse, InspectNodeRequest, InspectNodeResponse, ListNodesRequest, ListNodesResponse,
     MoveNodeRequest, MoveNodeResponse, NodeSummary, RegisterNodeRequest, RegisterNodeResponse,
     RenewCertRequest, RenewCertResponse, UnassignNodeRequest, UnassignNodeResponse,
@@ -25,8 +25,8 @@ use pact_common::types::{
 };
 
 use crate::ca::CaKeyManager;
-use crate::rate_limiter::RateLimiter;
 use crate::raft::types::{JournalCommand, JournalResponse, JournalTypeConfig};
+use crate::rate_limiter::RateLimiter;
 use crate::JournalState;
 
 /// Enrollment gRPC service implementation.
@@ -69,7 +69,9 @@ impl EnrollmentServiceImpl {
         Self::require_auth(req)?;
         let role = Self::extract_role(req);
         if role != "pact-platform-admin" {
-            return Err(Status::permission_denied("PERMISSION_DENIED: requires pact-platform-admin role"));
+            return Err(Status::permission_denied(
+                "PERMISSION_DENIED: requires pact-platform-admin role",
+            ));
         }
         Ok(())
     }
@@ -85,7 +87,9 @@ impl EnrollmentServiceImpl {
         if role == expected_ops {
             return Ok(());
         }
-        Err(Status::permission_denied("PERMISSION_DENIED: requires platform-admin or ops role for this vCluster"))
+        Err(Status::permission_denied(
+            "PERMISSION_DENIED: requires platform-admin or ops role for this vCluster",
+        ))
     }
 
     /// Extract the principal name from auth metadata (simplified).
@@ -93,8 +97,7 @@ impl EnrollmentServiceImpl {
         req.metadata()
             .get("authorization")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.trim_start_matches("Bearer ").to_string())
-            .unwrap_or_else(|| "unknown".to_string())
+            .map_or_else(|| "unknown".to_string(), |s| s.trim_start_matches("Bearer ").to_string())
     }
 
     /// Extract role from auth metadata.
@@ -109,34 +112,26 @@ impl EnrollmentServiceImpl {
             }
         }
         // Fallback: try to extract from token (in production, decode JWT claims)
-        req.metadata()
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| {
+        req.metadata().get("authorization").and_then(|v| v.to_str().ok()).map_or_else(
+            || "unknown".to_string(),
+            |s| {
                 let token = s.trim_start_matches("Bearer ");
                 // Simple heuristic: if token contains a role pattern, use it
                 if token.contains("platform-admin") {
                     "pact-platform-admin".to_string()
-                } else if token.contains("ops-") {
-                    token.to_string()
-                } else if token.contains("viewer-") {
+                } else if token.contains("ops-") || token.contains("viewer-") {
                     token.to_string()
                 } else {
                     "unknown".to_string()
                 }
-            })
-            .unwrap_or_else(|| "unknown".to_string())
+            },
+        )
     }
 }
 
 impl EnrollmentServiceImpl {
     /// Record an enrollment audit event to the Raft log.
-    async fn audit_enrollment(
-        &self,
-        op_type: AdminOperationType,
-        node_id: &str,
-        detail: &str,
-    ) {
+    async fn audit_enrollment(&self, op_type: AdminOperationType, node_id: &str, detail: &str) {
         let op = AdminOperation {
             operation_id: uuid::Uuid::new_v4().to_string(),
             timestamp: chrono::Utc::now(),
@@ -184,24 +179,23 @@ impl EnrollmentService for EnrollmentServiceImpl {
         // Look up enrollment by hardware identity
         let state = self.state.read().await;
         let hw_key = crate::raft::state::hw_canonical_key(&hw_domain);
-        let node_id = match state.hw_index.get(&hw_key) {
-            Some(id) => id.clone(),
-            None => {
-                drop(state);
-                warn!(mac = %hw.mac_address, "Enrollment attempt with unknown hardware identity");
-                self.audit_enrollment(
-                    AdminOperationType::NodeEnroll,
-                    &hw.mac_address,
-                    &format!("REJECTED: NODE_NOT_ENROLLED mac={}", hw.mac_address),
-                ).await;
-                return Err(Status::not_found("NODE_NOT_ENROLLED"));
-            }
+        let Some(node_id) = state.hw_index.get(&hw_key).cloned() else {
+            drop(state);
+            warn!(mac = %hw.mac_address, "Enrollment attempt with unknown hardware identity");
+            self.audit_enrollment(
+                AdminOperationType::NodeEnroll,
+                &hw.mac_address,
+                &format!("REJECTED: NODE_NOT_ENROLLED mac={}", hw.mac_address),
+            )
+            .await;
+            return Err(Status::not_found("NODE_NOT_ENROLLED"));
         };
 
         let enrollment = state.enrollments.get(&node_id).cloned();
         drop(state);
 
-        let enrollment = enrollment.ok_or_else(|| Status::internal("enrollment index inconsistency"))?;
+        let enrollment =
+            enrollment.ok_or_else(|| Status::internal("enrollment index inconsistency"))?;
 
         // Check state (pre-flight — authoritative check is in Raft apply)
         match enrollment.state {
@@ -210,7 +204,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
                     AdminOperationType::NodeEnroll,
                     &node_id,
                     "REJECTED: NODE_REVOKED",
-                ).await;
+                )
+                .await;
                 return Err(Status::permission_denied("NODE_REVOKED"));
             }
             EnrollmentState::Active => {
@@ -218,7 +213,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
                     AdminOperationType::NodeEnroll,
                     &node_id,
                     "REJECTED: ALREADY_ACTIVE",
-                ).await;
+                )
+                .await;
                 return Err(Status::already_exists("ALREADY_ACTIVE"));
             }
             EnrollmentState::Registered | EnrollmentState::Inactive => {} // OK to proceed
@@ -266,7 +262,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
             AdminOperationType::NodeEnroll,
             &node_id,
             &format!("SUCCESS: node activated, cert_serial={}", signed.cert_serial),
-        ).await;
+        )
+        .await;
         info!(node_id = %node_id, "Node activated via enrollment");
         Ok(Response::new(EnrollResponse {
             node_id,
@@ -340,19 +337,17 @@ impl EnrollmentService for EnrollmentServiceImpl {
         let mut failed = 0u32;
 
         for node_req in &req.nodes {
-            let hw = match node_req.hardware_identity.as_ref() {
-                Some(hw) => proto_hw_to_domain(hw),
-                None => {
-                    results.push(BatchNodeResult {
-                        node_id: node_req.node_id.clone(),
-                        success: false,
-                        enrollment_state: String::new(),
-                        error: "hardware_identity required".to_string(),
-                    });
-                    failed += 1;
-                    continue;
-                }
+            let Some(hw_proto) = node_req.hardware_identity.as_ref() else {
+                results.push(BatchNodeResult {
+                    node_id: node_req.node_id.clone(),
+                    success: false,
+                    enrollment_state: String::new(),
+                    error: "hardware_identity required".to_string(),
+                });
+                failed += 1;
+                continue;
             };
+            let hw = proto_hw_to_domain(hw_proto);
 
             let enrollment = NodeEnrollment {
                 node_id: node_req.node_id.clone(),
@@ -505,9 +500,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
         match resp.data {
-            JournalResponse::Ok => {
-                Ok(Response::new(UnassignNodeResponse { node_id: req.node_id }))
-            }
+            JournalResponse::Ok => Ok(Response::new(UnassignNodeResponse { node_id: req.node_id })),
             JournalResponse::ValidationError { reason } => Err(Status::failed_precondition(reason)),
             _ => Err(Status::internal("unexpected response")),
         }
@@ -631,10 +624,10 @@ impl EnrollmentService for EnrollmentServiceImpl {
                         return false;
                     }
                 }
-                if !req.vcluster_filter.is_empty() {
-                    if e.vcluster_id.as_deref() != Some(&req.vcluster_filter) {
-                        return false;
-                    }
+                if !req.vcluster_filter.is_empty()
+                    && e.vcluster_id.as_deref() != Some(&req.vcluster_filter)
+                {
+                    return false;
                 }
                 if req.unassigned_only && e.vcluster_id.is_some() {
                     return false;
@@ -645,10 +638,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
                 node_id: e.node_id.clone(),
                 enrollment_state: format!("{:?}", e.state),
                 vcluster_id: e.vcluster_id.clone().unwrap_or_default(),
-                last_seen: e
-                    .last_seen
-                    .map(|t| t.to_rfc3339())
-                    .unwrap_or_default(),
+                last_seen: e.last_seen.map(|t| t.to_rfc3339()).unwrap_or_default(),
                 mac_address: e.hardware_identity.mac_address.clone(),
             })
             .collect();
@@ -671,10 +661,14 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .ok_or_else(|| Status::not_found(format!("node {} not found", req.node_id)))?;
 
         // RBAC: non-admin viewers can only inspect nodes in their vCluster
-        if role != "pact-platform-admin" && (role.starts_with("pact-ops-") || role.starts_with("pact-viewer-")) {
+        if role != "pact-platform-admin"
+            && (role.starts_with("pact-ops-") || role.starts_with("pact-viewer-"))
+        {
             let allowed_vc = role.split('-').skip(2).collect::<Vec<_>>().join("-");
             if enrollment.vcluster_id.as_deref() != Some(&allowed_vc) {
-                return Err(Status::permission_denied("PERMISSION_DENIED: node not in your vCluster"));
+                return Err(Status::permission_denied(
+                    "PERMISSION_DENIED: node not in your vCluster",
+                ));
             }
         }
 
@@ -684,27 +678,16 @@ impl EnrollmentService for EnrollmentServiceImpl {
             enrollment_state: format!("{:?}", enrollment.state),
             hardware_identity: Some(pact_common::proto::enrollment::HardwareIdentity {
                 mac_address: enrollment.hardware_identity.mac_address.clone(),
-                bmc_serial: enrollment
-                    .hardware_identity
-                    .bmc_serial
-                    .clone()
-                    .unwrap_or_default(),
+                bmc_serial: enrollment.hardware_identity.bmc_serial.clone().unwrap_or_default(),
                 extra: enrollment.hardware_identity.extra.clone(),
             }),
             vcluster_id: enrollment.vcluster_id.clone().unwrap_or_default(),
             cert_serial: enrollment.cert_serial.clone().unwrap_or_default(),
-            cert_expires_at: enrollment
-                .cert_expires_at
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_default(),
-            last_seen: enrollment
-                .last_seen
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_default(),
+            cert_expires_at: enrollment.cert_expires_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            last_seen: enrollment.last_seen.map(|t| t.to_rfc3339()).unwrap_or_default(),
             enrolled_at: enrollment.enrolled_at.to_rfc3339(),
             enrolled_by: enrollment.enrolled_by.principal.clone(),
             active_sessions: enrollment.active_sessions,
         }))
     }
 }
-

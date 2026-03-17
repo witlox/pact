@@ -84,23 +84,18 @@ impl CaKeyManager {
     ) -> anyhow::Result<SignedCertResult> {
         // Generate a certificate for the node, signed by our CA
         let mut params = CertificateParams::default();
-        params.distinguished_name.push(
-            DnType::CommonName,
-            format!("pact-service-agent/{node_id}@{domain_id}"),
-        );
+        params
+            .distinguished_name
+            .push(DnType::CommonName, format!("pact-service-agent/{node_id}@{domain_id}"));
 
         // Generate serial number from UUID
         let serial_uuid = uuid::Uuid::new_v4();
 
         // Sign the cert with our CA
-        let node_key = KeyPair::generate()
-            .map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
+        let node_key =
+            KeyPair::generate().map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
         let signed = params
-            .signed_by(
-                &node_key,
-                &self.ca_certified_key.cert,
-                &self.ca_certified_key.key_pair,
-            )
+            .signed_by(&node_key, &self.ca_certified_key.cert, &self.ca_certified_key.key_pair)
             .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
 
         let cert_pem = signed.pem();
@@ -108,8 +103,8 @@ impl CaKeyManager {
         let serial_hex = serial_uuid.to_string();
 
         // Compute expiry from now + lifetime
-        let expires_at = chrono::Utc::now()
-            + chrono::Duration::seconds(i64::from(self.cert_lifetime_seconds));
+        let expires_at =
+            chrono::Utc::now() + chrono::Duration::seconds(i64::from(self.cert_lifetime_seconds));
 
         debug!(node_id, serial = %serial_hex, "Signed enrollment certificate");
 

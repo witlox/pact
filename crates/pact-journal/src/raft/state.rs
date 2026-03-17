@@ -154,6 +154,7 @@ const TTL_MIN_SECONDS: u32 = 900;
 const TTL_MAX_SECONDS: u32 = 864_000;
 
 impl StateMachineState<JournalTypeConfig> for JournalState {
+    #[allow(clippy::too_many_lines)]
     fn apply(&mut self, cmd: JournalCommand) -> JournalResponse {
         match cmd {
             JournalCommand::AppendEntry(mut entry) => {
@@ -326,17 +327,15 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                     },
                 }
             }
-            JournalCommand::RevokeNode { node_id } => {
-                match self.enrollments.get_mut(&node_id) {
-                    Some(enrollment) => {
-                        enrollment.state = EnrollmentState::Revoked;
-                        JournalResponse::Ok
-                    }
-                    None => JournalResponse::ValidationError {
-                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
-                    },
+            JournalCommand::RevokeNode { node_id } => match self.enrollments.get_mut(&node_id) {
+                Some(enrollment) => {
+                    enrollment.state = EnrollmentState::Revoked;
+                    JournalResponse::Ok
                 }
-            }
+                None => JournalResponse::ValidationError {
+                    reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                },
+            },
             JournalCommand::AssignNodeToVCluster { node_id, vcluster_id } => {
                 match self.enrollments.get_mut(&node_id) {
                     Some(enrollment) => {
@@ -350,18 +349,16 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                     },
                 }
             }
-            JournalCommand::UnassignNode { node_id } => {
-                match self.enrollments.get_mut(&node_id) {
-                    Some(enrollment) => {
-                        enrollment.vcluster_id = None;
-                        self.node_assignments.remove(&node_id);
-                        JournalResponse::Ok
-                    }
-                    None => JournalResponse::ValidationError {
-                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
-                    },
+            JournalCommand::UnassignNode { node_id } => match self.enrollments.get_mut(&node_id) {
+                Some(enrollment) => {
+                    enrollment.vcluster_id = None;
+                    self.node_assignments.remove(&node_id);
+                    JournalResponse::Ok
                 }
-            }
+                None => JournalResponse::ValidationError {
+                    reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                },
+            },
             JournalCommand::MoveNodeVCluster { node_id, from_vcluster_id: _, to_vcluster_id } => {
                 match self.enrollments.get_mut(&node_id) {
                     Some(enrollment) => {
@@ -377,10 +374,9 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
             JournalCommand::UpdateNodeLastSeen { node_id, timestamp } => {
                 match self.enrollments.get_mut(&node_id) {
                     Some(enrollment) => {
-                        enrollment.last_seen =
-                            chrono::DateTime::parse_from_rfc3339(&timestamp)
-                                .ok()
-                                .map(|dt| dt.with_timezone(&chrono::Utc));
+                        enrollment.last_seen = chrono::DateTime::parse_from_rfc3339(&timestamp)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&chrono::Utc));
                         JournalResponse::Ok
                     }
                     None => JournalResponse::ValidationError {

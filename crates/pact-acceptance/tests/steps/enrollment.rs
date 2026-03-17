@@ -53,7 +53,12 @@ fn given_authenticated_as(world: &mut PactWorld, role: String) {
 // Admin Enrollment (RegisterNode)
 // ---------------------------------------------------------------------------
 
-fn make_enrollment(node_id: &str, mac: &str, bmc_serial: Option<&str>, role: &str) -> NodeEnrollment {
+fn make_enrollment(
+    node_id: &str,
+    mac: &str,
+    bmc_serial: Option<&str>,
+    role: &str,
+) -> NodeEnrollment {
     NodeEnrollment {
         node_id: node_id.to_string(),
         domain_id: "site-alpha".to_string(),
@@ -78,7 +83,12 @@ fn make_enrollment(node_id: &str, mac: &str, bmc_serial: Option<&str>, role: &st
 }
 
 #[when(regex = r#"I run "pact node enroll (.+?) --mac ([a-f0-9:]+) --bmc-serial (.+)""#)]
-fn when_enroll_node_with_bmc(world: &mut PactWorld, node_id: String, mac: String, bmc_serial: String) {
+fn when_enroll_node_with_bmc(
+    world: &mut PactWorld,
+    node_id: String,
+    mac: String,
+    bmc_serial: String,
+) {
     when_enroll_node_inner(world, node_id, mac, Some(bmc_serial));
 }
 
@@ -87,12 +97,13 @@ fn when_enroll_node(world: &mut PactWorld, node_id: String, mac: String) {
     when_enroll_node_inner(world, node_id, mac, None);
 }
 
-fn when_enroll_node_inner(world: &mut PactWorld, node_id: String, mac: String, bmc_serial: Option<String>) {
-    let role = world
-        .current_identity
-        .as_ref()
-        .map(|i| i.role.clone())
-        .unwrap_or_default();
+fn when_enroll_node_inner(
+    world: &mut PactWorld,
+    node_id: String,
+    mac: String,
+    bmc_serial: Option<String>,
+) {
+    let role = world.current_identity.as_ref().map(|i| i.role.clone()).unwrap_or_default();
 
     // RBAC: only platform-admin can enroll
     if role != "pact-platform-admin" {
@@ -139,12 +150,8 @@ fn given_csv_with_nodes(world: &mut PactWorld, _filename: String, count: u32) {
     // Pre-register the batch in memory for the WHEN step
     for i in 0..count {
         let mac = format!("aa:bb:cc:dd:{:02x}:{:02x}", i / 256, i % 256);
-        let enrollment = make_enrollment(
-            &format!("batch-node-{i:03}"),
-            &mac,
-            None,
-            "pact-platform-admin",
-        );
+        let enrollment =
+            make_enrollment(&format!("batch-node-{i:03}"), &mac, None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -176,12 +183,8 @@ fn given_csv_partial_failure(world: &mut PactWorld) {
     // Enroll 3 nodes first (they'll conflict)
     for i in 0..3 {
         let mac = format!("ff:ff:ff:ff:ff:{:02x}", i);
-        let enrollment = make_enrollment(
-            &format!("existing-{i}"),
-            &mac,
-            None,
-            "pact-platform-admin",
-        );
+        let enrollment =
+            make_enrollment(&format!("existing-{i}"), &mac, None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     // Now try to register 10 nodes, 3 of which will have same MACs
@@ -191,12 +194,7 @@ fn given_csv_partial_failure(world: &mut PactWorld) {
         } else {
             format!("aa:bb:cc:dd:ee:{:02x}", i)
         };
-        let enrollment = make_enrollment(
-            &format!("batch-{i}"),
-            &mac,
-            None,
-            "pact-platform-admin",
-        );
+        let enrollment = make_enrollment(&format!("batch-{i}"), &mac, None, "pact-platform-admin");
         let resp = world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         match resp {
             JournalResponse::ValidationError { .. } => {
@@ -283,7 +281,10 @@ fn when_agent_calls_enroll(world: &mut PactWorld) {
     let mac = world.cli_output.clone().unwrap_or_default();
     // Find node by MAC (hw_key may include bmc serial suffix)
     let mac_prefix = format!("mac:{}", mac.to_lowercase());
-    let node_id_opt = world.journal.hw_index.iter()
+    let node_id_opt = world
+        .journal
+        .hw_index
+        .iter()
         .find(|(k, _)| k.starts_with(&mac_prefix))
         .map(|(_, v)| v.clone());
     if let Some(node_id) = node_id_opt {
@@ -339,7 +340,9 @@ fn then_cert_returned(_world: &mut PactWorld, _node_id: String) {
     // Verified via enrollment state
 }
 
-#[then("the agent should establish an mTLS connection using its own private key and the signed cert")]
+#[then(
+    "the agent should establish an mTLS connection using its own private key and the signed cert"
+)]
 fn then_mtls_established(_world: &mut PactWorld) {
     // Connection establishment tested in integration tests
 }
@@ -363,13 +366,12 @@ fn then_journal_rejects(world: &mut PactWorld, expected_error: String) {
     let has_error = world
         .last_error
         .as_ref()
-        .map(|e| format!("{e}").contains(&expected_error) || format!("{e:?}").contains(&expected_error))
+        .map(|e| {
+            format!("{e}").contains(&expected_error) || format!("{e:?}").contains(&expected_error)
+        })
         .unwrap_or(false);
-    let has_output = world
-        .cli_output
-        .as_ref()
-        .map(|o| o.contains(&expected_error))
-        .unwrap_or(false);
+    let has_output =
+        world.cli_output.as_ref().map(|o| o.contains(&expected_error)).unwrap_or(false);
     assert!(
         has_error || has_output || world.cli_exit_code == Some(1),
         "expected rejection with '{expected_error}', got error={:?}, output={:?}",
@@ -385,7 +387,8 @@ fn then_no_cert_signed(_world: &mut PactWorld) {}
 
 #[given(regex = r#"node "(.+)" was enrolled but has been decommissioned"#)]
 fn given_node_decommissioned(world: &mut PactWorld, node_id: String) {
-    let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+    let enrollment =
+        make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
     world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     world.journal.apply_command(JournalCommand::RevokeNode { node_id });
 }
@@ -393,7 +396,8 @@ fn given_node_decommissioned(world: &mut PactWorld, node_id: String) {
 #[given(regex = r#"node "(.+)" is enrolled and currently "(.+)""#)]
 fn given_node_in_state(world: &mut PactWorld, node_id: String, state: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     if state == "Active" {
@@ -417,7 +421,8 @@ fn then_existing_cert_unaffected(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is enrolled and was previously active"#)]
 fn given_previously_active(world: &mut PactWorld, node_id: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     world.journal.apply_command(JournalCommand::ActivateNode {
@@ -442,7 +447,8 @@ fn then_new_csr_signed(world: &mut PactWorld) {
 #[given(regex = r#"node "(.+)" is enrolled and assigned to vCluster "(.+)""#)]
 fn given_enrolled_assigned(world: &mut PactWorld, node_id: String, vcluster: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     // Activate the node so it can later be deactivated if needed
@@ -453,10 +459,9 @@ fn given_enrolled_assigned(world: &mut PactWorld, node_id: String, vcluster: Str
             cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
         });
     }
-    world.journal.apply_command(JournalCommand::AssignNodeToVCluster {
-        node_id,
-        vcluster_id: vcluster,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::AssignNodeToVCluster { node_id, vcluster_id: vcluster });
 }
 
 // "node is in state" step handled by capability.rs — enrollment deactivation in given_inactive_heartbeat
@@ -485,7 +490,8 @@ fn then_stream_boot_config(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is enrolled with no vCluster assignment"#)]
 fn given_enrolled_no_vc(world: &mut PactWorld, node_id: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -507,9 +513,8 @@ fn then_no_client_cert_required(_world: &mut PactWorld) {}
 #[when("more than 100 enrollment requests arrive within 1 minute")]
 fn when_rate_limit_exceeded(world: &mut PactWorld) {
     world.cli_exit_code = Some(1);
-    world.last_error = Some(pact_common::error::PactError::RateLimited(
-        "too many requests".to_string(),
-    ));
+    world.last_error =
+        Some(pact_common::error::PactError::RateLimited("too many requests".to_string()));
 }
 
 #[then(regex = r#"requests beyond the limit should be rejected with "(.+)""#)]
@@ -534,9 +539,8 @@ fn then_loki_forwarded(_world: &mut PactWorld) {}
 #[when("an unauthenticated client calls ConfigService.AppendEntry")]
 fn when_unauth_config(world: &mut PactWorld) {
     world.cli_exit_code = Some(1);
-    world.last_error = Some(pact_common::error::PactError::Unauthorized {
-        reason: "UNAUTHENTICATED".to_string(),
-    });
+    world.last_error =
+        Some(pact_common::error::PactError::Unauthorized { reason: "UNAUTHENTICATED".to_string() });
 }
 
 #[then(regex = r#"the request should be rejected with "(.+)""#)]
@@ -550,9 +554,8 @@ fn then_rejected_with(world: &mut PactWorld, expected: String) {
 #[when("an unauthenticated client calls EnrollmentService.RegisterNode")]
 fn when_unauth_enrollment(world: &mut PactWorld) {
     world.cli_exit_code = Some(1);
-    world.last_error = Some(pact_common::error::PactError::Unauthorized {
-        reason: "UNAUTHENTICATED".to_string(),
-    });
+    world.last_error =
+        Some(pact_common::error::PactError::Unauthorized { reason: "UNAUTHENTICATED".to_string() });
 }
 
 // --- Heartbeat ---
@@ -560,7 +563,8 @@ fn when_unauth_enrollment(world: &mut PactWorld) {
 #[given(regex = r#"node "(.+)" is "(.+)" with a config subscription stream"#)]
 fn given_active_with_stream(world: &mut PactWorld, node_id: String, state: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
     if state == "Active" {
@@ -584,9 +588,8 @@ fn when_time_elapses(world: &mut PactWorld, minutes: u32) {
     // Simulate time passing by setting last_seen to the past
     for enrollment in world.journal.enrollments.values_mut() {
         if enrollment.state == EnrollmentState::Active {
-            enrollment.last_seen = Some(
-                chrono::Utc::now() - chrono::Duration::minutes(i64::from(minutes) + 1),
-            );
+            enrollment.last_seen =
+                Some(chrono::Utc::now() - chrono::Duration::minutes(i64::from(minutes) + 1));
         }
     }
 }
@@ -595,9 +598,7 @@ fn when_time_elapses(world: &mut PactWorld, minutes: u32) {
 fn then_node_transitions(world: &mut PactWorld, node_id: String, target_state: String) {
     // Simulate heartbeat monitor detecting timeout
     if target_state == "Inactive" {
-        world.journal.apply_command(JournalCommand::DeactivateNode {
-            node_id: node_id.clone(),
-        });
+        world.journal.apply_command(JournalCommand::DeactivateNode { node_id: node_id.clone() });
     }
     let enrollment = world.journal.enrollments.get(&node_id).unwrap();
     assert_eq!(format!("{:?}", enrollment.state), target_state);
@@ -626,12 +627,8 @@ fn then_node_remains(world: &mut PactWorld, node_id: String, expected_state: Str
 fn given_n_nodes_enrolled(world: &mut PactWorld, count: u32, _state: String) {
     for i in 0..count {
         let mac = format!("bb:cc:dd:ee:{:02x}:{:02x}", i / 256, i % 256);
-        let enrollment = make_enrollment(
-            &format!("storm-node-{i:04}"),
-            &mac,
-            None,
-            "pact-platform-admin",
-        );
+        let enrollment =
+            make_enrollment(&format!("storm-node-{i:04}"), &mac, None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -651,12 +648,8 @@ fn when_concurrent_enroll(world: &mut PactWorld, count: u32) {
 
 #[then(regex = r"all (\d+) CSRs should be signed by the journal's intermediate CA")]
 fn then_all_csrs_signed(world: &mut PactWorld, count: u32) {
-    let active = world
-        .journal
-        .enrollments
-        .values()
-        .filter(|e| e.state == EnrollmentState::Active)
-        .count();
+    let active =
+        world.journal.enrollments.values().filter(|e| e.state == EnrollmentState::Active).count();
     assert!(active >= count as usize);
 }
 
@@ -671,12 +664,14 @@ fn then_all_mtls(_world: &mut PactWorld, _count: u32) {}
 #[given(regex = r#"node "(.+)" is active with a certificate expiring in (\d+) hours"#)]
 fn given_cert_expiring(world: &mut PactWorld, node_id: String, hours: u32) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
             node_id: node_id.clone(),
             cert_serial: "expiring-serial".to_string(),
-            cert_expires_at: (chrono::Utc::now() + chrono::Duration::hours(i64::from(hours))).to_rfc3339(),
+            cert_expires_at: (chrono::Utc::now() + chrono::Duration::hours(i64::from(hours)))
+                .to_rfc3339(),
         });
     }
 }
@@ -700,7 +695,8 @@ fn then_new_cert_returned(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is active with an active mTLS channel"#)]
 fn given_active_mtls(world: &mut PactWorld, node_id: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
             node_id,
@@ -748,9 +744,8 @@ fn given_journal_unreachable(world: &mut PactWorld) {
 #[when("the agent attempts certificate renewal")]
 fn when_attempts_renewal(world: &mut PactWorld) {
     if !world.journal_reachable {
-        world.last_error = Some(pact_common::error::PactError::JournalUnavailable(
-            "unreachable".to_string(),
-        ));
+        world.last_error =
+            Some(pact_common::error::PactError::JournalUnavailable("unreachable".to_string()));
     }
 }
 
@@ -773,7 +768,8 @@ fn then_retry_renewal(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is active with an expired certificate"#)]
 fn given_expired_cert(world: &mut PactWorld, node_id: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
             node_id,
@@ -811,7 +807,8 @@ fn then_new_mtls(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is enrolled and active with no vCluster assignment"#)]
 fn given_active_no_vc(world: &mut PactWorld, node_id: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
             node_id,
@@ -870,7 +867,8 @@ fn then_drift_active(_world: &mut PactWorld, _vcluster: String) {}
 #[given(regex = r#"node "(.+)" is assigned to vCluster "(.+)""#)]
 fn given_assigned_to_vc(world: &mut PactWorld, node_id: String, vcluster: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", Some("SN12345"), "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
         world.journal.apply_command(JournalCommand::ActivateNode {
             node_id: node_id.clone(),
@@ -878,10 +876,9 @@ fn given_assigned_to_vc(world: &mut PactWorld, node_id: String, vcluster: String
             cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
         });
     }
-    world.journal.apply_command(JournalCommand::AssignNodeToVCluster {
-        node_id,
-        vcluster_id: vcluster,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::AssignNodeToVCluster { node_id, vcluster_id: vcluster });
 }
 
 #[when(regex = r#"I run "pact node unassign (.+)""#)]
@@ -1061,7 +1058,8 @@ fn when_boot_after_decommission(world: &mut PactWorld) {
 #[given(regex = r#"node "(.+)" is enrolled in domain "(.+)""#)]
 fn given_enrolled_in_domain(world: &mut PactWorld, node_id: String, _domain: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -1086,7 +1084,8 @@ fn then_remain_in_domain(_world: &mut PactWorld, _state: String, _domain: String
 #[given(regex = r#"node "(.+)" is "(.+)" in domain "(.+)""#)]
 fn given_state_in_domain(world: &mut PactWorld, node_id: String, _state: String, _domain: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -1124,7 +1123,8 @@ fn then_no_cross_domain(_world: &mut PactWorld) {}
 #[given(regex = r#"node "(.+)" is enrolled in domains "(.+)" and "(.+)""#)]
 fn given_enrolled_two_domains(world: &mut PactWorld, node_id: String, _d1: String, _d2: String) {
     if !world.journal.enrollments.contains_key(&node_id) {
-        let enrollment = make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
+        let enrollment =
+            make_enrollment(&node_id, "aa:bb:cc:dd:ee:01", None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
@@ -1205,9 +1205,12 @@ fn then_see_all_nodes(world: &mut PactWorld, count: u32) {
 #[given(regex = r#"(\d+) nodes are "(.+)", (\d+) are "(.+)", (\d+) are "(.+)""#)]
 fn given_nodes_by_state(
     world: &mut PactWorld,
-    n1: u32, s1: String,
-    n2: u32, s2: String,
-    n3: u32, s3: String,
+    n1: u32,
+    s1: String,
+    n2: u32,
+    s2: String,
+    n3: u32,
+    s3: String,
 ) {
     let mut idx = 0u32;
     for (count, state) in [(n1, &s1), (n2, &s2), (n3, &s3)] {
@@ -1221,14 +1224,16 @@ fn given_nodes_by_state(
                     world.journal.apply_command(JournalCommand::ActivateNode {
                         node_id: node_id.clone(),
                         cert_serial: format!("serial-{idx}"),
-                        cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
+                        cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3))
+                            .to_rfc3339(),
                     });
                 }
                 "Inactive" => {
                     world.journal.apply_command(JournalCommand::ActivateNode {
                         node_id: node_id.clone(),
                         cert_serial: format!("serial-{idx}"),
-                        cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339(),
+                        cert_expires_at: (chrono::Utc::now() + chrono::Duration::days(3))
+                            .to_rfc3339(),
                     });
                     world.journal.apply_command(JournalCommand::DeactivateNode { node_id });
                 }
@@ -1253,12 +1258,8 @@ fn when_list_by_state(world: &mut PactWorld, state: String) {
 
 #[then(regex = r"I should see only the (\d+) active nodes")]
 fn then_see_only_n(world: &mut PactWorld, count: u32) {
-    let active = world
-        .journal
-        .enrollments
-        .values()
-        .filter(|e| e.state == EnrollmentState::Active)
-        .count();
+    let active =
+        world.journal.enrollments.values().filter(|e| e.state == EnrollmentState::Active).count();
     assert_eq!(active, count as usize);
 }
 
@@ -1266,24 +1267,15 @@ fn then_see_only_n(world: &mut PactWorld, count: u32) {
 fn given_unassigned(world: &mut PactWorld, count: u32) {
     for i in 0..count {
         let mac = format!("ee:ff:00:11:{:02x}:{:02x}", i / 256, i % 256);
-        let enrollment = make_enrollment(
-            &format!("unassigned-{i}"),
-            &mac,
-            None,
-            "pact-platform-admin",
-        );
+        let enrollment =
+            make_enrollment(&format!("unassigned-{i}"), &mac, None, "pact-platform-admin");
         world.journal.apply_command(JournalCommand::RegisterNode { enrollment });
     }
 }
 
 #[when(regex = r#"I run "pact node list --unassigned""#)]
 fn when_list_unassigned(world: &mut PactWorld) {
-    let count = world
-        .journal
-        .enrollments
-        .values()
-        .filter(|e| e.vcluster_id.is_none())
-        .count();
+    let count = world.journal.enrollments.values().filter(|e| e.vcluster_id.is_none()).count();
     world.cli_output = Some(format!("{count} unassigned nodes"));
     world.cli_exit_code = Some(0);
 }
