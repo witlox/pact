@@ -170,7 +170,7 @@ Precise definitions for all terms used across pact documentation, code, and spec
 | Term | Definition |
 |------|-----------|
 | **OpenCHAMI** | Hardware discovery, boot provisioning, DHCP, BMC management. Below pact in the stack. Handles reboot, re-image, firmware. |
-| **Lattice** | Workload scheduler. Beside pact. Handles drain, cordon, job management. pact starts lattice-node-agent as a supervised service. Integration via hpc-core shared contracts (cgroup, namespace handoff, mount conventions). Lattice works independently of pact but gains capabilities ("steroids") when pact is init. |
+| **Lattice** | Workload scheduler. Beside pact. Handles drain, cordon, job management. pact starts lattice-node-agent as a supervised service. Integration via hpc-core shared contracts (cgroup, namespace handoff, mount conventions). Lattice works independently of pact but gains capabilities ("supercharged") when pact is init. |
 | **Sovra** | Federated key management and cross-org trust. Above pact. Federates policy templates, not config state. |
 | **BMC console** | Out-of-band fallback when pact-agent is down. Unrestricted bash via Redfish. Changes detected as unattributed drift. |
 | **SPIRE** | SPIFFE Runtime Environment. Provides mTLS workload attestation. Pre-existing in HPE Cray infrastructure. pact integrates via SPIRE agent socket to obtain SVIDs. Not a pact-supervised service — a dependency. |

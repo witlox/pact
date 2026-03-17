@@ -98,7 +98,7 @@ Benefits of pact as init:
 - Boot is faster (no unit parsing, no generator execution)
 - Single process to debug if something goes wrong
 - cgroup hierarchy owned by pact, shared contract with lattice via hpc-core
-- Namespace pre-creation and mount refcounting for lattice ("steroids" mode)
+- Namespace pre-creation and mount refcounting for lattice ("supercharged" mode)
 - Network configuration via netlink (no wickedd daemon)
 - Identity mapping for NFS (no SSSD)
 

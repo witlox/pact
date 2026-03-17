@@ -148,7 +148,7 @@ pact writes CapabilityReport to tmpfs + unix socket. lattice-node-agent reads it
 hpc-core crates (`hpc-node`, `hpc-audit`) define traits and types, not implementations. pact and lattice each implement the traits independently. Neither system depends on the other at runtime — only on the shared contract.
 
 ### A-Int6: Lattice works independently of pact [Accepted]
-lattice-node-agent can run without pact (standalone mode on systemd-managed nodes). In standalone mode, lattice creates its own cgroup hierarchy and manages its own mounts using hpc-core conventions. When pact is present, lattice gains capabilities (namespace pre-creation, mount refcounting, cgroup-atomic checkpointing) — "steroids" mode.
+lattice-node-agent can run without pact (standalone mode on systemd-managed nodes). In standalone mode, lattice creates its own cgroup hierarchy and manages its own mounts using hpc-core conventions. When pact is present, lattice gains capabilities (namespace pre-creation, mount refcounting, cgroup-atomic checkpointing) — "supercharged" mode.
 
 ### A-Int7: Unix socket for namespace handoff [Accepted]
 Namespace FDs are passed from pact to lattice via a unix socket (SCM_RIGHTS). This is the standard Linux mechanism for FD passing between processes. The socket path is defined in hpc-core `hpc-node` conventions.

@@ -5,7 +5,7 @@
 ## Context
 
 pact and lattice are independent systems that benefit from co-deployment. When pact is
-the init system and lattice manages workloads, lattice gains capabilities ("steroids"):
+the init system and lattice manages workloads, lattice gains capabilities ("supercharged"):
 cgroup pre-creation, namespace handoff, mount refcounting, unified audit, shared mTLS.
 But lattice must also work standalone (on systemd-managed nodes without pact).
 
