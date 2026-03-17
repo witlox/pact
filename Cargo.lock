@@ -1370,6 +1370,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hpc-audit"
+version = "2026.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "739f5edff0f8d844a4081fa389e4a3aba7c83c119d6e67d79857789f882348e4"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "hpc-auth"
 version = "2026.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1390,6 +1402,29 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "hpc-identity"
+version = "2026.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d7f9bef7632454698eeb0531a1d18bc106bfe00cddb83525568031421f610c3"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "hpc-node"
+version = "2026.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d7a2582149b62962826c71fcf3db0eb09edda024542834aa380c9a830e23588"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2325,6 +2360,9 @@ dependencies = [
  "aya-log",
  "chrono",
  "clap",
+ "hpc-audit",
+ "hpc-identity",
+ "hpc-node",
  "jsonwebtoken",
  "nix",
  "pact-common",

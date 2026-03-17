@@ -19,6 +19,7 @@ pub mod conflict;
 pub mod drift;
 pub mod emergency;
 pub mod enrollment;
+pub mod isolation;
 pub mod journal_client;
 pub mod observer;
 pub mod shell;

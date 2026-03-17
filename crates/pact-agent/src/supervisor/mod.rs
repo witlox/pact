@@ -8,7 +8,7 @@
 
 mod pact_supervisor;
 
-pub use pact_supervisor::PactSupervisor;
+pub use pact_supervisor::{PactSupervisor, SupervisionConfig, WorkloadState};
 
 use async_trait::async_trait;
 use pact_common::types::{ServiceDecl, ServiceState};

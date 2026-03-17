@@ -172,15 +172,87 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Process Supervision Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| PS1 | Adaptive supervision loop | `PactSupervisor::run_loop()` | Check `cgroup_manager.is_scope_empty(workload_slice)` each tick. Adjust interval. Coupled to watchdog pet. | Automatic adaptation |
+| PS2 | Watchdog coupled to loop | `PactSupervisor::run_loop()` | `watchdog.pet()` called in loop body. If loop hangs → no pet → BMC reboot. | F23: BMC hard reboot |
+| PS3 | cgroup scope kills children | `CgroupManager::destroy_scope()` | Write to `cgroup.kill` before removing scope dir. Timeout 10s → log zombie scope (F30). | AuditEvent + zombie scope logged |
+
+---
+
+## Resource Isolation Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| RI1 | Exclusive slice ownership | `CgroupManager::create_scope()` | Check `slice_owner(parent)`. Reject if caller doesn't own slice. Emergency override checked separately (RI3). | `CgroupError::PermissionDenied` |
+| RI2 | Every process has scope | `PactSupervisor::start_service()` | Calls `cgroup_manager.create_scope()` BEFORE `Command::spawn()`. Process placed in scope via cgroup.procs. | Service start fails if scope creation fails (F22) |
+| RI3 | Emergency override + audit | `EmergencySession::freeze_workload()` | Check emergency state active + OIDC auth. Emit AuditEvent BEFORE freeze/kill. | `PactError::EmergencyRequired` if not in emergency |
+| RI4 | pact-agent OOM protection | `boot::init_hardware()` | Write -1000 to `/proc/self/oom_score_adj` during InitHardware phase | Structural — set once at boot |
+| RI5 | CgroupHandle callback | `PactSupervisor::start_service()` | On spawn failure: explicit `cgroup_manager.destroy_scope(handle)` in error path | Structural — error handling code |
+| RI6 | Shared read across slices | `CgroupManager::read_metrics()` | No ownership check on reads. Any path readable. | By design — read method has no owner check |
+
+---
+
+## Identity Mapping Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| IM1 | UID stable within federation | `JournalState::apply(AssignUid)` | UidEntry keyed by (org, subject). Updates rejected (append-only per subject). GC only on federation departure. | `JournalResponse::ValidationError` on duplicate |
+| IM2 | Precursor ranges no overlap | `JournalState::apply(AddOrgIndex)` | Sequential org_index assignment. `precursor = base + index * stride`. No manual range config. | Structural — sequential index |
+| IM3 | Sequential within range | `JournalState::apply(AssignUid)` | Counter per org tracks next UID. If counter >= stride → exhaustion error. | `PactError::UidRangeExhausted` + alert (F24) |
+| IM4 | Pre-provisioned rejects unknowns | `PolicyEngine::evaluate()` (identity check) | If `vcluster_policy.identity_mode == PreProvisioned` AND subject not in UidMap → deny | `PactError::IdentityNotProvisioned` |
+| IM5 | NSS module read-only | `libnss_pact.so` implementation | mmap on .db files. No write syscalls, no socket syscalls. | Structural — code has no write/network capability |
+| IM6 | Only in PactSupervisor mode | `boot::load_identity()` | Skip .db file creation if `config.supervisor.backend == Systemd` | Structural — conditional code path |
+| IM7 | UidMap before non-root services | Boot phase ordering (PB3) + `PactSupervisor::start_service()` | Phase 3 before Phase 5. Runtime: check getpwnam() succeeds before spawn for non-root services. | Service start waits/retries until UidMap available |
+
+---
+
+## Network Management Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| NM1 | Netlink only in PactSupervisor | `boot::configure_network()` | Skip if `config.supervisor.backend == Systemd` | Structural — conditional code path |
+| NM2 | Network before services | Boot phase ordering (PB3) | Phase 2 (ConfigureNetwork) before Phase 5 (StartServices) | Boot blocked on network failure (F28) |
+
+---
+
+## Platform Bootstrap Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| PB1 | Watchdog only as PID 1 | `boot::init_hardware()` | Check `getpid() == 1` AND `/dev/watchdog` exists. Skip otherwise. | No watchdog opened in non-PID-1 mode |
+| PB2 | Watchdog pet interval | `PactSupervisor::run_loop()` | Pet interval = min(loop_interval, watchdog_timeout / 2) | Coupled to PS2 |
+| PB3 | Strict boot phase ordering | `BootSequence::run()` | Sequential execution. Phase N+1 starts only after Phase N returns Ok. | `BootPhase::BootFailed` on error, blocks subsequent |
+| PB4 | Bootstrap identity temporary | `identity::on_svid_acquired()` | On SVID acquisition: clear bootstrap cert from memory, log discard | Structural — overwrite + drop |
+| PB5 | No hard SPIRE dependency | `IdentityCascade::get_identity()` | SPIRE is first in cascade. If unavailable, falls through to SelfSigned, then Bootstrap. | Automatic fallback (IdentityCascade) |
+
+---
+
+## Workload Integration Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| WI1 | Unix socket only for handoff | `handoff::HandoffServer` | Listens on `HANDOFF_SOCKET_PATH`. SCM_RIGHTS for FD passing. No other transport. | Structural — only unix socket code exists |
+| WI2 | Refcount accuracy | `MountManager` impl | `acquire_mount` increments, `release_mount` decrements. Assert refcount >= 0. | Assert failure + AuditEvent on negative (F31) |
+| WI3 | Lazy unmount + hold timer | `MountManager::release_mount()` | On refcount=0: start timer. On timer expiry: unmount. Emergency `--force` bypasses timer. | Timer-based. Emergency override checked via EmergencySession state. |
+| WI4 | Lattice standalone creates own | hpc-node trait design | Same `CgroupManager` trait implemented by both. Lattice's impl creates hierarchy if pact hasn't. | By design — trait-based contract |
+| WI5 | Cleanup on cgroup empty | `PactSupervisor::run_loop()` (idle tick) | Poll allocation cgroups with `is_scope_empty()`. On empty → cleanup NamespaceSet + release mounts. | Automatic on idle ticks |
+| WI6 | Refcount reconstruction | `MountManager::reconstruct_state()` | On agent restart: read `/proc/mounts`, cross-reference with journal active allocations, rebuild refcount map. | Called during boot after journal reconnect |
+
+---
+
 ## Enforcement Categories
 
 Summary of how invariants are enforced:
 
 | Category | Count | Invariants | Description |
 |----------|-------|------------|-------------|
-| **Structural** | 16 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8 | Impossible to violate by design (no API exists to break them) |
-| **Validation** | 12 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7 | Checked at input boundary, rejected with error |
-| **Runtime logic** | 25 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4, E5, E6, E9, E10 | Active enforcement in business logic |
+| **Structural** | 27 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8, RI4, RI5, RI6, IM2, IM5, IM6, NM1, PB4, WI1, WI2(assert), WI4, PB1 | Impossible to violate by design (no API exists to break them) |
+| **Validation** | 14 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7, IM1, IM3 | Checked at input boundary, rejected with error |
+| **Runtime logic** | 35 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4-E6, E9-E10, PS1-PS3, RI1-RI3, IM4, IM7, NM2, WI3, WI5, WI6 | Active enforcement in business logic |
 | **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
 | **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
-| **Degraded fallback** | 5 | P7, F2, F3, A9, CR3 | Special behavior when components unavailable |
+| **Degraded fallback** | 7 | P7, F2, F3, A9, CR3, PB5, PB2 | Special behavior when components unavailable |
+| **Boot ordering** | 2 | PB3, NM2 | Enforced by sequential boot phase execution |

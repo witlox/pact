@@ -72,35 +72,44 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 
 ## pact-agent
 
-**Responsibility:** Per-node daemon. Init system on diskless nodes. Process supervision, state observation, drift detection, commit window management, capability reporting, shell/exec server, emergency mode.
+**Responsibility:** Per-node daemon. Init system on diskless nodes. Decomposed into 6 sub-contexts (domain-model.md §2a-2f), each with PactSupervisor/SystemdBackend strategy.
 
 **Owns:**
-- Process supervisor (PactSupervisor + SystemdBackend)
+- Process supervision (PactSupervisor + SystemdBackend) — supervision loop, health checks, restarts
+- Resource isolation — cgroup v2 hierarchy, scopes, namespace creation
+- Identity mapping — UidMap management, NSS .db file writer (PactSupervisor mode only)
+- Network management — netlink interface config (PactSupervisor mode only)
+- Platform bootstrap — boot phases, watchdog, SPIRE integration, coldplug
+- Workload integration — namespace handoff server, mount refcounting
 - State observer (eBPF, inotify, netlink)
 - Drift evaluator (7-dimension comparison)
 - Commit window manager (formula-based timing, auto-rollback)
 - Capability reporter (GPU, memory, network, storage, software)
 - Shell server (exec endpoint + interactive shell)
 - Emergency mode manager
-- Boot sequence orchestration
-- Boot enrollment: hardware identity detection, cert receipt, mTLS setup (ADR-008)
-- Dual-channel gRPC client with hot-swap cert rotation (ADR-008, E6)
+- Enrollment: hardware identity detection, identity cascade (SPIRE/self-signed/bootstrap)
 - Config subscription (live updates from journal)
 - Local config/policy cache for partition resilience
 
 **Submodules:**
-- `supervisor/` — ServiceManager trait, PactSupervisor, SystemdBackend
+- `supervisor/` — ServiceManager trait, PactSupervisor (with supervision loop), SystemdBackend
+- `isolation/` — CgroupManager impl, namespace creation, mount refcounting (implements hpc-node traits)
+- `identity/` — UidMap cache, NSS .db writer, identity cascade (implements hpc-identity traits)
+- `network/` — netlink interface configuration
+- `boot/` — BootSequence phases, WatchdogHandle, coldplug, readiness signal
+- `handoff/` — namespace handoff unix socket server (implements hpc-node NamespaceProvider)
 - `observer/` — eBPF, inotify, netlink observers
 - `drift/` — DriftEvaluator, blacklist filtering
 - `commit/` — CommitWindow runtime, auto-rollback, active consumer check
 - `capability/` — GpuBackend trait, CapabilityReport builder
 - `shell/` — ShellService gRPC, exec handler, interactive shell, whitelist
 - `emergency/` — EmergencySession lifecycle
-- `enrollment/` — HardwareIdentity detection, EnrollmentClient, DualChannelClient (ADR-008)
+- `enrollment/` — HardwareIdentity detection, EnrollmentClient
 - `subscription/` — config update stream consumer
 - `cache/` — local config + policy cache
+- `audit/` — AuditSink impl (journal append + local buffer), AuditEvent emitter
 
-**Justification:** Agent is the Node Management bounded context (domain-model.md). ADR-006 defines pact-agent as init. ADR-007 defines shell as SSH replacement.
+**Justification:** Agent is the Node Management bounded context (domain-model.md §2). ADR-006 defines pact-agent as init. ADR-007 defines shell as SSH replacement. Sub-context decomposition per analyst Layer 1.
 
 ---
 
@@ -174,3 +183,74 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Invariants enforced:** Auth1-Auth8, with PAuth1-PAuth5 enforced by consumer (pact-cli)
 
 **Justification:** specs/invariants.md Auth1-Auth8 require a shared auth library. Both pact and lattice CLIs need identical OAuth2 flows, differing only in permission mode (PAuth1 vs lenient). Extracting to a shared crate prevents duplication and ensures consistent behavior.
+
+---
+
+## hpc-node (external shared crate — NEW)
+
+**Responsibility:** Shared contracts for node-level resource management between pact and lattice. Traits and types only — no implementation.
+
+**Owns:**
+- Cgroup slice naming conventions (constants for pact.slice/, workload.slice/)
+- `CgroupManager` trait — hierarchy creation, scope management, metrics reading
+- `ResourceLimits`, `CgroupHandle`, `CgroupMetrics` types
+- `NamespaceProvider` / `NamespaceConsumer` traits — namespace handoff protocol
+- `NamespaceRequest`, `NamespaceResponse` types
+- `MountManager` trait — mount refcounting, lazy unmount, reconstruction
+- `MountHandle` types
+- `ReadinessGate` trait — boot readiness signaling
+- Well-known paths (socket paths, mount base paths)
+- Error types (CgroupError, NamespaceError, MountError, ReadinessError)
+
+**Does NOT own:** Implementations. No Linux-specific code. No async runtime dependency.
+
+**Consumed by:** pact-agent (implements CgroupManager, NamespaceProvider, MountManager), lattice-node-agent (implements CgroupManager, NamespaceConsumer, MountManager in standalone mode)
+
+**Invariants enforced:** RI1 (slice ownership via SliceOwner enum), WI1 (handoff socket path), WI4 (shared conventions)
+
+**Justification:** Both pact and lattice need to agree on cgroup layout, namespace handoff, and mount conventions. hpc-core shared kernel pattern (domain-model.md §2f). Lattice must work independently of pact (A-Int6).
+
+---
+
+## hpc-audit (external shared crate — NEW)
+
+**Responsibility:** Shared audit event types and sink trait. Loose coupling, high coherence.
+
+**Owns:**
+- `AuditEvent` type — universal event format
+- `AuditPrincipal`, `AuditScope`, `AuditOutcome`, `AuditSource` types
+- `AuditSink` trait — destination interface
+- `CompliancePolicy` type — retention rules, required audit points
+- Well-known action string constants
+- Error types (AuditError)
+
+**Does NOT own:** Sink implementations (each system implements its own). No I/O.
+
+**Consumed by:** pact-agent, pact-journal, pact-cli, lattice-node-agent, lattice-quorum
+
+**Invariants enforced:** O3 (audit trail continuity — via AuditSink contract)
+
+**Justification:** Both pact and lattice need audit. Shared format enables unified SIEM forwarding. Cross-cutting concern (domain-model.md).
+
+---
+
+## hpc-identity (external shared crate — NEW)
+
+**Responsibility:** Workload identity abstraction. SPIRE/self-signed/bootstrap cert sources behind a trait. Certificate rotation.
+
+**Owns:**
+- `WorkloadIdentity` type — source-agnostic cert + key + trust bundle
+- `IdentitySource` enum (Spire, SelfSigned, Bootstrap)
+- `IdentityProvider` trait — obtain identity from any source
+- `CertRotator` trait — dual-channel rotation pattern
+- `IdentityCascade` — try providers in order
+- Provider configs (SpireConfig, SelfSignedConfig, BootstrapConfig)
+- Error types (IdentityError)
+
+**Does NOT own:** Provider implementations. No SPIRE client code. No Vault client code.
+
+**Consumed by:** pact-agent (SpireProvider + SelfSignedProvider + StaticProvider), lattice-node-agent (same providers)
+
+**Invariants enforced:** PB4 (bootstrap temporary), PB5 (no hard SPIRE dependency), E6 (dual-channel rotation pattern)
+
+**Justification:** Both pact and lattice need mTLS. SPIRE is pre-existing (A-I7). ADR-008 self-signed model is fallback. Shared trait prevents each system from reinventing identity management. See A-mTLS1.

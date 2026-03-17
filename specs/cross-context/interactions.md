@@ -107,6 +107,127 @@ Integration points between bounded contexts and external systems.
 
 ---
 
+## Node Management Sub-Context Interactions
+
+### N1: Bootstrap → Process Supervision (Service Startup)
+
+**Direction:** Bootstrap delegates service startup to Process Supervision after boot phases complete.
+**Protocol:** Internal (function call within pact-agent)
+**Data flow:**
+- Bootstrap Phase 5 (StartServices) provides ServiceDecl list from overlay
+- Process Supervision starts services in dependency order
+- Each service start requests CgroupHandle from Resource Isolation (N2)
+**Failure mode:** Service start failure — boot remains in StartServices phase, retries
+**Invariants:** PB3 (strict ordering), A6 (dependency ordering)
+
+### N2: Process Supervision → Resource Isolation (Cgroup Lifecycle)
+
+**Direction:** Supervision requests cgroup creation before spawning, notifies on death.
+**Protocol:** Internal (async callback pattern)
+**Data flow:**
+- Supervision calls Isolation.create_scope(service, limits) → callback with CgroupHandle or error
+- On spawn success: process placed in cgroup scope
+- On spawn failure: Isolation receives failure callback, cleans up scope
+- On process death: Supervision notifies Isolation → Isolation kills all scope processes (cgroup.kill) → releases scope
+**Failure mode:** F22 (cgroup creation failure) — service start fails, no orphaned scopes
+**Invariants:** RI2 (every process has scope), RI5 (callback on failure), PS3 (kill children)
+
+### N3: Process Supervision → Identity Mapping (UID Resolution)
+
+**Direction:** Supervision checks UID resolution for services with non-root user.
+**Protocol:** Internal (NSS lookup via libc getpwnam)
+**Data flow:**
+- ServiceDecl specifies `user: "appuser"`
+- Supervision calls getpwnam("appuser") which routes through libnss_pact.so
+- NSS module reads /run/pact/passwd.db → returns uid/gid
+- Supervision uses uid/gid for process spawn
+**Failure mode:** F25 (NSS .db files missing) — service startup waits for UidMap
+**Invariants:** IM7 (UidMap before non-root startup), IM5 (NSS read-only)
+
+### N4: Bootstrap → Identity Mapping (UidMap Loading)
+
+**Direction:** Bootstrap loads UidMap from journal during Phase 3 (LoadIdentity).
+**Protocol:** Internal (journal overlay extraction)
+**Data flow:**
+- Boot Phase 3: extract UidMap from journal overlay or separate subscription
+- Write /run/pact/passwd.db and /run/pact/group.db to tmpfs
+- NSS module becomes functional
+**Failure mode:** Journal unreachable — use cached UidMap from previous boot if available
+**Invariants:** PB3 (LoadIdentity before StartServices), IM6 (only in PactSupervisor mode)
+
+### N5: Bootstrap → Network Management (Interface Config)
+
+**Direction:** Bootstrap delegates network configuration to Network Management during Phase 2.
+**Protocol:** Internal (function call)
+**Data flow:**
+- Boot Phase 2: pass interface declarations from overlay
+- Network Management configures interfaces via netlink
+- Interfaces must be up before phase completes
+**Failure mode:** F28 (network config failure) — boot blocked
+**Invariants:** NM1 (netlink only in PactSupervisor), NM2 (network before services)
+
+### N6: Process Supervision → Bootstrap (Watchdog Coupling)
+
+**Direction:** Supervision loop tick triggers watchdog pet.
+**Protocol:** Internal (WatchdogHandle.pet() called in loop body)
+**Data flow:**
+- Each supervision loop iteration calls watchdog.pet()
+- If loop hangs → no pet → watchdog timeout → BMC reboot
+**Failure mode:** F23 (watchdog timeout) — BMC hard reboot
+**Invariants:** PS2 (coupled), PB1 (PID 1 only), PB2 (pet interval)
+
+### N7: Resource Isolation → Workload Integration (Namespace Creation)
+
+**Direction:** Workload Integration requests namespace creation from Resource Isolation.
+**Protocol:** Internal (function call)
+**Data flow:**
+- Allocation request arrives via unix socket from lattice-node-agent
+- Workload Integration calls Isolation.create_namespace_set(allocation_id)
+- Isolation creates pid/net/mount namespaces via unshare(2)
+- Returns NamespaceSet with FDs
+- Workload Integration passes FDs to lattice via unix socket (SCM_RIGHTS)
+**Failure mode:** F27 (namespace handoff failure) — lattice falls back to self-service
+**Invariants:** WI1 (unix socket only), WI5 (cleanup on cgroup empty)
+
+### N8: Workload Integration → Resource Isolation (Mount Refcounting)
+
+**Direction:** Workload Integration manages mount lifecycle through Resource Isolation.
+**Protocol:** Internal (function call)
+**Data flow:**
+- Allocation requests uenv mount → Isolation checks MountRef
+- If first mount: mount SquashFS, create MountRef(refcount=1)
+- If existing: increment refcount, bind-mount into allocation namespace
+- On release: decrement refcount, start hold timer at zero
+**Failure mode:** Agent crash → WI6 (reconstruct from mount table + journal state)
+**Invariants:** WI2 (refcount accuracy), WI3 (lazy unmount), WI6 (reconstruction)
+
+### N9: Agent → Journal (UidMap Subscription)
+
+**Direction:** Agent subscribes to journal for UidMap updates.
+**Protocol:** gRPC streaming (part of SubscribeConfigUpdates or separate stream)
+**Data flow:**
+- New UID assignment committed to journal via Raft
+- Journal pushes UidMap delta to subscribed agents
+- Agent updates /run/pact/passwd.db and /run/pact/group.db
+- NSS module reads updated files on next lookup
+**Failure mode:** Journal unreachable — use cached UidMap, new users cannot be resolved
+**Invariants:** IM1 (stable assignments), IM7 (loaded before non-root services)
+
+### N10: Agent → SPIRE Agent (SVID Acquisition)
+
+**Direction:** pact-agent requests workload identity from SPIRE agent.
+**Protocol:** SPIRE Workload API (unix domain socket)
+**Data flow:**
+- pact-agent connects to SPIRE agent socket
+- Requests SVID for pact-agent workload
+- SPIRE returns X.509 SVID + private key + trust bundle
+- pact-agent rotates mTLS to use SVID
+- Bootstrap identity discarded
+**Failure mode:** F26 (SPIRE unreachable) — continue with bootstrap identity, retry
+**Invariants:** PB4 (bootstrap temporary), PB5 (no hard SPIRE dependency)
+
+---
+
 ## External System Interactions
 
 ### E1: Agent → lattice-node-agent (Capability Delivery)
@@ -254,11 +375,14 @@ Integration points between bounded contexts and external systems.
 | Agent | Journal (boot) | gRPC stream | Request | Cached config |
 | Agent | Journal (write) | gRPC unary | Push | Block until available |
 | Agent | Journal (reconnect) | gRPC unary+stream | Push then subscribe | Merge conflict (F13) |
+| Agent | Journal (UidMap) | gRPC stream | Subscribe | Cached UidMap |
 | Agent | PolicyService | gRPC unary | Request | Cached policy |
 | CLI | Journal | gRPC | Request | Timeout (exit 5) |
 | CLI | Agent | gRPC | Request | Connection error |
 | Policy | OPA | REST localhost | Request | Cached policy |
 | Agent | lattice-node-agent | tmpfs + socket | File write | Capability not reported |
+| Agent | lattice-node-agent | unix socket (SCM_RIGHTS) | FD passing | Lattice self-service fallback |
+| Agent | SPIRE agent | unix socket (Workload API) | Request | Bootstrap identity fallback |
 | CLI | Lattice | gRPC | Delegate | Error with context |
 | CLI | OpenCHAMI | REST | Delegate | Stubbed |
 | Sovra | pact-policy | mTLS REST | Pull | Cached templates |
@@ -269,3 +393,10 @@ Integration points between bounded contexts and external systems.
 | Journal | Vault | REST | Request | CA key continues; retry CRL (F18) |
 | Journal | Agent (heartbeat) | gRPC stream | Connection state | Active → Inactive on timeout |
 | CLI | Journal (node mgmt) | gRPC unary | Request | Block until available (F1) |
+| Supervision | Isolation | Internal callback | Sync/callback | Service start fails (F22) |
+| Supervision | Identity | Internal (NSS) | Lookup | Wait for UidMap (IM7) |
+| Bootstrap | Network | Internal | Delegate | Boot blocked (F28) |
+| Bootstrap | Supervision | Internal | Delegate | Boot stuck at StartServices |
+| Supervision loop | Watchdog | Internal | Pet | BMC reboot (F23) |
+| Workload Int. | Isolation | Internal | Delegate | Namespace creation or fallback |
+| Workload Int. | Isolation | Internal | Mount mgmt | Refcount reconstruction (WI6) |

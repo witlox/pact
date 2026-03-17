@@ -24,6 +24,8 @@ fn make_service_decl(name: &str, binary: &str) -> ServiceDecl {
         depends_on: vec![],
         order: 0,
         cgroup_memory_max: None,
+        cgroup_slice: None,
+        cgroup_cpu_weight: None,
         health_check: None,
     }
 }
@@ -38,6 +40,8 @@ fn long_running_service(name: &str) -> ServiceDecl {
         depends_on: vec![],
         order: 0,
         cgroup_memory_max: None,
+        cgroup_slice: None,
+        cgroup_cpu_weight: None,
         health_check: None,
     }
 }

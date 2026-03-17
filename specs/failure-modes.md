@@ -500,6 +500,426 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F21: Supervision loop detects crashed service
+
+**Trigger:** A supervised service (e.g., nvidia-persistenced, lattice-node-agent) crashes or exits unexpectedly.
+
+**Impact:**
+- Service unavailable until restarted
+- Dependent services may be affected (e.g., GPU workloads if nvidia-persistenced dies)
+
+**Degradation:**
+- Supervision loop detects exit via `try_wait()` within poll interval
+- RestartPolicy evaluated: Always → immediate restart, OnFailure → restart on non-zero exit, Never → mark Stopped
+- Restart count incremented, restart delay applied
+- AuditEvent emitted with service name, exit code, restart count
+
+**Recovery:**
+- Automatic restart per policy
+- If restart fails repeatedly, service remains Failed — admin notified
+- No max restart count by default (configurable)
+
+**Detection:**
+- AuditEvent: service crash + restart
+- CapabilityReport updated if service affects capabilities
+
+---
+
+## F22: cgroup creation failure
+
+**Trigger:** Cannot create cgroup scope for a service (filesystem error, permission issue, cgroup hierarchy corruption).
+
+**Impact:**
+- Service cannot start (no resource isolation)
+- CgroupHandle callback notifies Process Supervision of failure
+
+**Degradation:**
+- Service start fails with descriptive error
+- Other services unaffected (each has independent cgroup scope)
+- AuditEvent emitted
+
+**Recovery:**
+- Admin investigates cgroup filesystem state
+- Possible: remount cgroup2, or reboot node
+
+**Detection:**
+- Service state transitions to Failed
+- AuditEvent with cgroup creation error detail
+
+---
+
+## F23: Hardware watchdog timeout (pact-agent hang)
+
+**Trigger:** pact-agent stops petting `/dev/watchdog` (hang, deadlock, infinite loop — not crash, since crash would also stop petting).
+
+**Impact:**
+- Watchdog timer expires
+- BMC triggers hard reboot of the node
+- All supervised services killed (unclean shutdown)
+- In-progress workloads lost
+
+**Degradation:**
+- Hard reboot — no graceful shutdown
+- Node reboots and pact-agent starts fresh
+- Journal detects node went Inactive (heartbeat timeout) then Active again (re-enrollment)
+- Unattributed drift detected for any state changes before hang
+
+**Recovery:**
+- Automatic via reboot + re-enrollment
+- Admin should investigate root cause of hang (logs, core dump if available)
+
+**Detection:**
+- Journal: node went Inactive then Active in quick succession
+- BMC logs: watchdog timeout event
+
+---
+
+## F24: UidMap exhaustion (UID range full)
+
+**Trigger:** On-demand UID assignment attempted but the org's UID range is exhausted.
+
+**Impact:**
+- New user authentication succeeds (OIDC is fine) but UID assignment fails
+- User cannot access NFS mounts (no POSIX identity)
+- Existing users unaffected
+
+**Degradation:**
+- Authentication succeeds but operations requiring UID fail with clear error
+- Alert: range exhaustion event
+- Admin must extend the org's UID range in journal policy
+
+**Recovery:**
+- Admin extends range: `pact policy uid-range extend --org local --end 59999`
+- New assignments resume immediately
+
+**Detection:**
+- AuditEvent: UID range exhaustion
+- Journal metrics: range utilization percentage
+
+---
+
+## F25: NSS module cannot read .db files
+
+**Trigger:** `/run/pact/passwd.db` or `group.db` is missing, corrupted, or has wrong permissions.
+
+**Impact:**
+- All NSS lookups via pact fail (getpwnam, getpwuid, getgrnam, getgrgid)
+- NFS file operations may fail or show numeric UIDs instead of names
+- `/etc/nsswitch.conf` falls through to next source (files)
+
+**Degradation:**
+- System users (/etc/passwd) still resolve
+- pact-managed users show as numeric UIDs
+- pact-agent should detect and rewrite .db files from cached UidMap
+
+**Recovery:**
+- pact-agent rewrites .db files from in-memory UidMap cache
+- If UidMap cache is empty: re-pull from journal
+
+**Detection:**
+- pact-agent health check: .db file integrity
+- User reports: numeric UIDs on NFS files
+
+---
+
+## F26: SPIRE agent unreachable
+
+**Trigger:** SPIRE agent socket not available when pact-agent tries to obtain SVID.
+
+**Impact:**
+- pact-agent continues with bootstrap identity (or journal-signed cert)
+- Full SPIRE-managed mTLS not available
+
+**Degradation:**
+- Bootstrap identity provides journal connectivity
+- Periodic retry for SPIRE SVID
+- No functional impact if journal accepts bootstrap identity
+
+**Recovery:**
+- SPIRE agent becomes available → pact-agent obtains SVID → rotates to SPIRE-managed mTLS
+- Fully automatic, no admin intervention
+
+**Detection:**
+- pact-agent logs: "SPIRE agent unreachable, using bootstrap identity"
+- Periodic retry log entries
+
+---
+
+## F27: Namespace handoff failure (pact → lattice)
+
+**Trigger:** Unix socket connection between pact-agent and lattice-node-agent fails, or FD passing fails.
+
+**Impact:**
+- Allocation cannot start in prepared namespace
+- lattice-node-agent falls back to self-service mode (creates own namespaces if capable)
+
+**Degradation:**
+- In fallback mode: lattice creates namespaces without pact's cgroup enforcement
+- Reduced isolation guarantees
+- AuditEvent emitted
+
+**Recovery:**
+- Socket reconnection on next allocation request
+- If persistent: admin investigates socket path, permissions, process state
+
+**Detection:**
+- AuditEvent: namespace handoff failure
+- lattice-node-agent logs: "falling back to self-service namespace creation"
+
+---
+
+## F28: Network configuration failure (netlink)
+
+**Trigger:** Netlink interface configuration fails during boot (wrong config, driver issue, hardware failure).
+
+**Impact:**
+- Network-dependent boot phases blocked (PB3: strict ordering)
+- Node cannot reach journal, cannot pull overlay
+- Boot sequence stuck at ConfigureNetwork phase
+
+**Degradation:**
+- Node is unreachable
+- Boot fails — no services started
+- BMC console is the only access path
+
+**Recovery:**
+- Admin investigates via BMC console
+- Fix network config in overlay or hardware issue
+- Node reboots with corrected config
+
+**Detection:**
+- Node never reaches Active enrollment state
+- Journal logs: no heartbeat from node after expected boot time
+
+---
+
+## F29: Cascade service failure (dependency chain)
+
+**Trigger:** A service that other services depend on crashes (e.g., dbus-daemon crashes, nv-hostengine depends on it).
+
+**Impact:**
+- Dependent services may malfunction or crash in cascade
+- Multiple services entering Failed state simultaneously
+
+**Degradation:**
+- Supervision loop restarts the root-cause service first (lowest order number)
+- Dependent services are restarted after their dependency is Running
+- Dependency ordering is re-evaluated on each restart cycle
+- If root-cause service keeps failing: dependents remain Failed
+
+**Recovery:**
+- Root-cause service recovers → dependents restart in order
+- Admin investigates if root-cause service enters restart loop
+
+**Detection:**
+- Multiple AuditEvents for service crashes in rapid succession
+- CapabilityReport shows multiple services Failed
+
+**Blast radius:** Limited to the dependency chain of the failed service. Services in other slices or without dependency are unaffected.
+
+---
+
+## F30: cgroup.kill failure (scope cleanup)
+
+**Trigger:** cgroup.kill fails to terminate processes in a scope (kernel bug, zombie processes, D-state processes stuck in I/O).
+
+**Impact:**
+- CgroupScope cannot be fully released
+- Orphaned processes may consume resources
+- New cgroup scope for service restart may coexist with old one
+
+**Degradation:**
+- Log error with PID list of unkillable processes
+- Mark scope as "zombie" — do not reuse
+- Create new scope for service restart in same slice
+- Zombie scopes cleaned up on next reboot
+
+**Recovery:**
+- Reboot clears all zombie scopes
+- D-state processes resolve when I/O completes (or hardware is fixed)
+
+**Detection:**
+- AuditEvent: "cgroup.kill failed, zombie scope"
+- Monitoring: zombie scope count metric
+
+**What must NEVER happen:** pact-agent must never hang waiting for cgroup.kill. Use a timeout — if kill doesn't complete within 10s, log and move on.
+
+---
+
+## F31: Mount refcount inconsistency
+
+**Trigger:** Bug or crash timing causes MountRef refcount to diverge from actual allocation count (undercount: mount unmounted while still in use; overcount: mount never unmounted).
+
+**Impact:**
+- Undercount: active allocation loses access to mounted filesystem — data access failure
+- Overcount: mount leaks, consuming kernel resources
+
+**Degradation:**
+- Undercount is the dangerous case — detected by allocation I/O errors. pact re-mounts and corrects refcount.
+- Overcount is benign — detected by periodic reconciliation (mount table scan vs. journal state). Corrected by adjusting refcount.
+
+**Recovery:**
+- Periodic reconciliation (on supervision loop idle tick) scans mount table against active allocations
+- Discrepancies logged and corrected automatically
+
+**Detection:**
+- I/O errors from allocations (undercount)
+- Mount table growing unboundedly (overcount)
+- Reconciliation audit log entries
+
+**What must NEVER happen:** Refcount must never go negative. Negative refcount is a bug — assert and log, do not unmount.
+
+---
+
+## F32: UidMap propagation lag
+
+**Trigger:** New UID assigned via journal Raft, but not yet propagated to all agents (eventual consistency window).
+
+**Impact:**
+- User authenticates successfully (OIDC valid) but NSS lookup fails on nodes that haven't received the update
+- NFS file access may fail or show numeric UIDs on lagging nodes
+
+**Degradation:**
+- Lag is typically sub-second (journal subscription push)
+- On lagging nodes: getpwnam returns not-found, falls through to "files" in nsswitch.conf
+- User retries after brief delay — second attempt succeeds
+
+**Recovery:**
+- Self-healing: journal subscription delivers update within seconds
+- If subscription is broken (F3 partition): cached UidMap used, new users unresolvable until reconnect
+
+**Detection:**
+- Agent logs: UidMap subscription lag metric
+- User reports: "identity not found" error that resolves on retry
+
+**Blast radius:** Limited to the propagation window (sub-second in normal operation). Only affects the newly assigned user, not existing users.
+
+---
+
+## F33: Boot phase retry exhaustion
+
+**Trigger:** A boot phase fails repeatedly (e.g., network driver keeps failing, journal permanently unreachable on first boot with no cache).
+
+**Impact:**
+- Node stuck in BootFailed state indefinitely
+- No services started, node not schedulable
+
+**Degradation:**
+- Exponential backoff on retries (1s, 2s, 4s, ... up to 60s max)
+- After configurable max retries (default: 30), agent stops retrying and remains in BootFailed
+- BMC console is the only access path
+- If hardware watchdog is active: watchdog continues being petted during retry loop (agent is alive, just stuck in boot)
+
+**Recovery:**
+- Admin investigates via BMC console
+- Fix underlying issue (network, journal availability, hardware)
+- Agent restart or node reboot to retry boot
+
+**Detection:**
+- Node never reaches Active enrollment state
+- Agent logs: "boot phase X failed, retry N/30"
+- Journal: no heartbeat from node
+
+**What must NEVER happen:** Boot retry loop must not prevent watchdog petting. A node stuck in boot should not trigger BMC reboot — the agent is alive and diagnosable via BMC console.
+
+---
+
+## F34: Emergency override failure
+
+**Trigger:** Admin requests emergency freeze/kill of workload.slice, but the operation fails (cgroup freeze not supported on kernel, or processes in D-state).
+
+**Impact:**
+- Runaway workload continues consuming resources despite emergency mode
+- Admin cannot regain control of node resources through pact
+
+**Degradation:**
+- Log failure with detail (kernel version, process states)
+- Suggest escalation: BMC reboot via OpenCHAMI
+- Emergency mode remains active (does not auto-close on failure)
+- Admin can try individual process SIGKILL as alternative
+
+**Recovery:**
+- BMC reboot as last resort
+- Or: wait for D-state processes to resolve, retry freeze
+
+**Detection:**
+- AuditEvent: "emergency freeze failed"
+- Admin CLI shows error with suggested actions
+
+---
+
+## F35: Namespace leak
+
+**Trigger:** NamespaceSet not cleaned up after allocation ends — pact misses the cgroup-empty event (race condition, or cgroup notification lost).
+
+**Impact:**
+- Leaked namespace FDs consume kernel resources (file descriptors, network namespace state)
+- Over time: file descriptor exhaustion on the node
+
+**Degradation:**
+- Periodic reconciliation (idle supervision tick) scans /proc for orphaned namespaces
+- Orphaned namespaces (no processes, no active allocation in journal) are cleaned up
+- AuditEvent emitted for each leaked namespace found
+
+**Recovery:**
+- Automatic via periodic reconciliation
+- Worst case: node reboot clears all namespaces
+
+**Detection:**
+- Reconciliation audit log: "orphaned namespace cleaned up"
+- Monitoring: namespace count metric trending upward
+
+**Blast radius:** Gradual resource leak, not immediate failure. Reconciliation prevents accumulation.
+
+---
+
+## F36: Simultaneous multiple service failures
+
+**Trigger:** Multiple services crash simultaneously (e.g., kernel OOM kills several services, or shared dependency failure).
+
+**Impact:**
+- Multiple services need restart
+- Supervision loop processes one crash per tick — all are detected but restart is sequential
+
+**Degradation:**
+- Services restarted in dependency order (lowest order first)
+- Independent services (no dependency relationship) may restart in parallel
+- If OOM was the cause: cgroup limits should prevent recurrence after restart
+- CapabilityReport updated to reflect multiple Failed services
+
+**Recovery:**
+- Automatic restart per policy in dependency order
+- If OOM caused by pact-agent itself: agent is protected by OOMScoreAdj=-1000 (RI4)
+- If OOM caused by workload: workload.slice processes killed first (kernel cgroup OOM priority)
+
+**Detection:**
+- Burst of AuditEvents for service crashes
+- Kernel OOM messages in dmesg (if OOM was cause)
+- CapabilityReport shows degraded state
+
+**What must NEVER happen:** pact-agent itself must not be OOM-killed. RI4 (OOMScoreAdj=-1000) ensures this. If pact-agent IS killed despite this, the hardware watchdog triggers reboot (F23).
+
+---
+
+## Unacceptable Failure Behaviors
+
+The following must NEVER happen, regardless of failure scenario:
+
+| Rule | Context | Rationale |
+|------|---------|-----------|
+| pact-agent OOM-killed | RI4 | OOMScoreAdj=-1000. If violated, watchdog reboots (F23). |
+| Agent hang blocks watchdog | PS2, F33 | Boot retry loop must still pet watchdog. Only a true hang triggers reboot. |
+| Orphaned cgroup scope leaks permanently | RI5, PS3 | Callback + cgroup.kill ensures cleanup. Zombie scopes cleared on reboot (F30). |
+| MountRef refcount goes negative | WI2 | Assert and log. Never unmount on negative. |
+| Silent UID collision across orgs | IM2 | Ranges non-overlapping by construction. Sequential assignment, no hash. |
+| Write to another system's cgroup slice outside emergency | RI1, RI3 | Requires emergency mode + OIDC auth + audit. No exceptions. |
+| Boot phase skipped | PB3 | Strict ordering. Phase failure blocks all subsequent phases. |
+| Network call from NSS module | IM5 | libnss_pact.so is read-only mmap. Never blocks on I/O. |
+| Audit trail gap (except during crash) | O3 | All operations logged. Local log during partition, replayed on reconnect. |
+| Bootstrap identity used after SVID obtained | PB4 | Discarded immediately. Never stored persistently. |
+
+---
+
 ## Severity Classification
 
 | Failure | Severity | Auto-Recovery | Human Required |
@@ -524,3 +944,19 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 | F18: Vault unreachable (CA rotation) | Medium | Yes (current CA key continues) | If CA cert expires |
 | F19: Journal unreachable (renewal) | High | Partial (1-day buffer) | If prolonged |
 | F20: Hardware identity mismatch | Medium | No | Yes (re-enroll or fix boot) |
+| F21: Supervised service crash | Medium | Yes (supervision loop) | If persistent |
+| F22: cgroup creation failure | High | No | Yes (investigate fs) |
+| F23: Watchdog timeout (agent hang) | Critical | Yes (BMC reboot) | Yes (investigate cause) |
+| F24: UID range exhaustion | Medium | No | Yes (extend range) |
+| F25: NSS .db file corruption | Low | Yes (rewrite from cache) | No |
+| F26: SPIRE agent unreachable | Low | Yes (retry + bootstrap fallback) | No |
+| F27: Namespace handoff failure | Medium | Partial (lattice self-service fallback) | If persistent |
+| F28: Network config failure | Critical | No | Yes (BMC console) |
+| F29: Cascade service failure | High | Yes (dependency-ordered restart) | If root cause persists |
+| F30: cgroup.kill failure | Medium | Partial (zombie scope, reboot clears) | If persistent |
+| F31: Mount refcount inconsistency | Medium | Yes (periodic reconciliation) | No |
+| F32: UidMap propagation lag | Low | Yes (sub-second self-healing) | No |
+| F33: Boot phase retry exhaustion | High | Partial (retries with backoff) | Yes (BMC investigation) |
+| F34: Emergency override failure | Critical | No | Yes (BMC reboot) |
+| F35: Namespace leak | Low | Yes (periodic reconciliation) | No |
+| F36: Simultaneous multi-service failure | High | Yes (dependency-ordered restart) | If OOM persists |

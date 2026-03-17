@@ -1,6 +1,6 @@
 # ADR-008: Node Enrollment, Domain Membership, and Certificate Lifecycle
 
-## Status: Proposed
+## Status: Accepted (amended 2026-03-17 — SPIRE as primary mTLS provider)
 
 ## Context
 
@@ -398,6 +398,88 @@ an independent Raft command. On partial failure:
 - Vault PKI configuration becomes part of pact deployment documentation.
 - Node heartbeat detected via subscription stream liveness (default timeout: 5 minutes).
 
+## Amendment (2026-03-17): SPIRE as Primary mTLS Provider
+
+### Context for amendment
+
+HPE Cray infrastructure uses SPIRE (SPIFFE Runtime Environment) for mTLS workload
+attestation. `spire-agent` runs on compute nodes. The original ADR-008 design assumed
+pact self-manages all mTLS certificates via Vault intermediate CA. This creates
+unnecessary duplication with the existing SPIRE infrastructure.
+
+Additionally, lattice-node-agent also needs mTLS (to lattice-quorum). Both systems
+managing their own certificate lifecycle independently is wasteful when SPIRE already
+provides this.
+
+### Amendment decision
+
+**SPIRE is the primary mTLS provider. ADR-008's Vault-based self-signed model is the
+fallback when SPIRE is not deployed.**
+
+The identity acquisition is abstracted via `hpc-identity` crate (ADR-015) with an
+`IdentityCascade` that tries providers in order:
+
+1. **SpireProvider** — connect to SPIRE agent socket, obtain X.509 SVID. SPIRE handles
+   rotation, attestation, and trust bundle management.
+2. **SelfSignedProvider** — ADR-008 model: agent generates keypair + CSR, journal signs
+   with intermediate CA. Fallback when SPIRE is not deployed.
+3. **StaticProvider** — bootstrap identity from OpenCHAMI SquashFS image. Used for
+   initial journal authentication before SPIRE or journal is reachable.
+
+### What changes
+
+| Component | Original ADR-008 | After amendment |
+|-----------|-----------------|-----------------|
+| Primary cert source | Vault intermediate CA via journal | SPIRE SVID |
+| Fallback cert source | N/A | Vault intermediate CA via journal (ADR-008 model) |
+| Bootstrap | Hardware identity + CSR | Same (unchanged) |
+| Cert rotation | Agent-driven CSR renewal + dual-channel | SPIRE-managed rotation + dual-channel |
+| Vault dependency | Required for all deployments | Required only when SPIRE not deployed |
+| Lattice mTLS | Not addressed | Same IdentityCascade via hpc-identity |
+
+### What survives unchanged
+
+- **Enrollment registry** — hardware identity matching, enrollment states, admin enrollment
+- **EnrollmentState machine** — Registered/Active/Inactive/Revoked
+- **Bootstrap identity** — used for initial auth before any provider is available
+- **Dual-channel rotation pattern** — applicable to both SVID and self-signed rotation
+- **Enrollment endpoint security** — rate limiting, once-Active rejection, audit logging
+- **Heartbeat via subscription stream** — unchanged
+- **Multi-domain enrollment** — unchanged
+- **Maintenance mode** — unchanged
+
+### What is demoted to fallback
+
+- **Vault intermediate CA on journal nodes** — only needed when SPIRE not deployed
+- **Per-agent CSR signing by journal** — only needed when SPIRE not deployed
+- **Journal-side cert lifecycle management** — SPIRE manages this when available
+
+### Boot sequence with SPIRE
+
+```
+T+0.0s  Kernel + initramfs → mount SquashFS root
+T+0.1s  pact-agent starts (PID 1)
+T+0.2s  IdentityCascade tries StaticProvider (bootstrap cert from SquashFS)
+T+0.3s  Agent authenticates to journal using bootstrap identity
+T+0.4s  Agent pulls vCluster overlay from journal
+T+0.5s  Agent starts services (including any SPIRE-dependent services)
+T+0.8s  IdentityCascade retries: SpireProvider detects SPIRE agent available
+T+0.9s  Agent obtains SVID from SPIRE
+T+1.0s  CertRotator performs dual-channel swap to SVID
+T+1.0s  Bootstrap identity discarded (PB4)
+```
+
+If SPIRE agent is never available (standalone deployment): agent continues with
+bootstrap identity or SelfSignedProvider (journal-signed cert). All functionality
+works (PB5: no hard SPIRE dependency).
+
+### Implications for lattice
+
+lattice-node-agent uses the same `IdentityCascade` from hpc-identity:
+- When SPIRE available: obtains SVID for lattice-quorum mTLS
+- When SPIRE not available: uses its own cert management (equivalent to ADR-008)
+- Both systems share the same `IdentityProvider` trait — no duplication
+
 ## Revisit
 
 - If TPM attestation becomes available across the fleet, hardware identity verification
@@ -408,3 +490,5 @@ an independent Raft command. On partial failure:
 - If Vault becomes unacceptable as a dependency, the journal could manage its own CA
   entirely (generate root key, self-sign) — but this loses Vault's audit, CRL, and
   federation benefits.
+- If SPIRE is adopted universally across all deployments, the SelfSignedProvider and
+  Vault CA model can be removed entirely, simplifying the architecture.

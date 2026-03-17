@@ -21,8 +21,27 @@ pact-agent can reach journal nodes via network at boot time. If network is unava
 ### A-I5: cgroup v2 filesystem available [Validated]
 PactSupervisor uses cgroup v2 for service isolation. Modern kernels (5.x+) have cgroup v2 by default. SquashFS images include cgroup2 mount.
 
-### A-I6: 4-7 services per node [Validated]
-Diskless HPC nodes run 4-7 services (chronyd, nvidia-persistenced, metrics, lattice-node-agent, etc.). This is far fewer than general-purpose servers, making PactSupervisor viable over systemd.
+### A-I6: 5-9 services per node [Validated — updated from real compute node analysis]
+Diskless HPC nodes run 5-9 services depending on vCluster type. Derived from real `ps aux` analysis of HPE Cray EX compute nodes:
+- **ML training (GPU)**: 7 services (chronyd, dbus, cxi_rh x4, nvidia-persistenced, nv-hostengine, rasdaemon, lattice-node-agent). Plus rpcbind/rpc.statd if NFS.
+- **Regulated/sensitive**: +2 (auditd, audit-forwarder) = 9 services.
+- **Dev sandbox**: 5 services (chronyd, dbus, cxi_rh, rasdaemon, lattice-node-agent).
+This is far fewer than general-purpose servers, making PactSupervisor viable over systemd.
+
+### A-I7: SPIRE pre-existing in infrastructure [Validated]
+HPE Cray infrastructure uses SPIRE (SPIFFE Runtime Environment) for mTLS workload attestation. spire-agent runs on compute nodes. pact-agent integrates with SPIRE to obtain SVIDs rather than managing its own certificate lifecycle end-to-end. ADR-008 bootstrap identity is used until SPIRE is reachable.
+
+### A-I8: Hardware watchdog available on BMC-equipped nodes [Accepted]
+Nodes where pact-agent runs as PID 1 have hardware watchdog support (`/dev/watchdog`) backed by IPMI/BMC. If no hardware watchdog is available, the node runs in systemd mode (pact is a regular service, not PID 1).
+
+### A-I9: cxi_rh instances match NIC count [Validated]
+CXI resource handler runs one instance per Slingshot NIC device. Real compute nodes show 4 instances (cxi0-cxi3). Count is hardware-dependent and discovered at boot.
+
+### A-I10: atomd and nomad replaced by pact [Accepted]
+HPE ATOM (atomd) and HashiCorp Nomad are the current task orchestration layers on compute nodes. Both are fully replaced by pact-agent's process supervision. The 17+ Nomad executors currently deploying system services (slurmd, munge, pyxis, enroot, podman, uenv, storage, IAM, CDI, skybox, etc.) are replaced by declarative ServiceDecl entries in the vCluster overlay.
+
+### A-I11: DVS is legacy [Accepted]
+Cray DVS (Data Virtualization Service) is legacy. DVS-IPC_msg processes on compute nodes are not needed with modern storage (VAST NFS/S3). Not managed by pact.
 
 ---
 
@@ -76,6 +95,28 @@ Token cache is stored on the user's client machine (workstation/laptop), not on 
 
 ---
 
+## Identity Mapping Assumptions
+
+### A-Id1: NFS requires POSIX UID/GID [Validated]
+NFS wire protocol uses numeric UID/GID for file ownership and access control. OIDC tokens do not natively carry POSIX attributes. A mapping layer is required when pact is init and NFS is used. S3 works natively with OIDC — no mapping needed.
+
+### A-Id2: Identity mapping is an NFS bypass shim [Accepted]
+The UidMap and NSS module exist solely because NFS cannot authenticate via OIDC. This is not a core identity system — it is a compatibility shim. When systemd mode is active (SSSD handles NSS) or when storage is pure S3, this subsystem is inactive.
+
+### A-Id3: IdP has POSIX attributes or can be synced [Accepted — with fallback]
+The IdP (Keycloak, AD) either has uidNumber/gidNumber in its LDAP backend, or pact-journal assigns UIDs from configured ranges. If the IdP has POSIX attributes, SCIM/LDAP sync populates the journal's UidMap. If not, on-demand assignment creates mappings.
+
+### A-Id4: Full supplementary group resolution needed [Validated]
+NFS access control uses all supplementary groups, not just primary GID. The NSS module must resolve full group membership (getgrouplist). GroupEntry includes member lists.
+
+### A-Id5: Stride of 10,000 per org sufficient [Accepted — configurable default]
+Default stride (10,000 UIDs per org) is sufficient for typical HPC sites. Stride is a site-wide configurable default, adjustable before federation starts. Exhaustion triggers alert; admin must increase stride (requires UID remapping if increased after assignments). With stride 10,000 and base_uid 10,000, max ~429,000 federated orgs in 32-bit UID space.
+
+### A-Id6: UID assignments reclaimable on federation departure [Accepted]
+When an org leaves federation, its UidEntries are GC'd from the journal and the org_index becomes reclaimable. NFS files owned by departed org's UIDs become orphaned (numeric UIDs, no name resolution). Site admin is responsible for archiving or re-owning those files before departure.
+
+---
+
 ## Consistency Assumptions
 
 ### A-C1: AP model is acceptable [Accepted]
@@ -102,6 +143,18 @@ Federation via Sovra is feature-gated. The system is fully functional without it
 
 ### A-Int4: lattice-node-agent mediates capability delivery [Accepted]
 pact writes CapabilityReport to tmpfs + unix socket. lattice-node-agent reads it and reports to scheduler. pact does NOT stream directly to lattice scheduler.
+
+### A-Int5: hpc-core contracts are trait-based [Accepted]
+hpc-core crates (`hpc-node`, `hpc-audit`) define traits and types, not implementations. pact and lattice each implement the traits independently. Neither system depends on the other at runtime — only on the shared contract.
+
+### A-Int6: Lattice works independently of pact [Accepted]
+lattice-node-agent can run without pact (standalone mode on systemd-managed nodes). In standalone mode, lattice creates its own cgroup hierarchy and manages its own mounts using hpc-core conventions. When pact is present, lattice gains capabilities (namespace pre-creation, mount refcounting, cgroup-atomic checkpointing) — "steroids" mode.
+
+### A-Int7: Unix socket for namespace handoff [Accepted]
+Namespace FDs are passed from pact to lattice via a unix socket (SCM_RIGHTS). This is the standard Linux mechanism for FD passing between processes. The socket path is defined in hpc-core `hpc-node` conventions.
+
+### A-Int8: libnss 0.9.0 crate is suitable [Accepted]
+The `libnss` Rust crate (0.9.0, Feb 2025, LGPL-3.0) provides a stable API for writing NSS modules. Dynamic linking (cdylib) satisfies LGPL requirements. Dependencies are minimal (libc, lazy_static, paste).
 
 ---
 
@@ -150,6 +203,55 @@ Mitigation for pact: journal state is small (config entries, policies, overlays)
 
 ---
 
+## Process Supervision Assumptions
+
+### A-PS1: Adaptive polling does not miss critical events [Accepted]
+During active workloads (slower polling, 2-5s), a service crash is not detected for up to the poll interval. This is acceptable because: (a) the supervision loop tick is the detection mechanism, not a real-time signal, (b) the watchdog pet is coupled to the tick, so agent hang is detected separately, (c) for sub-second crash detection, eBPF tracepoints on process exit could supplement polling in a future iteration.
+
+### A-PS2: cgroup.kill is reliable on supported kernels [Accepted]
+cgroup.kill (Linux 5.14+) is the cleanup mechanism for child processes. On older kernels, fallback to iterating cgroup.procs and sending SIGKILL. F30 handles the edge case where kill fails (D-state processes). SquashFS images should include kernel 5.14+ for full support.
+
+### A-PS3: Services do not require inter-service communication during startup [Accepted]
+Services are started sequentially in dependency order. There is no mechanism for a service to signal "I'm ready" to its dependents beyond being in Running state (process alive). If a service needs warm-up time (e.g., nv-hostengine initializing GPU contexts), the dependent service must handle the dependency not being fully ready yet. Health checks (HTTP/TCP) can be used to gate readiness, but this is per-service configuration, not a supervisor feature.
+
+---
+
+## Resource Isolation Assumptions
+
+### A-RI1: cgroup v2 unified hierarchy [Validated]
+All target systems use cgroup v2 unified hierarchy (not hybrid v1/v2). This is a hard requirement — PactSupervisor does not support cgroup v1 fallback. SquashFS images must have CONFIG_CGROUP_V2 enabled and cgroup2 mounted.
+
+### A-RI2: Kernel supports cgroup.kill [Accepted — with fallback]
+cgroup.kill requires Linux 5.14+. If not available, fallback to SIGKILL iteration on cgroup.procs. Degraded but functional. See A-PS2.
+
+### A-RI3: OOMScoreAdj=-1000 is honored [Validated]
+Linux kernel honors OOMScoreAdj=-1000 for the init process. pact-agent as PID 1 will not be OOM-killed unless all other processes have already been killed.
+
+---
+
+## Network Management Assumptions
+
+### A-NM1: Netlink sufficient for HPC network configuration [Accepted]
+Standard netlink (RTM_NEWADDR, RTM_NEWROUTE, RTM_SETLINK) covers all needed network operations: IP assignment, routing, MTU, link state. CXI/Slingshot-specific configuration is handled by cxi_rh (a supervised service), not by pact's network management. pact only configures standard IP interfaces.
+
+### A-NM2: Network configuration is deterministic from overlay [Accepted]
+On diskless compute nodes, network configuration is fully determined by the vCluster overlay (no DHCP discovery needed). Interface names, addresses, routes, and MTU are all declared. This assumption fails if nodes need dynamic network discovery — but diskless HPC nodes have pre-assigned network identities from OpenCHAMI.
+
+---
+
+## Workload Integration Assumptions
+
+### A-WI1: SCM_RIGHTS works for namespace FD passing [Validated]
+Unix domain sockets with SCM_RIGHTS ancillary data is the standard Linux mechanism for passing file descriptors between processes. Kernel support is universal. The namespace FDs (from /proc/self/ns/*) are passable via this mechanism.
+
+### A-WI2: Periodic reconciliation catches all leaks [Accepted]
+Mount refcount and namespace reconciliation during idle supervision ticks is sufficient to prevent resource leaks from accumulating. The reconciliation interval is bounded by the adaptive polling rate (faster when idle). A node running continuous workloads without idle periods could theoretically accumulate leaks — but the cache hold timer bounds mount accumulation, and namespace cleanup is triggered by cgroup-empty events regardless of reconciliation.
+
+### A-WI3: Hold timer default TBD [Unknown]
+The mount cache hold time (WI3) default has not been determined. Needs benchmarking: too short = no caching benefit, too long = resource waste. Likely in the range of 30-300 seconds. Must be determined by measuring uenv mount latency vs. available memory on target hardware.
+
+---
+
 ## Homogeneity Assumption
 
 ### A-H1: vCluster node homogeneity [Accepted]
@@ -158,3 +260,98 @@ All nodes within a vCluster converge to the same overlay configuration. Per-node
 - **Reports** heterogeneity in status/diff output so operators can see which nodes deviate.
 - **Does not enforce** homogeneity automatically — it flags the condition for admin decision.
 Rationale: HPC vClusters assume uniform node configuration for scheduling correctness. Heterogeneous nodes can cause job failures if the scheduler assumes capability uniformity.
+
+---
+
+## Assumption Risk Assessment
+
+Assumptions that, if wrong, would invalidate architectural decisions. Ordered by impact.
+
+### Critical (would require redesign)
+
+| Assumption | Decision it supports | What breaks if wrong |
+|-----------|---------------------|---------------------|
+| A-I8: Hardware watchdog available | PB1, PS2: watchdog as PID 1 crash recovery | If no watchdog on PID 1 nodes, agent hangs are unrecoverable without external monitoring. Would need a lightweight watchdog shim process (like tini) as actual PID 1. |
+| A-RI1: cgroup v2 unified hierarchy | All of Resource Isolation context | If some nodes run cgroup v1 or hybrid, the entire cgroup management layer needs dual implementation. PactSupervisor becomes significantly more complex. |
+| A-I1: Diskless compute nodes | Identity Mapping, Network Management, Bootstrap | If nodes have persistent local storage, the "no state survives reboot" assumption breaks. UidMap caching, network config persistence, and boot sequence all change. |
+| A-NM2: Network config deterministic from overlay | NM1, NM2, PB3 Phase 2 | If nodes need DHCP or dynamic discovery, ConfigureNetwork can't be a simple "apply overlay" phase. Would need a DHCP client as a supervised service, changing boot ordering. |
+
+### High (would require significant rework)
+
+| Assumption | Decision it supports | What breaks if wrong |
+|-----------|---------------------|---------------------|
+| A-I7: SPIRE pre-existing | PB4, PB5, N10: bootstrap identity → SVID | If SPIRE is NOT deployed, the SVID rotation path never activates. Not fatal (PB5 says no hard dependency), but the mTLS story is weaker — bootstrap identity or journal-signed certs only. |
+| A-Id1: NFS requires POSIX UID/GID | All of Identity Mapping context | If storage migrates to pure S3/NFSv4 with string identifiers, the entire pact-nss crate and UidMap machinery becomes unnecessary. This is the desired end state — the shim is deliberately disposable. |
+| A-Int6: Lattice works independently | hpc-core shared kernel design | If lattice becomes tightly coupled to pact (can't run without it), the hpc-core contracts are over-designed. Both systems implementing provider AND consumer becomes unnecessary. |
+| A-PS2: cgroup.kill reliable | PS3: immediate child cleanup | If cgroup.kill is unreliable on target kernels, child process cleanup becomes best-effort. Orphaned processes could accumulate. |
+
+### Low (manageable rework)
+
+| Assumption | Decision it supports | What breaks if wrong |
+|-----------|---------------------|---------------------|
+| A-Id5: Stride 10,000 sufficient | IM2, IM3: precursor ranges | If an org has >10,000 users, stride must be increased. Requires UID remapping for that org. Operationally painful but not architecturally breaking. |
+| A-Int8: libnss 0.9.0 suitable | Identity Mapping implementation | If crate is abandoned or incompatible, write NSS module manually. Small C shim + Rust FFI. ~200 lines of code. |
+| A-WI3: Hold timer default TBD | WI3: mount caching | Need benchmarking. Wrong default = suboptimal performance, not correctness issue. |
+
+### Open Unknowns
+
+| ID | Question | Impact if wrong | Next step |
+|----|---------|----------------|-----------|
+| A-Int2 | OpenCHAMI Rust client exists? | Delegation commands remain stubbed | Check OpenCHAMI API, assess effort |
+| A-WI3 | Mount hold timer optimal value? | Performance only | Benchmark uenv mount latency |
+| NEW | dbus-daemon actually needed for DCGM? | If not needed, one fewer service | Test nv-hostengine standalone mode |
+| NEW | rpcbind needed for NFSv4? | If NFSv4 only, rpcbind can be dropped | Check VAST NFS version in use |
+| NEW | SPIRE Workload API socket path on HPE Cray? | Needed for N10 integration | Check /run/spire/agent.sock or equivalent |
+| NEW | ADR-008 Vault-based cert model vs SPIRE | See A-mTLS1 below | Design decision needed |
+
+---
+
+## mTLS Architecture (SPIRE vs ADR-008 — needs resolution)
+
+### A-mTLS1: SPIRE is the primary mTLS provider [Accepted — invalidates parts of ADR-008]
+
+The current ADR-008 design assumes pact self-manages mTLS certificates:
+- Journal holds Vault intermediate CA
+- Agents generate keypairs, submit CSRs, journal signs locally
+- Dual-channel rotation for cert renewal
+
+The supervisor redesign established that SPIRE is pre-existing in the infrastructure (A-I7) and pact should integrate with it (N10). This means:
+
+**What changes:**
+- **Primary path**: pact-agent gets SVIDs from SPIRE (workload attestation). No Vault, no CSR signing, no intermediate CA for per-agent certs. SPIRE handles rotation.
+- **Fallback path**: ADR-008's journal-signed cert model remains as fallback when SPIRE is not deployed (PB5: no hard SPIRE dependency).
+- **Bootstrap**: OpenCHAMI provisioned identity (bootstrap cert in SquashFS) used for initial journal auth before SPIRE is reachable. This part of ADR-008 is unchanged.
+
+**What is invalidated in ADR-008:**
+- Vault intermediate CA on journal nodes — not needed when SPIRE is primary
+- Per-agent CSR signing by journal — not needed when SPIRE issues SVIDs
+- Journal-side cert lifecycle management — SPIRE manages this
+
+**What survives in ADR-008:**
+- Bootstrap identity concept (first auth before SPIRE)
+- Enrollment registry (hardware identity → domain membership)
+- Dual-channel rotation pattern (applicable to SVID rotation too)
+- EnrollmentState machine (Registered/Active/Inactive/Revoked)
+
+**Lattice also needs mTLS:**
+- Lattice-node-agent → lattice-quorum communication uses mTLS
+- If SPIRE is deployed, lattice should also obtain SVIDs
+- If SPIRE is NOT deployed, lattice needs its own cert management
+- This is a shared concern → belongs in hpc-core
+
+**Proposed resolution: hpc-identity crate in hpc-core**
+
+A new `hpc-identity` crate (or extend `hpc-auth`) defining:
+
+| Trait | Purpose |
+|-------|---------|
+| `IdentityProvider` | Trait for obtaining workload identity. Implementations: SpireProvider (SVID), SelfSignedProvider (ADR-008 style), StaticProvider (bootstrap) |
+| `CertRotator` | Trait for certificate rotation. Dual-channel pattern as default impl. |
+| `WorkloadIdentity` | Type holding cert + key + trust bundle, regardless of source |
+
+Both pact and lattice implement `IdentityProvider`:
+- When SPIRE available: use `SpireProvider`
+- When no SPIRE: pact uses `SelfSignedProvider` (journal CA), lattice uses its own equivalent
+- On first boot: both use `StaticProvider` (bootstrap cert from OpenCHAMI)
+
+**Status: needs ADR update.** ADR-008 should be amended or superseded with an ADR that covers the SPIRE-primary model. The enrollment registry and enrollment state machine remain valid regardless of cert source.

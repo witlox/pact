@@ -199,7 +199,15 @@ pub struct ServiceDecl {
     pub restart_delay_seconds: u32,
     pub depends_on: Vec<String>,
     pub order: u32,
+    /// Memory limit (e.g., "512M", "1G"). Maps to cgroup `memory.max`.
     pub cgroup_memory_max: Option<String>,
+    /// cgroup slice to place this service in (e.g., "pact.slice/gpu.slice").
+    /// Defaults to "pact.slice/infra.slice" if not set.
+    #[serde(default)]
+    pub cgroup_slice: Option<String>,
+    /// CPU weight (1-10000). Maps to cgroup `cpu.weight`. Default: 100.
+    #[serde(default)]
+    pub cgroup_cpu_weight: Option<u16>,
     pub health_check: Option<HealthCheck>,
 }
 

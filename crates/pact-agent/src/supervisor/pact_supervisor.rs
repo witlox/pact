@@ -14,9 +14,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::process::Command;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use pact_common::types::{HealthCheckType, ServiceDecl, ServiceState};
+use hpc_audit::{AuditEvent, AuditPrincipal, AuditScope, AuditSink, AuditSource};
+use hpc_node::{CgroupHandle, CgroupManager, ResourceLimits};
+use pact_common::types::{HealthCheckType, RestartPolicy, ServiceDecl, ServiceState};
 
 use super::{HealthCheckResult, ServiceManager, ServiceStatus};
 
@@ -28,18 +31,320 @@ struct ProcessState {
     last_exit_code: Option<i32>,
     /// Handle to the child process (if running).
     child: Option<tokio::process::Child>,
+    /// cgroup scope handle (if cgroup manager is active).
+    cgroup_handle: Option<CgroupHandle>,
+}
+
+/// Workload state determines supervision loop poll interval (PS1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkloadState {
+    /// No processes in workload.slice — faster polling, deeper inspections.
+    Idle,
+    /// Processes active in workload.slice — slower polling, minimal overhead.
+    Active,
+}
+
+/// Configuration for the supervision loop.
+#[derive(Debug, Clone)]
+pub struct SupervisionConfig {
+    /// Poll interval when idle (no workloads). Default: 500ms.
+    pub idle_interval_ms: u64,
+    /// Poll interval when active (workloads running). Default: 2000ms.
+    pub active_interval_ms: u64,
+}
+
+impl Default for SupervisionConfig {
+    fn default() -> Self {
+        Self {
+            idle_interval_ms: 500,
+            active_interval_ms: 2000,
+        }
+    }
 }
 
 /// Default process supervisor — manages services directly.
 pub struct PactSupervisor {
     processes: Arc<RwLock<HashMap<String, ProcessState>>>,
+    /// Service declarations (needed by supervision loop for restart).
+    service_decls: Arc<RwLock<Vec<ServiceDecl>>>,
     /// Grace period before SIGKILL (seconds).
     shutdown_grace_seconds: u64,
+    /// Supervision loop configuration.
+    supervision_config: SupervisionConfig,
+    /// Optional cgroup manager for resource isolation (RI2).
+    /// None when running on non-Linux or when cgroups are not available.
+    cgroup_manager: Option<Arc<dyn CgroupManager>>,
 }
 
 impl PactSupervisor {
     pub fn new() -> Self {
-        Self { processes: Arc::new(RwLock::new(HashMap::new())), shutdown_grace_seconds: 10 }
+        Self {
+            processes: Arc::new(RwLock::new(HashMap::new())),
+            service_decls: Arc::new(RwLock::new(Vec::new())),
+            shutdown_grace_seconds: 10,
+            supervision_config: SupervisionConfig::default(),
+            cgroup_manager: None,
+        }
+    }
+
+    /// Create with custom supervision config.
+    #[must_use]
+    pub fn with_config(supervision_config: SupervisionConfig) -> Self {
+        Self {
+            supervision_config,
+            ..Self::new()
+        }
+    }
+
+    /// Create with a cgroup manager for resource isolation.
+    #[must_use]
+    pub fn with_cgroup_manager(mut self, cgroup_manager: Arc<dyn CgroupManager>) -> Self {
+        self.cgroup_manager = Some(cgroup_manager);
+        self
+    }
+
+    /// Convert a `ServiceDecl`'s cgroup fields to `ResourceLimits`.
+    fn resource_limits(service: &ServiceDecl) -> ResourceLimits {
+        ResourceLimits {
+            memory_max: service.cgroup_memory_max.as_deref().and_then(parse_memory_value),
+            cpu_weight: service.cgroup_cpu_weight,
+            io_max: None,
+        }
+    }
+
+    /// Get the cgroup slice for a service (defaults to infra).
+    fn cgroup_slice(service: &ServiceDecl) -> &str {
+        service
+            .cgroup_slice
+            .as_deref()
+            .unwrap_or(hpc_node::cgroup::slices::PACT_INFRA)
+    }
+
+    /// Start the background supervision loop.
+    ///
+    /// Returns a `JoinHandle` for the loop task. The loop:
+    /// - Polls process status via `try_wait()`
+    /// - Evaluates `RestartPolicy` for crashed services
+    /// - Adapts poll interval based on workload state (PS1)
+    /// - Calls `watchdog_pet` callback each tick (PS2)
+    ///
+    /// The loop runs until the returned handle is aborted or the
+    /// `shutdown` channel is signaled.
+    pub fn start_supervision_loop<S: AuditSink + 'static>(
+        &self,
+        audit_sink: Arc<S>,
+        node_id: String,
+        watchdog_pet: Option<Arc<dyn Fn() + Send + Sync>>,
+        workload_active: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> JoinHandle<()> {
+        let processes = Arc::clone(&self.processes);
+        let service_decls = Arc::clone(&self.service_decls);
+        let config = self.supervision_config.clone();
+        let grace_secs = self.shutdown_grace_seconds;
+        let cgroup_mgr = self.cgroup_manager.clone();
+
+        tokio::spawn(async move {
+            info!("supervision loop started");
+            loop {
+                // Determine workload state and poll interval (PS1)
+                let is_active = workload_active();
+                let interval_ms = if is_active {
+                    config.active_interval_ms
+                } else {
+                    config.idle_interval_ms
+                };
+
+                // Pet the watchdog (PS2 — coupled to loop tick)
+                if let Some(ref pet) = watchdog_pet {
+                    pet();
+                }
+
+                // Check all processes for unexpected exits
+                let crashed = Self::detect_crashed_services(&processes).await;
+
+                // Handle restarts per policy
+                let decls = service_decls.read().await;
+                for (name, exit_code) in &crashed {
+                    if let Some(decl) = decls.iter().find(|d| &d.name == name) {
+                        let should_restart = match decl.restart {
+                            RestartPolicy::Always => true,
+                            RestartPolicy::OnFailure => exit_code.is_none_or(|c| c != 0),
+                            RestartPolicy::Never => false,
+                        };
+
+                        // Emit audit event for crash
+                        let event = Self::crash_audit_event(
+                            name,
+                            *exit_code,
+                            &node_id,
+                            should_restart,
+                        );
+                        audit_sink.emit(event);
+
+                        if should_restart {
+                            info!(
+                                service = %name,
+                                exit_code = ?exit_code,
+                                policy = ?decl.restart,
+                                "supervision loop restarting service"
+                            );
+
+                            // Apply restart delay
+                            if decl.restart_delay_seconds > 0 {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(
+                                    decl.restart_delay_seconds.into(),
+                                ))
+                                .await;
+                            }
+
+                            // Restart (with cgroup scope creation)
+                            if let Err(e) =
+                                Self::do_restart(&processes, decl, grace_secs, cgroup_mgr.as_ref()).await
+                            {
+                                error!(service = %name, "supervision restart failed: {e}");
+                            }
+                        } else {
+                            info!(
+                                service = %name,
+                                exit_code = ?exit_code,
+                                policy = ?decl.restart,
+                                "supervision loop: not restarting per policy"
+                            );
+                            // Mark as Stopped for Never policy
+                            let mut procs = processes.write().await;
+                            if let Some(ps) = procs.get_mut(name.as_str()) {
+                                if decl.restart == RestartPolicy::Never {
+                                    ps.state = ServiceState::Stopped;
+                                }
+                            }
+                        }
+                    }
+                }
+                drop(decls);
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
+            }
+        })
+    }
+
+    /// Detect services whose processes have exited unexpectedly.
+    /// Returns vec of (service_name, exit_code).
+    async fn detect_crashed_services(
+        processes: &Arc<RwLock<HashMap<String, ProcessState>>>,
+    ) -> Vec<(String, Option<i32>)> {
+        let mut crashed = Vec::new();
+        let mut procs = processes.write().await;
+
+        for (name, ps) in procs.iter_mut() {
+            if ps.state != ServiceState::Running {
+                continue;
+            }
+
+            let exited = if let Some(ref mut child) = ps.child {
+                child.try_wait().ok().flatten()
+            } else {
+                None
+            };
+
+            if let Some(exit_status) = exited {
+                let code = exit_status.code();
+                warn!(service = %name, exit_code = ?code, "service exited unexpectedly");
+                ps.last_exit_code = code;
+                ps.child = None;
+                ps.pid = None;
+                ps.state = ServiceState::Failed;
+                ps.restarts += 1;
+                crashed.push((name.clone(), code));
+            }
+        }
+
+        crashed
+    }
+
+    /// Restart a service (internal, used by supervision loop).
+    async fn do_restart(
+        processes: &Arc<RwLock<HashMap<String, ProcessState>>>,
+        service: &ServiceDecl,
+        _grace_secs: u64,
+        cgroup_mgr: Option<&Arc<dyn CgroupManager>>,
+    ) -> anyhow::Result<()> {
+        // Destroy old cgroup scope if present
+        {
+            let mut procs = processes.write().await;
+            if let Some(ps) = procs.get_mut(&service.name) {
+                if let (Some(mgr), Some(ref handle)) = (cgroup_mgr, &ps.cgroup_handle) {
+                    if let Err(e) = mgr.destroy_scope(handle) {
+                        warn!(service = %service.name, "old cgroup scope cleanup failed: {e}");
+                    }
+                }
+                ps.cgroup_handle = None;
+            }
+        }
+
+        // Create new cgroup scope
+        let cgroup_handle = if let Some(mgr) = cgroup_mgr {
+            let limits = Self::resource_limits(service);
+            let slice = Self::cgroup_slice(service);
+            match mgr.create_scope(slice, &service.name, &limits) {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    error!(service = %service.name, "cgroup scope creation on restart failed: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let child = Self::spawn_process(service).await?;
+        let pid = child.id();
+
+        let mut procs = processes.write().await;
+        if let Some(ps) = procs.get_mut(&service.name) {
+            ps.state = ServiceState::Running;
+            ps.pid = pid;
+            ps.child = Some(child);
+            ps.cgroup_handle = cgroup_handle;
+            info!(service = %service.name, pid = ?pid, "service restarted by supervision loop");
+        } else {
+            procs.insert(
+                service.name.clone(),
+                ProcessState {
+                    state: ServiceState::Running,
+                    pid,
+                    restarts: 1,
+                    last_exit_code: None,
+                    child: Some(child),
+                    cgroup_handle,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn crash_audit_event(
+        service_name: &str,
+        exit_code: Option<i32>,
+        node_id: &str,
+        will_restart: bool,
+    ) -> AuditEvent {
+        AuditEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now(),
+            principal: AuditPrincipal::system("supervision-loop"),
+            action: hpc_audit::actions::SERVICE_CRASH.to_string(),
+            scope: AuditScope::node(node_id),
+            outcome: hpc_audit::AuditOutcome::Failure,
+            detail: format!(
+                "service {service_name} crashed with exit code {exit_code:?}, restart={will_restart}"
+            ),
+            metadata: serde_json::json!({
+                "service": service_name,
+                "exit_code": exit_code,
+                "will_restart": will_restart,
+            }),
+            source: AuditSource::PactAgent,
+        }
     }
 
     /// Sort services by dependency order (topological sort by `order` field).
@@ -59,6 +364,24 @@ impl PactSupervisor {
             .spawn()?;
         Ok(child)
     }
+}
+
+/// Parse memory value like "512M", "1G", "1048576" to bytes.
+fn parse_memory_value(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (num, multiplier) = if let Some(n) = s.strip_suffix('G').or_else(|| s.strip_suffix('g')) {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('M').or_else(|| s.strip_suffix('m')) {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('K').or_else(|| s.strip_suffix('k')) {
+        (n, 1024)
+    } else {
+        (s, 1)
+    };
+    num.trim().parse::<u64>().ok().map(|v| v * multiplier)
 }
 
 impl Default for PactSupervisor {
@@ -82,22 +405,55 @@ impl ServiceManager for PactSupervisor {
 
         let prev_restarts = processes.get(&service.name).map_or(0, |p| p.restarts);
 
-        let child = Self::spawn_process(service).await?;
-        let pid = child.id();
+        // Create cgroup scope before spawning (RI2)
+        let cgroup_handle = if let Some(ref mgr) = self.cgroup_manager {
+            let limits = Self::resource_limits(service);
+            let slice = Self::cgroup_slice(service);
+            match mgr.create_scope(slice, &service.name, &limits) {
+                Ok(handle) => {
+                    debug!(service = %service.name, scope = %handle.path, "cgroup scope created");
+                    Some(handle)
+                }
+                Err(e) => {
+                    error!(service = %service.name, "cgroup scope creation failed: {e}");
+                    return Err(anyhow::anyhow!("cgroup scope creation failed: {e}"));
+                }
+            }
+        } else {
+            None
+        };
 
-        processes.insert(
-            service.name.clone(),
-            ProcessState {
-                state: ServiceState::Running,
-                pid,
-                restarts: prev_restarts,
-                last_exit_code: None,
-                child: Some(child),
-            },
-        );
-
-        info!(service = %service.name, pid = ?pid, "Service started");
-        Ok(())
+        // Spawn process
+        match Self::spawn_process(service).await {
+            Ok(child) => {
+                let pid = child.id();
+                processes.insert(
+                    service.name.clone(),
+                    ProcessState {
+                        state: ServiceState::Running,
+                        pid,
+                        restarts: prev_restarts,
+                        last_exit_code: None,
+                        child: Some(child),
+                        cgroup_handle,
+                    },
+                );
+                info!(service = %service.name, pid = ?pid, "Service started");
+                Ok(())
+            }
+            Err(e) => {
+                // Spawn failed — clean up cgroup scope (RI5: callback on failure)
+                if let (Some(ref mgr), Some(ref handle)) = (&self.cgroup_manager, &cgroup_handle) {
+                    if let Err(cleanup_err) = mgr.destroy_scope(handle) {
+                        warn!(
+                            service = %service.name,
+                            "cgroup cleanup after spawn failure also failed: {cleanup_err}"
+                        );
+                    }
+                }
+                Err(e)
+            }
+        }
     }
 
     async fn stop(&self, service: &ServiceDecl) -> anyhow::Result<()> {
@@ -145,6 +501,15 @@ impl ServiceManager for PactSupervisor {
         ps.state = ServiceState::Stopped;
         ps.child = None;
         ps.pid = None;
+
+        // Destroy cgroup scope (PS3: kill all children)
+        if let (Some(ref mgr), Some(ref handle)) = (&self.cgroup_manager, &ps.cgroup_handle) {
+            if let Err(e) = mgr.destroy_scope(handle) {
+                warn!(service = %service.name, "cgroup scope cleanup failed: {e}");
+            }
+        }
+        ps.cgroup_handle = None;
+
         Ok(())
     }
 
@@ -265,6 +630,12 @@ impl ServiceManager for PactSupervisor {
     }
 
     async fn start_all(&self, services: &[ServiceDecl]) -> anyhow::Result<()> {
+        // Store declarations for supervision loop restarts
+        {
+            let mut decls = self.service_decls.write().await;
+            *decls = services.to_vec();
+        }
+
         let sorted = Self::sorted_services(services);
         for service in sorted {
             self.start(service).await?;
@@ -300,6 +671,8 @@ mod tests {
             depends_on: vec![],
             order: 0,
             cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
             health_check: None,
         }
     }
@@ -314,6 +687,8 @@ mod tests {
             depends_on: vec![],
             order: 0,
             cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
             health_check: None,
         }
     }
@@ -433,6 +808,164 @@ mod tests {
         let status = sup.status(&svc).await.unwrap();
         // Process has exited, so status check should detect it as failed
         assert_eq!(status.state, ServiceState::Failed);
+    }
+
+    #[tokio::test]
+    async fn supervision_loop_restarts_crashed_service() {
+        use hpc_audit::MemoryAuditSink;
+
+        let sup = PactSupervisor::with_config(SupervisionConfig {
+            idle_interval_ms: 100,
+            active_interval_ms: 100,
+        });
+
+        // Use echo which exits immediately — simulates a crash
+        let services = vec![ServiceDecl {
+            name: "crasher".into(),
+            binary: "echo".into(),
+            args: vec!["crash".into()],
+            restart: RestartPolicy::Always,
+            restart_delay_seconds: 0,
+            depends_on: vec![],
+            order: 1,
+            cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
+            health_check: None,
+        }];
+
+        sup.start_all(&services).await.unwrap();
+
+        let audit = Arc::new(MemoryAuditSink::new());
+        let handle = sup.start_supervision_loop(
+            Arc::clone(&audit),
+            "test-node".to_string(),
+            None,
+            Arc::new(|| false), // idle
+        );
+
+        // Wait for the loop to detect the crash and restart
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        handle.abort();
+
+        // Audit sink should have crash events
+        let events = audit.events();
+        assert!(
+            !events.is_empty(),
+            "supervision loop should emit crash audit events"
+        );
+        assert!(events.iter().any(|e| e.action == hpc_audit::actions::SERVICE_CRASH));
+    }
+
+    #[tokio::test]
+    async fn supervision_loop_does_not_restart_never_policy() {
+        use hpc_audit::MemoryAuditSink;
+
+        let sup = PactSupervisor::with_config(SupervisionConfig {
+            idle_interval_ms: 100,
+            active_interval_ms: 100,
+        });
+
+        let services = vec![ServiceDecl {
+            name: "oneshot".into(),
+            binary: "echo".into(),
+            args: vec!["done".into()],
+            restart: RestartPolicy::Never,
+            restart_delay_seconds: 0,
+            depends_on: vec![],
+            order: 1,
+            cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
+            health_check: None,
+        }];
+
+        sup.start_all(&services).await.unwrap();
+
+        let audit = Arc::new(MemoryAuditSink::new());
+        let handle = sup.start_supervision_loop(
+            Arc::clone(&audit),
+            "test-node".to_string(),
+            None,
+            Arc::new(|| false),
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        handle.abort();
+
+        // Service should be in Stopped state, not restarted
+        let status = sup.status(&services[0]).await.unwrap();
+        assert!(
+            status.state == ServiceState::Stopped || status.state == ServiceState::Failed,
+            "service with Never policy should not be Running, got {:?}",
+            status.state
+        );
+    }
+
+    #[tokio::test]
+    async fn supervision_loop_pets_watchdog() {
+        use hpc_audit::NullAuditSink;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let sup = PactSupervisor::with_config(SupervisionConfig {
+            idle_interval_ms: 50,
+            active_interval_ms: 50,
+        });
+
+        let pet_count = Arc::new(AtomicU32::new(0));
+        let pet_counter = Arc::clone(&pet_count);
+
+        let handle = sup.start_supervision_loop(
+            Arc::new(NullAuditSink),
+            "test-node".to_string(),
+            Some(Arc::new(move || {
+                pet_counter.fetch_add(1, Ordering::Relaxed);
+            })),
+            Arc::new(|| false),
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        handle.abort();
+
+        let count = pet_count.load(Ordering::Relaxed);
+        assert!(
+            count >= 3,
+            "watchdog should have been petted at least 3 times in 300ms with 50ms interval, got {count}"
+        );
+    }
+
+    #[tokio::test]
+    async fn supervision_loop_adapts_interval() {
+        use hpc_audit::NullAuditSink;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        // Track pet count with active workload (slower interval)
+        let sup = PactSupervisor::with_config(SupervisionConfig {
+            idle_interval_ms: 50,
+            active_interval_ms: 200,
+        });
+
+        let pet_count = Arc::new(AtomicU32::new(0));
+        let pet_counter = Arc::clone(&pet_count);
+
+        let handle = sup.start_supervision_loop(
+            Arc::new(NullAuditSink),
+            "test-node".to_string(),
+            Some(Arc::new(move || {
+                pet_counter.fetch_add(1, Ordering::Relaxed);
+            })),
+            Arc::new(|| true), // active workload
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        handle.abort();
+
+        let active_count = pet_count.load(Ordering::Relaxed);
+        // With 200ms interval over 500ms, expect ~2-3 pets
+        assert!(
+            active_count <= 5,
+            "active workload should have fewer pets (slower interval), got {active_count}"
+        );
     }
 
     #[tokio::test]

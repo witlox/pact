@@ -1,7 +1,8 @@
 Feature: Process Supervisor
   pact-agent includes a built-in process supervisor (PactSupervisor) that
   manages services on compute nodes. It replaces systemd for diskless HPC
-  nodes that run 4-7 services. systemd is available as a fallback. (ADR-006)
+  nodes that run 5-9 services. systemd is available as a fallback. (ADR-006)
+  (Invariants: PS1-PS3, A6-A7)
 
   Background:
     Given a supervisor with backend "pact"
@@ -96,6 +97,68 @@ Feature: Process Supervisor
   Scenario: Systemd backend is available as fallback
     Given supervisor config with backend "systemd"
     Then the supervisor should use the "Systemd" backend
+
+  # --- Supervision loop ---
+
+  Scenario: Supervision loop detects crashed service and restarts
+    Given a running service "nvidia-persistenced" with restart policy "Always"
+    When "nvidia-persistenced" crashes with exit code 1
+    Then the supervision loop should detect the crash within the poll interval
+    And "nvidia-persistenced" should be restarted after the configured delay
+    And the restart count should be incremented
+    And an AuditEvent should be emitted for the crash and restart
+
+  Scenario: Supervision loop respects OnFailure policy for clean exit
+    Given a running service "oneshot" with restart policy "OnFailure"
+    When "oneshot" exits with code 0
+    Then the supervision loop should detect the exit
+    And "oneshot" should not be restarted
+    And the service should be in state "Stopped"
+
+  Scenario: Supervision loop does not run in systemd mode
+    Given a supervisor with backend "systemd"
+    When a service crashes
+    Then pact should not attempt to restart the service
+    And systemd should handle the restart via native Restart= directive
+
+  # --- Real compute node service sets ---
+
+  Scenario: ML training vCluster starts 7 services
+    Given a vCluster "ml-training" with service declarations:
+      | name                  | order | restart_policy | cgroup_slice          |
+      | chronyd               | 1     | Always         | pact.slice/infra      |
+      | dbus-daemon           | 2     | Always         | pact.slice/infra      |
+      | cxi_rh-0              | 3     | Always         | pact.slice/network    |
+      | cxi_rh-1              | 3     | Always         | pact.slice/network    |
+      | cxi_rh-2              | 3     | Always         | pact.slice/network    |
+      | cxi_rh-3              | 3     | Always         | pact.slice/network    |
+      | nvidia-persistenced   | 4     | Always         | pact.slice/gpu        |
+      | nv-hostengine         | 5     | Always         | pact.slice/gpu        |
+      | rasdaemon             | 6     | OnFailure      | pact.slice/infra      |
+      | lattice-node-agent    | 10    | Always         | workload              |
+    When all services are started
+    Then all 10 service instances should be in state "Running"
+    And services should have started in order 1, 2, 3, 4, 5, 6, 10
+
+  Scenario: Regulated vCluster adds audit services
+    Given a vCluster "regulated" extending "ml-training" with:
+      | name                | order | restart_policy | cgroup_slice       |
+      | auditd              | 7     | Always         | pact.slice/audit   |
+      | audit-forwarder     | 8     | Always         | pact.slice/audit   |
+    When all services are started
+    Then 12 service instances should be running
+    And auditd should start after rasdaemon and before lattice-node-agent
+
+  Scenario: Dev sandbox vCluster starts minimal services
+    Given a vCluster "dev-sandbox" with service declarations:
+      | name                | order | restart_policy | cgroup_slice       |
+      | chronyd             | 1     | Always         | pact.slice/infra   |
+      | dbus-daemon         | 2     | Always         | pact.slice/infra   |
+      | cxi_rh-0            | 3     | Always         | pact.slice/network |
+      | rasdaemon           | 4     | OnFailure      | pact.slice/infra   |
+      | lattice-node-agent  | 10    | Always         | workload           |
+    When all services are started
+    Then 5 service instances should be running
 
   # --- Service lifecycle journal entries ---
 

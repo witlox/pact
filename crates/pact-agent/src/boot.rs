@@ -27,6 +27,7 @@ use crate::commit::CommitWindowManager;
 use crate::conflict::ConflictManager;
 use crate::drift::DriftEvaluator;
 use crate::emergency::EmergencyManager;
+use crate::isolation;
 use crate::journal_client::JournalClient;
 use crate::subscription::{ConfigSubscription, ConfigUpdateAction, SubscriptionConfig};
 use crate::supervisor::{PactSupervisor, ServiceManager};
@@ -57,10 +58,41 @@ pub async fn boot(
 ) -> anyhow::Result<BootResult> {
     let start = std::time::Instant::now();
 
+    // Phase 0: InitHardware — OOM protection + cgroup hierarchy (PactSupervisor only)
+    let cgroup_manager: Option<Arc<dyn hpc_node::CgroupManager>> =
+        if config.supervisor.backend == SupervisorBackend::Pact {
+            info!("Boot phase 0: InitHardware — OOM protection + cgroup hierarchy");
+
+            // RI4: protect pact-agent from OOM killer
+            if let Err(e) = isolation::protect_from_oom() {
+                warn!("OOM protection failed (non-fatal on macOS dev): {e}");
+            }
+
+            // Create cgroup hierarchy
+            let mgr = isolation::create_cgroup_manager("/sys/fs/cgroup");
+            if let Err(e) = mgr.create_hierarchy() {
+                warn!("cgroup hierarchy creation failed (non-fatal on macOS dev): {e}");
+            }
+            debug!(
+                elapsed_ms = start.elapsed().as_millis(),
+                "InitHardware complete"
+            );
+            Some(Arc::from(mgr))
+        } else {
+            info!("Boot phase 0: skipping InitHardware (systemd mode)");
+            None
+        };
+
     // Phase 1: Initialize supervisor
     info!("Boot phase 1: initializing process supervisor");
     let supervisor: Arc<dyn ServiceManager> = match config.supervisor.backend {
-        SupervisorBackend::Pact => Arc::new(PactSupervisor::new()),
+        SupervisorBackend::Pact => {
+            let mut sup = PactSupervisor::new();
+            if let Some(ref mgr) = cgroup_manager {
+                sup = sup.with_cgroup_manager(Arc::clone(mgr));
+            }
+            Arc::new(sup)
+        }
         SupervisorBackend::Systemd => {
             warn!("systemd backend requested but not compiled in — using pact supervisor");
             Arc::new(PactSupervisor::new())
@@ -171,6 +203,15 @@ pub async fn boot(
         }
     });
 
+    // Readiness signal — create /run/pact/ready to signal lattice (PB3 Phase 6)
+    let ready_path = std::path::Path::new(hpc_node::readiness::READINESS_FILE_PATH);
+    if let Some(parent) = ready_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::write(ready_path, config.node_id.as_bytes()) {
+        debug!("Could not write readiness file: {e} (expected on macOS dev)");
+    }
+
     let elapsed = start.elapsed();
     info!(
         elapsed_ms = elapsed.as_millis(),
@@ -178,7 +219,7 @@ pub async fn boot(
         vcluster = config.vcluster.as_deref().unwrap_or("(none)"),
         enforcement_mode = %config.enforcement_mode,
         config_state = ?config_state,
-        "Boot sequence complete"
+        "Boot sequence complete — node ready"
     );
 
     Ok(BootResult {
@@ -653,6 +694,8 @@ mod tests {
             depends_on: vec![],
             order: 0,
             cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
             health_check: None,
         };
 

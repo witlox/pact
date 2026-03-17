@@ -125,6 +125,8 @@ async fn given_boot_overlay_with_services(world: &mut PactWorld, step: &cucumber
                 depends_on,
                 order,
                 cgroup_memory_max: None,
+                cgroup_slice: None,
+                cgroup_cpu_weight: None,
                 health_check: None,
             });
         }

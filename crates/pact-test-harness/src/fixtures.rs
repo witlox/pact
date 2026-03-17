@@ -281,6 +281,8 @@ pub mod builders {
                 depends_on: self.depends_on,
                 order: self.order,
                 cgroup_memory_max: None,
+                cgroup_slice: None,
+                cgroup_cpu_weight: None,
                 health_check: None,
             }
         }

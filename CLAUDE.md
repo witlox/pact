@@ -231,3 +231,5 @@ See `docs/decisions/` for full ADRs:
 - ADR-012: Merge conflict grace period with journal-wins fallback
 - ADR-013: Two-person approval as stateful Raft entries
 - ADR-014: Optimistic concurrency with commit windows
+- ADR-015: hpc-core shared contracts (hpc-node, hpc-audit, hpc-identity)
+- ADR-016: Identity mapping — OIDC-to-POSIX UID/GID shim for NFS

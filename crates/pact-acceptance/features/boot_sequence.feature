@@ -76,10 +76,15 @@ Feature: Boot Sequence
 
   # --- Resource budget ---
 
-  Scenario: Agent stays within resource budget
-    When pact-agent is running in steady state
+  Scenario: Agent stays within resource budget when active
+    When pact-agent is running with active allocations
     Then RSS should be less than 50 MB
     And CPU usage should be less than 0.5 percent
+
+  Scenario: Agent uses more CPU when idle for deeper inspections
+    When pact-agent is running with no active allocations
+    Then RSS should be less than 50 MB
+    And CPU usage should be less than 2 percent
 
   Scenario: Agent CPU during drift evaluation stays bounded
     When drift is being evaluated on node "node-001"

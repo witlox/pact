@@ -165,3 +165,131 @@ Feature: Cross-Context Integration
     When admin executes a command requiring the updated policy
     Then OPA evaluates using the new template
     And the result reflects the updated rules
+
+  # --- Boot → cgroup → Service → Watchdog lifecycle ---
+
+  Scenario: Full PID 1 boot creates cgroups, starts services, pets watchdog
+    Given a supervisor with backend "pact"
+    And /dev/watchdog is available
+    When pact-agent boots as PID 1
+    Then InitHardware should mount cgroup2 and create slice hierarchy
+    And ConfigureNetwork should configure interfaces via netlink
+    And LoadIdentity should load UidMap and write .db files
+    And PullOverlay should stream vCluster overlay from journal
+    And StartServices should create cgroup scopes and start services in order
+    And ReadinessSignal should be emitted
+    And the supervision loop should be running
+    And each loop tick should pet the hardware watchdog
+
+  # --- Supervision → Isolation → Cleanup chain ---
+
+  Scenario: Service crash triggers supervision restart with cgroup cleanup
+    Given a running service "nvidia-persistenced" in cgroup scope "pact.slice/gpu.slice/nvidia-persistenced"
+    And "nvidia-persistenced" has forked 2 child processes
+    When the main process of "nvidia-persistenced" crashes
+    Then the supervision loop detects the crash
+    And Resource Isolation kills all processes in the cgroup scope
+    And the cgroup scope is released
+    And a new cgroup scope is created for the restart
+    And "nvidia-persistenced" is restarted in the new scope
+    And an AuditEvent records the crash and restart
+
+  # --- Identity → Supervision → NFS chain ---
+
+  Scenario: Service running as non-root user requires identity mapping
+    Given identity_mode is "on-demand"
+    And a service "app-svc" declared with user "appuser"
+    And "appuser@cscs.ch" has been assigned UID 10042
+    When pact-agent boots and reaches StartServices phase
+    Then UidMap should already be loaded (Phase 3 before Phase 5)
+    And getpwnam("appuser") should resolve to UID 10042
+    And "app-svc" should start as UID 10042 in its cgroup scope
+    And NFS files created by "app-svc" should be owned by UID 10042
+
+  # --- Namespace handoff → Mount sharing → Allocation lifecycle ---
+
+  Scenario: Allocation lifecycle with namespace handoff and shared mount
+    Given pact-agent is running with ReadinessSignal emitted
+    And lattice-node-agent is running and connected via unix socket
+    When lattice requests allocation "alloc-01" with uenv "pytorch-2.5.sqfs"
+    Then pact creates pid/net/mount namespaces for "alloc-01"
+    And pact mounts "pytorch-2.5.sqfs" (MountRef refcount=1)
+    And pact bind-mounts into alloc-01's mount namespace
+    And namespace FDs are passed to lattice via SCM_RIGHTS
+    When lattice requests allocation "alloc-02" with same uenv "pytorch-2.5.sqfs"
+    Then no new SquashFS mount occurs (MountRef refcount=2)
+    And alloc-02 gets its own namespaces and bind-mount
+    When alloc-01 completes (cgroup empties)
+    Then pact detects empty cgroup and cleans up alloc-01's namespaces
+    And MountRef refcount decreases to 1
+    When alloc-02 completes (cgroup empties)
+    Then pact cleans up alloc-02's namespaces
+    And MountRef refcount reaches 0
+    And cache hold timer starts for "pytorch-2.5.sqfs"
+
+  # --- Emergency → workload.slice override → audit ---
+
+  Scenario: Emergency mode allows cross-slice intervention with full audit
+    Given node "node-001" has active workloads in workload.slice
+    And user "admin@example.com" has role "pact-ops-ml-training"
+    When admin enters emergency mode with reason "runaway process consuming all memory"
+    Then an EmergencyStart AuditEvent is recorded
+    When admin requests freeze of workload.slice with "--force"
+    Then pact freezes all processes in workload.slice
+    And an EmergencyFreeze AuditEvent is recorded with admin identity
+    And any mount hold timers in workload.slice are overridden
+    When admin ends emergency mode with commit
+    Then an EmergencyEnd AuditEvent is recorded
+    And workload.slice processes remain frozen (lattice must restart them)
+
+  # --- SPIRE bootstrap → mTLS rotation ---
+
+  Scenario: SPIRE SVID replaces bootstrap identity during boot
+    Given pact-agent starts with bootstrap identity from OpenCHAMI
+    And SPIRE agent is running on the node
+    When pact-agent authenticates to journal using bootstrap identity
+    And pact-agent connects to SPIRE agent socket
+    Then SPIRE issues an SVID for pact-agent workload
+    And pact-agent rotates mTLS to use SVID (dual-channel swap)
+    And the bootstrap identity is discarded
+    And all subsequent journal communication uses SPIRE-managed mTLS
+
+  # --- Agent crash → mount reconstruction → allocation continuity ---
+
+  Scenario: Agent crash preserves running allocations
+    Given 2 active allocations using "pytorch-2.5.sqfs" (MountRef refcount=2)
+    And allocation workload processes are running in their cgroup scopes
+    When pact-agent crashes
+    Then workload processes continue running (orphaned but alive in cgroups)
+    When pact-agent restarts
+    Then pact scans kernel mount table and finds "pytorch-2.5.sqfs" mounted
+    And pact queries journal for active allocations on this node
+    And MountRef is reconstructed with refcount=2
+    And supervision loop resumes monitoring supervised services
+    And namespace handoff socket is re-opened for lattice
+
+  # --- Federation UID lifecycle ---
+
+  Scenario: Federated user gets UID, uses NFS, org departs
+    Given org "partner-a" joined with org_index 1 (precursor 20000, stride 10000)
+    And "researcher@partner-a.org" authenticates via OIDC
+    Then "researcher@partner-a.org" is assigned UID 20000 in the journal
+    And all agents receive the UidMap update
+    And NFS files created by this user are owned by UID 20000
+    When org "partner-a" leaves federation
+    Then all UidEntries for "partner-a" are GC'd from journal
+    And agents remove "partner-a" entries from .db files
+    And NFS files owned by UID 20000 become orphaned (numeric only)
+    And org_index 1 becomes reclaimable
+
+  # --- Systemd compat mode skips init-specific interactions ---
+
+  Scenario: Systemd mode disables pact-specific sub-contexts
+    Given a supervisor with backend "systemd"
+    When pact-agent starts
+    Then no hardware watchdog is opened
+    And no netlink interface configuration occurs
+    And no UidMap .db files are written
+    And no cgroup slices are created by pact
+    And systemd manages service restart natively
+    And pact still pulls overlay and manages config state
