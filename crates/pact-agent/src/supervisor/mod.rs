@@ -7,8 +7,10 @@
 //! The `ServiceManager` trait provides the common interface.
 
 mod pact_supervisor;
+mod systemd_backend;
 
 pub use pact_supervisor::{PactSupervisor, SupervisionConfig, WorkloadState};
+pub use systemd_backend::SystemdBackend;
 
 use async_trait::async_trait;
 use pact_common::types::{ServiceDecl, ServiceState};

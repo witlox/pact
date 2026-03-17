@@ -30,7 +30,7 @@ use crate::emergency::EmergencyManager;
 use crate::isolation;
 use crate::journal_client::JournalClient;
 use crate::subscription::{ConfigSubscription, ConfigUpdateAction, SubscriptionConfig};
-use crate::supervisor::{PactSupervisor, ServiceManager};
+use crate::supervisor::{PactSupervisor, ServiceManager, SystemdBackend};
 
 /// Boot result — subsystems initialized and ready.
 pub struct BootResult {
@@ -94,8 +94,8 @@ pub async fn boot(
             Arc::new(sup)
         }
         SupervisorBackend::Systemd => {
-            warn!("systemd backend requested but not compiled in — using pact supervisor");
-            Arc::new(PactSupervisor::new())
+            info!("Using systemd backend — delegating service management to systemd");
+            Arc::new(SystemdBackend::new())
         }
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "Supervisor initialized");
