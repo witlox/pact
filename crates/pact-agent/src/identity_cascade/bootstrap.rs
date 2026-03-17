@@ -42,9 +42,12 @@ impl IdentityProvider for BootstrapProvider {
             path: format!("{}: {e}", self.ca_path),
         })?;
 
-        // Parse cert to get expiry (simplified — real impl would parse X.509)
-        // For now, assume 1 hour validity from load time
+        // Bootstrap cert expiry: conservative 1-hour default.
+        // Bootstrap identity is temporary (PB4: discarded after SVID acquisition).
+        // Proper X.509 parsing would require x509-parser crate — not worth the
+        // dependency for a cert that's replaced within seconds of boot.
         let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        debug!("bootstrap cert expiry set to 1h (conservative default, PB4: temporary)");
 
         debug!(
             cert_path = %self.cert_path,

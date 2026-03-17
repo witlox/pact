@@ -27,6 +27,7 @@ use crate::commit::CommitWindowManager;
 use crate::conflict::ConflictManager;
 use crate::drift::DriftEvaluator;
 use crate::emergency::EmergencyManager;
+use crate::identity_cascade;
 use crate::isolation;
 use crate::journal_client::JournalClient;
 use crate::subscription::{ConfigSubscription, ConfigUpdateAction, SubscriptionConfig};
@@ -82,6 +83,58 @@ pub async fn boot(
             info!("Boot phase 0: skipping InitHardware (systemd mode)");
             None
         };
+
+    // Phase 0.5: Identity acquisition (PB3: LoadIdentity before services)
+    info!("Boot phase 0.5: acquiring workload identity");
+
+    let spire_socket = {
+        let socket = "/run/spire/agent.sock";
+        if std::path::Path::new(socket).exists() {
+            Some(socket.to_string())
+        } else {
+            None
+        }
+    };
+
+    let (journal_endpoint, bootstrap_cert, bootstrap_key, bootstrap_ca) =
+        if let Some(ref enrollment) = config.enrollment {
+            let endpoint = enrollment.journal_endpoints.first().cloned();
+            let cert_dir = enrollment.cert_dir.to_str().unwrap_or("/var/lib/pact/certs");
+            let cert = Some(format!("{cert_dir}/cert.pem"));
+            let key = Some(format!("{cert_dir}/key.pem"));
+            let ca = Some(enrollment.ca_cert.to_str().unwrap_or("/etc/pact/ca.pem").to_string());
+            (endpoint, cert, key, ca)
+        } else {
+            (None, None, None, None)
+        };
+
+    let identity_cascade = identity_cascade::build_cascade(
+        spire_socket,
+        journal_endpoint,
+        bootstrap_cert,
+        bootstrap_key,
+        bootstrap_ca,
+    );
+
+    match identity_cascade.get_identity().await {
+        Ok(identity) => {
+            info!(
+                source = ?identity.source,
+                expires_at = %identity.expires_at,
+                "workload identity acquired"
+            );
+            // If SelfSignedProvider was used via enrollment, the enrollment result
+            // is already cached. If SPIRE was used, we have an SVID.
+            // Store identity source for audit trail.
+        }
+        Err(e) => {
+            warn!(
+                "identity acquisition failed: {e} — will retry with journal connection"
+            );
+            // Not fatal: agent can still attempt enrollment during journal connect phase
+        }
+    }
+    debug!(elapsed_ms = start.elapsed().as_millis(), "Identity phase complete");
 
     // Phase 1: Initialize supervisor
     info!("Boot phase 1: initializing process supervisor");
