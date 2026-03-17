@@ -18,10 +18,11 @@ On compute nodes, pact-agent is the init system: it supervises all services, man
 ## Design Principles
 
 - **No SSH needed** — pact shell provides authenticated, audited, policy-scoped remote access
-- **pact-agent as init** — boots diskless nodes in <2s, supervises 4-7 services directly
+- **pact-agent as init** — boots diskless nodes in <2s, supervises 5-9 services directly
 - **Acknowledged drift** — detected, measured, explicitly handled — never silently converged
 - **Immutable audit log** — every action recorded, any state reconstructible
 - **Optimistic concurrency** — apply first, commit within time window, rollback on expiry
+- **Network separation** — management net for pact control traffic, HSN for lattice workload data
 - **10,000+ node scale** — streaming boot config, no per-node scrape targets
 
 ## Architecture
@@ -35,6 +36,8 @@ Infrastructure   OpenCHAMI (boot) → pact (config + init) → lattice (scheduli
 
 Integrates with [Lattice](https://github.com/witlox/lattice),
 [OpenCHAMI](https://openchami.org), and [Sovra](https://github.com/witlox/sovra).
+Shares types and traits with lattice via the [hpc-core](https://github.com/witlox/hpc-core)
+crates (hpc-node, hpc-audit, hpc-identity).
 
 ## CLI Overview
 
@@ -51,6 +54,14 @@ pact apply <spec.toml>         # Apply declarative config spec
 pact exec <node> -- <command>  # Run diagnostic command on node
 pact shell <node>              # Interactive pact shell on node
 pact service <action> <name>   # Service management (start/stop/restart/status)
+
+# Node lifecycle
+pact promote <node>            # Promote node to active service
+pact drain <node>              # Drain workloads from node
+pact cordon <node>             # Mark node as unschedulable
+pact uncordon <node>           # Remove cordon from node
+pact reboot <node>             # Reboot node via BMC/Redfish
+pact reimage <node>            # Re-image node via OpenCHAMI
 
 # Operational
 pact watch                     # Live event stream

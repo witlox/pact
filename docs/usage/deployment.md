@@ -169,53 +169,57 @@ patterns = ["/tmp/**", "/var/log/**", "/proc/**", "/sys/**", "/dev/**",
 The agent's `node_id` is typically set via environment variable or auto-detected
 from the hostname. For diskless nodes, OpenCHAMI sets the hostname during PXE boot.
 
-## mTLS Certificate Setup
+## Identity and mTLS Setup
 
-pact uses mutual TLS for agent-to-journal communication. Each agent has its own
-certificate signed by the site CA.
+pact uses mutual TLS for agent-to-journal communication. Identity is provisioned
+automatically -- no manual certificate generation is needed for agents or journal nodes.
 
-### Generate a CA (if you don't have one)
+### SPIRE (primary, when deployed)
 
-```bash
-# Generate CA private key
-openssl genrsa -out ca.key 4096
+When SPIRE is deployed at the site, pact uses it as the primary identity provider.
+Agents and journal nodes receive SPIFFE SVIDs (X.509 certificates) via SPIRE node
+attestation. SPIRE handles certificate rotation automatically.
 
-# Generate CA certificate
-openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
-    -subj "/CN=pact-ca/O=HPC Site"
+Configure the SPIRE agent socket in the agent config:
+
+```toml
+[agent.identity]
+provider = "spire"
+spire_socket = "/run/spire/agent.sock"
 ```
 
-### Generate journal server certificates
+### Ephemeral CA (fallback, default)
 
-```bash
-# For each journal node
-openssl genrsa -out journal-1.key 2048
-openssl req -new -key journal-1.key -out journal-1.csr \
-    -subj "/CN=journal-1.mgmt"
-openssl x509 -req -days 365 -in journal-1.csr \
-    -CA ca.crt -CAkey ca.key -CAcreateserial \
-    -out journal-1.crt \
-    -extfile <(echo "subjectAltName=DNS:journal-1.mgmt")
-```
+When SPIRE is not available, the journal quorum generates an ephemeral CA at startup.
+Agents enroll via the CSR workflow -- no manual certificate provisioning is required.
 
-### Generate agent certificates
+**Enrollment workflow:**
 
-```bash
-# For each compute node
-openssl genrsa -out agent.key 2048
-openssl req -new -key agent.key -out agent.csr \
-    -subj "/CN=node-042/O=pact-service-agent"
-openssl x509 -req -days 365 -in agent.csr \
-    -CA ca.crt -CAkey ca.key -CAcreateserial \
-    -out agent.crt
-```
+1. Platform admin enrolls a node: `pact enroll <node> --hardware-id <hw-id>`
+2. The journal records the enrollment with the node's expected hardware identity
+3. Agent boots and presents its hardware identity (TPM, SMBIOS UUID, or MAC-based)
+4. Agent generates a keypair and submits a CSR to the journal
+5. Journal validates the hardware identity against the enrollment record
+6. Journal signs the CSR with the ephemeral CA and returns the certificate
+7. Agent uses the signed certificate for mTLS from this point forward
 
-### Distribute certificates
+The ephemeral CA is regenerated when the journal quorum restarts. Agents automatically
+re-enroll to obtain new certificates.
 
-Place on each node:
-- `/etc/pact/ca.crt` -- CA certificate (all nodes)
-- `/etc/pact/agent.crt` and `/etc/pact/agent.key` -- agent identity (compute nodes)
-- Journal nodes get their own server cert and key
+### CA cert distribution
+
+Agents need the CA certificate bundle to validate journal server certificates.
+For diskless nodes, include the CA cert in the base SquashFS image:
+
+- `/etc/pact/ca.crt` -- CA certificate bundle (all nodes)
+
+For SPIRE deployments, the SPIRE trust bundle replaces this file. For ephemeral CA
+deployments, the journal serves the CA cert during the enrollment handshake.
+
+### Identity mapping
+
+In PactSupervisor mode, identity mapping (pact-nss) is automatic -- the agent
+maps SPIFFE IDs or certificate CNs to local UIDs without manual NSS configuration.
 
 ## OIDC Provider Configuration
 

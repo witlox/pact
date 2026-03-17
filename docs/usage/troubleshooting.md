@@ -17,28 +17,53 @@ systemctl status pact-journal
 journalctl -u pact-journal --since "5 min ago"
 ```
 
-**Check 3: TLS configuration**
+**Check 3: SPIRE identity (if using SPIRE)**
 ```bash
-# Verify the CA certificate matches
-openssl x509 -in /etc/pact/ca.crt -noout -subject -issuer
+# Verify the SPIRE agent socket is available
+ls -la /run/spire/agent.sock
 
-# Test TLS handshake
-openssl s_client -connect journal-1.mgmt:9443 -CAfile /etc/pact/ca.crt
+# Check SPIRE agent health
+spire-agent healthcheck -socketPath /run/spire/agent.sock
+
+# Verify the agent has a valid SVID
+spire-agent api fetch x509 -socketPath /run/spire/agent.sock -write /tmp/
+openssl x509 -in /tmp/svid.0.pem -noout -subject -issuer -dates
 ```
 
-**Check 4: Agent config**
+If the SPIRE socket is unavailable, check that the SPIRE agent is running on the node.
+If attestation fails, verify the node's SPIRE registration entry exists and matches its
+hardware identity (TPM, SMBIOS UUID, or join token).
+
+**Check 4: Enrollment (if using ephemeral CA)**
+```bash
+# Check if the node has been enrolled
+pact enroll status <node>
+
+# Check if the agent has a valid certificate
+openssl x509 -in /etc/pact/agent.crt -noout -subject -dates 2>/dev/null || echo "No certificate"
+```
+
+Common enrollment failures:
+- **Hardware identity mismatch**: the node's actual hardware identity (TPM/SMBIOS/MAC)
+  does not match what was registered during `pact enroll`. Re-enroll with the correct
+  hardware ID: `pact enroll <node> --hardware-id <correct-hw-id>`
+- **CSR rejected**: the journal could not validate the CSR. Check journal logs for
+  the rejection reason.
+- **Ephemeral CA rotated**: if the journal quorum restarted, the CA was regenerated
+  and all agents must re-enroll. Agents do this automatically on the next boot, but
+  running agents need a restart: `systemctl restart pact-agent`
+
+**Check 5: Agent config**
 
 Verify `endpoints` in agent.toml points to the correct journal addresses:
 ```toml
 [agent.journal]
 endpoints = ["journal-1.mgmt:9443", "journal-2.mgmt:9443", "journal-3.mgmt:9443"]
 tls_enabled = true
-tls_cert = "/etc/pact/agent.crt"
-tls_key = "/etc/pact/agent.key"
 tls_ca = "/etc/pact/ca.crt"
 ```
 
-**Check 5: Firewall**
+**Check 6: Firewall**
 
 Ensure port 9443 (gRPC) and 9444 (Raft) are open between journal nodes, and
 port 9443 is open from compute nodes to journal nodes.
@@ -302,7 +327,9 @@ underlying volume.
 | `No auth token found` | Missing OIDC token | Set `PACT_TOKEN` or write to `~/.config/pact/token` |
 | `No vCluster specified` | Missing vCluster scope | Use `--vcluster` or set `PACT_VCLUSTER` |
 | `connection refused` | Journal not running or wrong endpoint | Check journal status and endpoint config |
-| `certificate verify failed` | TLS cert mismatch | Verify CA cert is correct on both sides |
+| `certificate verify failed` | TLS cert mismatch or ephemeral CA rotated | Restart agent to re-enroll, or verify CA bundle at `/etc/pact/ca.crt` |
+| `SPIRE socket unavailable` | SPIRE agent not running | Start SPIRE agent or switch to ephemeral CA identity |
+| `enrollment: hardware mismatch` | Node hardware ID does not match enrollment record | Re-enroll with correct `--hardware-id` |
 | `policy: denied` | OPA rejected the operation | Check your role has the required permissions |
 | `approval required` | Regulated vCluster | Another admin must approve (see workflow above) |
 | `commit window expired` | Time window for changes has closed | Run `pact extend` or `pact commit` first |

@@ -336,6 +336,171 @@ pact extend 30                       # Extend by 30 minutes
 
 ---
 
+## Node Lifecycle Commands
+
+These commands manage node state transitions. Requires `pact-ops-{vcluster}` or
+`pact-platform-admin` role. All lifecycle operations are logged to the journal.
+
+### `pact promote`
+
+Promote a node to active service after enrollment and configuration.
+
+```bash
+pact promote node-042                # Promote node
+pact promote node-042 --dry-run      # Show what would happen without applying
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+| `--dry-run` | Show promotion plan without executing |
+
+### `pact drain`
+
+Drain workloads from a node. Delegates to lattice to gracefully migrate running
+workloads before taking the node out of service.
+
+```bash
+pact drain node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
+### `pact cordon`
+
+Mark a node as unschedulable. Existing workloads continue running but no new
+workloads will be placed on the node.
+
+```bash
+pact cordon node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
+### `pact uncordon`
+
+Remove a cordon from a node, making it schedulable again.
+
+```bash
+pact uncordon node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
+### `pact reboot`
+
+Reboot a node via BMC/Redfish. Delegates to OpenCHAMI for the actual reboot.
+
+```bash
+pact reboot node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
+### `pact reimage`
+
+Re-image a node via OpenCHAMI. The node will be re-provisioned with the base
+SquashFS image and re-enrolled with pact.
+
+```bash
+pact reimage node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
+---
+
+## Group Commands
+
+Manage vCluster groups and their policies.
+
+### `pact group list`
+
+List all vCluster groups.
+
+```bash
+pact group list
+pact group list --output json
+```
+
+### `pact group show`
+
+Show details for a specific group.
+
+```bash
+pact group show ml-training
+```
+
+| Option | Description |
+|--------|-------------|
+| `<group>` | Group name (required) |
+
+### `pact group set-policy`
+
+Update the policy for a group.
+
+```bash
+pact group set-policy ml-training --file policy.toml
+```
+
+| Option | Description |
+|--------|-------------|
+| `<group>` | Group name (required) |
+| `--file <PATH>` | Path to policy TOML file (required) |
+
+---
+
+## Blacklist Commands
+
+Manage drift detection exclusion patterns.
+
+### `pact blacklist list`
+
+List current blacklist patterns for a node or vCluster.
+
+```bash
+pact blacklist list
+pact blacklist list --vcluster ml-training
+```
+
+### `pact blacklist add`
+
+Add a pattern to the drift detection blacklist.
+
+```bash
+pact blacklist add "/var/cache/**"
+pact blacklist add "/opt/scratch/**" --vcluster ml-training
+```
+
+| Option | Description |
+|--------|-------------|
+| `<pattern>` | Glob pattern to exclude from drift detection (required) |
+| `--vcluster <NAME>` | Apply to a specific vCluster (optional, defaults to node-local) |
+
+### `pact blacklist remove`
+
+Remove a pattern from the drift detection blacklist.
+
+```bash
+pact blacklist remove "/var/cache/**"
+```
+
+| Option | Description |
+|--------|-------------|
+| `<pattern>` | Glob pattern to remove (required) |
+
+---
+
 ## Configuration File
 
 The CLI reads its configuration from `~/.config/pact/cli.toml`:
