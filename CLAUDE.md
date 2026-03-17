@@ -224,3 +224,10 @@ See `docs/decisions/` for full ADRs:
 - ADR-005: No agent-level Prometheus metrics
 - ADR-006: Pact as init with systemd fallback
 - ADR-007: No SSH — pact shell replaces remote access
+- ADR-008: Node enrollment, domain membership, certificate lifecycle
+- ADR-009: Overlay staleness detection and on-demand rebuild
+- ADR-010: Per-node delta TTL bounds (15 min – 10 days)
+- ADR-011: Degraded-mode policy evaluation (cached whitelist, fail-closed)
+- ADR-012: Merge conflict grace period with journal-wins fallback
+- ADR-013: Two-person approval as stateful Raft entries
+- ADR-014: Optimistic concurrency with commit windows
