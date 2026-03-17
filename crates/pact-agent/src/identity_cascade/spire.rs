@@ -1,17 +1,15 @@
 //! SPIRE identity provider — obtains SVID from SPIRE agent.
 //!
-//! Connects to the SPIRE Workload API via unix socket.
+//! Connects to the SPIRE Workload API via unix socket using the `spiffe` crate.
 //! Primary identity source when SPIRE is deployed (A-I7).
 //!
-//! Note: actual SPIRE Workload API integration requires the
-//! spiffe crate or direct protobuf client. This is a stub that
-//! checks socket availability and will be completed when the
-//! SPIRE integration is fully designed.
+//! Feature-gated behind `spire` — when disabled, a stub is provided
+//! that always reports unavailable.
 
 use hpc_identity::{IdentityError, IdentityProvider, IdentitySource, WorkloadIdentity};
-use tracing::{debug, info};
 
 /// SPIRE identity provider.
+#[allow(dead_code)] // agent_socket used only with `spire` feature
 pub struct SpireProvider {
     /// Path to the SPIRE agent Workload API socket.
     agent_socket: String,
@@ -26,21 +24,69 @@ impl SpireProvider {
     }
 }
 
+#[cfg(feature = "spire")]
 #[async_trait::async_trait]
 impl IdentityProvider for SpireProvider {
     async fn get_identity(&self) -> Result<WorkloadIdentity, IdentityError> {
-        info!(socket = %self.agent_socket, "requesting SVID from SPIRE agent");
+        info!(socket = %self.agent_socket, "requesting X.509 SVID from SPIRE agent");
 
-        // TODO: implement actual SPIRE Workload API client
-        // For now, return an error indicating SPIRE is not yet implemented.
-        // The cascade will fall through to the next provider.
-        Err(IdentityError::SpireUnavailable {
-            reason: "SPIRE Workload API client not yet implemented".to_string(),
+        use spiffe::workload_api::x509::X509Source;
+
+        // Connect to SPIRE Workload API
+        let source = X509Source::builder()
+            .with_socket_path(&self.agent_socket)
+            .build()
+            .await
+            .map_err(|e| IdentityError::SpireUnavailable {
+                reason: format!("failed to connect to SPIRE agent: {e}"),
+            })?;
+
+        // Get the default SVID
+        let svid = source.svid().map_err(|e| IdentityError::SpireUnavailable {
+            reason: format!("failed to get SVID: {e}"),
+        })?;
+
+        // Extract cert chain, private key, and trust bundle as PEM
+        let cert_chain_pem = svid.cert_chain_pem().map_err(|e| IdentityError::SpireUnavailable {
+            reason: format!("failed to encode cert chain: {e}"),
+        })?;
+        let private_key_pem = svid.private_key_pem().map_err(|e| IdentityError::SpireUnavailable {
+            reason: format!("failed to encode private key: {e}"),
+        })?;
+
+        // Get trust bundle
+        let bundle = source.bundle().map_err(|e| IdentityError::SpireUnavailable {
+            reason: format!("failed to get trust bundle: {e}"),
+        })?;
+        let trust_bundle_pem = bundle.authorities_pem().map_err(|e| IdentityError::SpireUnavailable {
+            reason: format!("failed to encode trust bundle: {e}"),
+        })?;
+
+        // Parse expiry from the leaf cert
+        let expires_at = svid
+            .x509_svid()
+            .not_after()
+            .and_then(|t| {
+                chrono::DateTime::from_timestamp(t.unix_timestamp(), 0)
+            })
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
+
+        info!(
+            spiffe_id = %svid.spiffe_id(),
+            expires_at = %expires_at,
+            "SPIRE SVID acquired"
+        );
+
+        Ok(WorkloadIdentity {
+            cert_chain_pem: cert_chain_pem.into_bytes(),
+            private_key_pem: private_key_pem.into_bytes(),
+            trust_bundle_pem: trust_bundle_pem.into_bytes(),
+            expires_at,
+            source: IdentitySource::Spire,
         })
     }
 
     async fn is_available(&self) -> bool {
-        // Check if the SPIRE agent socket exists
         let available = std::path::Path::new(&self.agent_socket).exists();
         debug!(
             socket = %self.agent_socket,
@@ -48,6 +94,24 @@ impl IdentityProvider for SpireProvider {
             "SPIRE agent socket check"
         );
         available
+    }
+
+    fn source_type(&self) -> IdentitySource {
+        IdentitySource::Spire
+    }
+}
+
+#[cfg(not(feature = "spire"))]
+#[async_trait::async_trait]
+impl IdentityProvider for SpireProvider {
+    async fn get_identity(&self) -> Result<WorkloadIdentity, IdentityError> {
+        Err(IdentityError::SpireUnavailable {
+            reason: "SPIRE support not compiled in (enable 'spire' feature)".to_string(),
+        })
+    }
+
+    async fn is_available(&self) -> bool {
+        false
     }
 
     fn source_type(&self) -> IdentitySource {

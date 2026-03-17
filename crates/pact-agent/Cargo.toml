@@ -11,6 +11,7 @@ path = "src/main.rs"
 [features]
 default = []
 ebpf = ["dep:aya", "dep:aya-log"]
+spire = ["dep:spiffe"]
 systemd = []
 nvidia = []
 amd = []
@@ -45,6 +46,9 @@ rcgen = { workspace = true }
 # Optional: eBPF observers
 aya = { workspace = true, optional = true }
 aya-log = { workspace = true, optional = true }
+
+# Optional: SPIRE workload identity
+spiffe = { workspace = true, optional = true }
 
 [dev-dependencies]
 pact-test-harness = { workspace = true }

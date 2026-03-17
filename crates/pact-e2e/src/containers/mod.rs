@@ -7,3 +7,4 @@ pub mod loki;
 pub mod opa;
 pub mod prometheus;
 pub mod raft_cluster;
+pub mod spire;

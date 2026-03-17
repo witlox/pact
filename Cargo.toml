@@ -33,6 +33,9 @@ hpc-node = "2026.1"
 hpc-audit = "2026.1"
 hpc-identity = "2026.1"
 
+# SPIFFE/SPIRE
+spiffe = { version = "0.12", features = ["workload-api-x509", "tracing"], default-features = false }
+
 # Async runtime
 tokio = { version = "1", features = ["full", "process", "signal"] }
 tokio-stream = "0.1"

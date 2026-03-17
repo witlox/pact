@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 pact-agent = { workspace = true }
 pact-cli = { workspace = true }
+hpc-identity = { workspace = true }
 pact-common = { workspace = true }
 pact-journal = { workspace = true }
 hpc-audit = { workspace = true }
