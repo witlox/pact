@@ -6,9 +6,12 @@ license.workspace = true
 publish = false
 
 [dependencies]
+pact-agent = { workspace = true }
 pact-cli = { workspace = true }
 pact-common = { workspace = true }
 pact-journal = { workspace = true }
+hpc-audit = { workspace = true }
+hpc-node = { workspace = true }
 pact-mcp = { workspace = true }
 pact-policy = { workspace = true }
 tokio = { workspace = true }
