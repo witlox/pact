@@ -47,6 +47,8 @@ pub enum JournalCommand {
     MoveNodeVCluster { node_id: NodeId, from_vcluster_id: VClusterId, to_vcluster_id: VClusterId },
     /// Update node's last-seen timestamp.
     UpdateNodeLastSeen { node_id: NodeId, timestamp: String },
+    /// Update node's certificate after renewal (does not change enrollment state).
+    UpdateNodeCert { node_id: NodeId, cert_serial: String, cert_expires_at: String },
 }
 
 impl fmt::Display for JournalCommand {
@@ -81,6 +83,9 @@ impl fmt::Display for JournalCommand {
             }
             Self::UpdateNodeLastSeen { node_id, .. } => {
                 write!(f, "UpdateNodeLastSeen({node_id})")
+            }
+            Self::UpdateNodeCert { node_id, .. } => {
+                write!(f, "UpdateNodeCert({node_id})")
             }
         }
     }

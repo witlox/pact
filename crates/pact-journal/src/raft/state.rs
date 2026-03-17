@@ -135,9 +135,17 @@ impl JournalState {
     }
 }
 
-/// Compute a canonical key from hardware identity for duplicate detection.
+/// Compute a canonical key from hardware identity for duplicate detection (E2).
+///
+/// Includes both MAC address and BMC serial (when present) to ensure
+/// hardware identity uniqueness within a domain.
 pub fn hw_canonical_key(hw: &pact_common::types::HardwareIdentity) -> String {
-    format!("mac:{}", hw.mac_address.to_lowercase())
+    match &hw.bmc_serial {
+        Some(serial) if !serial.is_empty() => {
+            format!("mac:{}:bmc:{}", hw.mac_address.to_lowercase(), serial.to_lowercase())
+        }
+        _ => format!("mac:{}", hw.mac_address.to_lowercase()),
+    }
 }
 
 /// Minimum TTL: 15 minutes (ND1).
@@ -373,6 +381,22 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                             chrono::DateTime::parse_from_rfc3339(&timestamp)
                                 .ok()
                                 .map(|dt| dt.with_timezone(&chrono::Utc));
+                        JournalResponse::Ok
+                    }
+                    None => JournalResponse::ValidationError {
+                        reason: format!("NODE_NOT_ENROLLED: {node_id}"),
+                    },
+                }
+            }
+            JournalCommand::UpdateNodeCert { node_id, cert_serial, cert_expires_at } => {
+                match self.enrollments.get_mut(&node_id) {
+                    Some(enrollment) => {
+                        enrollment.cert_serial = Some(cert_serial);
+                        enrollment.cert_expires_at =
+                            chrono::DateTime::parse_from_rfc3339(&cert_expires_at)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc));
+                        enrollment.last_seen = Some(chrono::Utc::now());
                         JournalResponse::Ok
                     }
                     None => JournalResponse::ValidationError {

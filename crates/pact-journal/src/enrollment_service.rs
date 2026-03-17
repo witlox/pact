@@ -20,7 +20,8 @@ use pact_common::proto::enrollment::{
     RenewCertRequest, RenewCertResponse, UnassignNodeRequest, UnassignNodeResponse,
 };
 use pact_common::types::{
-    DomainId, EnrollmentState, HardwareIdentity, Identity, NodeEnrollment, PrincipalType,
+    AdminOperation, AdminOperationType, DomainId, EnrollmentState, HardwareIdentity, Identity,
+    NodeEnrollment, PrincipalType, Scope,
 };
 
 use crate::ca::CaKeyManager;
@@ -63,6 +64,30 @@ impl EnrollmentServiceImpl {
         Ok(())
     }
 
+    /// Validate Bearer token and require platform-admin role (E10).
+    fn require_platform_admin<T>(req: &Request<T>) -> Result<(), Status> {
+        Self::require_auth(req)?;
+        let role = Self::extract_role(req);
+        if role != "pact-platform-admin" {
+            return Err(Status::permission_denied("PERMISSION_DENIED: requires pact-platform-admin role"));
+        }
+        Ok(())
+    }
+
+    /// Validate Bearer token and require ops role for the given vCluster, or platform-admin.
+    fn require_ops_or_admin<T>(req: &Request<T>, vcluster_id: &str) -> Result<(), Status> {
+        Self::require_auth(req)?;
+        let role = Self::extract_role(req);
+        if role == "pact-platform-admin" {
+            return Ok(());
+        }
+        let expected_ops = format!("pact-ops-{vcluster_id}");
+        if role == expected_ops {
+            return Ok(());
+        }
+        Err(Status::permission_denied("PERMISSION_DENIED: requires platform-admin or ops role for this vCluster"))
+    }
+
     /// Extract the principal name from auth metadata (simplified).
     fn extract_principal<T>(req: &Request<T>) -> String {
         req.metadata()
@@ -70,6 +95,61 @@ impl EnrollmentServiceImpl {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.trim_start_matches("Bearer ").to_string())
             .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    /// Extract role from auth metadata.
+    ///
+    /// In production this decodes the JWT to get the role claim.
+    /// Simplified: looks for `x-pact-role` metadata header, falls back to token inspection.
+    fn extract_role<T>(req: &Request<T>) -> String {
+        // Check explicit role header (set by auth interceptor or gateway)
+        if let Some(role) = req.metadata().get("x-pact-role") {
+            if let Ok(role_str) = role.to_str() {
+                return role_str.to_string();
+            }
+        }
+        // Fallback: try to extract from token (in production, decode JWT claims)
+        req.metadata()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| {
+                let token = s.trim_start_matches("Bearer ");
+                // Simple heuristic: if token contains a role pattern, use it
+                if token.contains("platform-admin") {
+                    "pact-platform-admin".to_string()
+                } else if token.contains("ops-") {
+                    token.to_string()
+                } else if token.contains("viewer-") {
+                    token.to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+}
+
+impl EnrollmentServiceImpl {
+    /// Record an enrollment audit event to the Raft log.
+    async fn audit_enrollment(
+        &self,
+        op_type: AdminOperationType,
+        node_id: &str,
+        detail: &str,
+    ) {
+        let op = AdminOperation {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now(),
+            actor: Identity {
+                principal: "enrollment-service".to_string(),
+                principal_type: PrincipalType::Service,
+                role: "pact-service-agent".to_string(),
+            },
+            operation_type: op_type,
+            scope: Scope::Node(node_id.to_string()),
+            detail: detail.to_string(),
+        };
+        let _ = self.raft.client_write(JournalCommand::RecordOperation(op)).await;
     }
 }
 
@@ -108,8 +188,12 @@ impl EnrollmentService for EnrollmentServiceImpl {
             Some(id) => id.clone(),
             None => {
                 drop(state);
-                // Log failed attempt for audit
                 warn!(mac = %hw.mac_address, "Enrollment attempt with unknown hardware identity");
+                self.audit_enrollment(
+                    AdminOperationType::NodeEnroll,
+                    &hw.mac_address,
+                    &format!("REJECTED: NODE_NOT_ENROLLED mac={}", hw.mac_address),
+                ).await;
                 return Err(Status::not_found("NODE_NOT_ENROLLED"));
             }
         };
@@ -119,24 +203,36 @@ impl EnrollmentService for EnrollmentServiceImpl {
 
         let enrollment = enrollment.ok_or_else(|| Status::internal("enrollment index inconsistency"))?;
 
-        // Check state
+        // Check state (pre-flight — authoritative check is in Raft apply)
         match enrollment.state {
-            EnrollmentState::Revoked => return Err(Status::permission_denied("NODE_REVOKED")),
-            EnrollmentState::Active => return Err(Status::already_exists("ALREADY_ACTIVE")),
+            EnrollmentState::Revoked => {
+                self.audit_enrollment(
+                    AdminOperationType::NodeEnroll,
+                    &node_id,
+                    "REJECTED: NODE_REVOKED",
+                ).await;
+                return Err(Status::permission_denied("NODE_REVOKED"));
+            }
+            EnrollmentState::Active => {
+                self.audit_enrollment(
+                    AdminOperationType::NodeEnroll,
+                    &node_id,
+                    "REJECTED: ALREADY_ACTIVE",
+                ).await;
+                return Err(Status::already_exists("ALREADY_ACTIVE"));
+            }
             EnrollmentState::Registered | EnrollmentState::Inactive => {} // OK to proceed
         }
 
-        // Sign CSR
-        let signed = self
-            .ca
-            .sign_csr(&req.csr, &node_id, &self.domain_id)
-            .map_err(|e| Status::internal(format!("CSR signing failed: {e}")))?;
-
-        // Write ActivateNode to Raft
+        // Write ActivateNode to Raft FIRST — only sign CSR if Raft accepts.
+        // This prevents ghost certs from TOCTOU races: if two concurrent Enroll
+        // calls race, only the Raft winner gets a signed cert.
+        let placeholder_serial = uuid::Uuid::new_v4().to_string();
+        let placeholder_expires = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
         let cmd = JournalCommand::ActivateNode {
             node_id: node_id.clone(),
-            cert_serial: signed.cert_serial.clone(),
-            cert_expires_at: signed.cert_expires_at.clone(),
+            cert_serial: placeholder_serial,
+            cert_expires_at: placeholder_expires,
         };
         let resp = self
             .raft
@@ -144,29 +240,50 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
-        match resp.data {
-            JournalResponse::EnrollmentResult { vcluster_id, .. } => {
-                info!(node_id = %node_id, "Node activated via enrollment");
-                Ok(Response::new(EnrollResponse {
-                    node_id,
-                    domain_id: self.domain_id.clone(),
-                    signed_cert: signed.cert_pem.into_bytes(),
-                    ca_chain: signed.ca_chain_pem.into_bytes(),
-                    vcluster_id: vcluster_id.unwrap_or_default(),
-                    cert_serial: signed.cert_serial,
-                    cert_expires_at: signed.cert_expires_at,
-                }))
+        let vcluster_id = match resp.data {
+            JournalResponse::EnrollmentResult { vcluster_id, .. } => vcluster_id,
+            JournalResponse::ValidationError { reason } => {
+                return Err(Status::failed_precondition(reason));
             }
-            JournalResponse::ValidationError { reason } => Err(Status::failed_precondition(reason)),
-            _ => Err(Status::internal("unexpected Raft response")),
-        }
+            _ => return Err(Status::internal("unexpected Raft response")),
+        };
+
+        // Raft accepted — now sign the CSR (no ghost certs possible).
+        let signed = self
+            .ca
+            .sign_csr(&req.csr, &node_id, &self.domain_id)
+            .map_err(|e| Status::internal(format!("CSR signing failed: {e}")))?;
+
+        // Update Raft with the real cert serial and expiry.
+        let update_cmd = JournalCommand::UpdateNodeCert {
+            node_id: node_id.clone(),
+            cert_serial: signed.cert_serial.clone(),
+            cert_expires_at: signed.cert_expires_at.clone(),
+        };
+        let _ = self.raft.client_write(update_cmd).await;
+
+        self.audit_enrollment(
+            AdminOperationType::NodeEnroll,
+            &node_id,
+            &format!("SUCCESS: node activated, cert_serial={}", signed.cert_serial),
+        ).await;
+        info!(node_id = %node_id, "Node activated via enrollment");
+        Ok(Response::new(EnrollResponse {
+            node_id,
+            domain_id: self.domain_id.clone(),
+            signed_cert: signed.cert_pem.into_bytes(),
+            ca_chain: signed.ca_chain_pem.into_bytes(),
+            vcluster_id: vcluster_id.unwrap_or_default(),
+            cert_serial: signed.cert_serial,
+            cert_expires_at: signed.cert_expires_at,
+        }))
     }
 
     async fn register_node(
         &self,
         request: Request<RegisterNodeRequest>,
     ) -> Result<Response<RegisterNodeResponse>, Status> {
-        Self::require_auth(&request)?;
+        Self::require_platform_admin(&request)?;
         let principal = Self::extract_principal(&request);
         let req = request.into_inner();
         let hw = req
@@ -215,7 +332,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<BatchRegisterNodesRequest>,
     ) -> Result<Response<BatchRegisterNodesResponse>, Status> {
-        Self::require_auth(&request)?;
+        Self::require_platform_admin(&request)?;
+        let principal = Self::extract_principal(&request);
         let req = request.into_inner();
         let mut results = Vec::with_capacity(req.nodes.len());
         let mut succeeded = 0u32;
@@ -247,7 +365,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
                 last_seen: None,
                 enrolled_at: chrono::Utc::now(),
                 enrolled_by: Identity {
-                    principal: "batch-admin".to_string(),
+                    principal: principal.clone(),
                     principal_type: PrincipalType::Human,
                     role: "pact-platform-admin".to_string(),
                 },
@@ -304,7 +422,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<DecommissionNodeRequest>,
     ) -> Result<Response<DecommissionNodeResponse>, Status> {
-        Self::require_auth(&request)?;
+        Self::require_platform_admin(&request)?;
         let req = request.into_inner();
 
         // Check for active sessions
@@ -347,7 +465,9 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<AssignNodeRequest>,
     ) -> Result<Response<AssignNodeResponse>, Status> {
-        Self::require_auth(&request)?;
+        // E10: platform-admin or ops for the target vCluster
+        let vcluster_id = request.get_ref().vcluster_id.clone();
+        Self::require_ops_or_admin(&request, &vcluster_id)?;
         let req = request.into_inner();
 
         let cmd = JournalCommand::AssignNodeToVCluster {
@@ -455,33 +575,16 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .sign_csr(&req.csr, &node_id, &self.domain_id)
             .map_err(|e| Status::internal(format!("CSR signing failed: {e}")))?;
 
-        // Update cert in Raft
-        let cmd = JournalCommand::ActivateNode {
+        // Update cert serial and expiry in Raft (does not change enrollment state).
+        let cmd = JournalCommand::UpdateNodeCert {
             node_id: node_id.clone(),
             cert_serial: signed.cert_serial.clone(),
             cert_expires_at: signed.cert_expires_at.clone(),
         };
-
-        // For renewal, the node is already active, so we update cert directly
-        // We need to handle ALREADY_ACTIVE differently for renewals
-        let state_guard = self.state.read().await;
-        if let Some(enrollment) = state_guard.enrollments.get(&node_id) {
-            if enrollment.state == EnrollmentState::Active {
-                // Directly update cert fields via a different Raft path
-                // For now, update last_seen to avoid ALREADY_ACTIVE error
-                drop(state_guard);
-                let update_cmd = JournalCommand::UpdateNodeLastSeen {
-                    node_id: node_id.clone(),
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                };
-                let _ = self.raft.client_write(update_cmd).await;
-            } else {
-                drop(state_guard);
-                let _ = self.raft.client_write(cmd).await;
-            }
-        } else {
-            drop(state_guard);
-        }
+        self.raft
+            .client_write(cmd)
+            .await
+            .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
         info!(node_id = %node_id, "Certificate renewed");
         Ok(Response::new(RenewCertResponse {
@@ -497,13 +600,31 @@ impl EnrollmentService for EnrollmentServiceImpl {
         request: Request<ListNodesRequest>,
     ) -> Result<Response<ListNodesResponse>, Status> {
         Self::require_auth(&request)?;
+        let role = Self::extract_role(&request);
         let req = request.into_inner();
         let state = self.state.read().await;
+
+        // Determine vCluster scope from caller role
+        let allowed_vcluster = if role == "pact-platform-admin" {
+            None // can see all
+        } else if role.starts_with("pact-ops-") || role.starts_with("pact-viewer-") {
+            // Extract vCluster from role: pact-ops-{vc} or pact-viewer-{vc}
+            let vc = role.split('-').skip(2).collect::<Vec<_>>().join("-");
+            Some(vc)
+        } else {
+            None
+        };
 
         let nodes: Vec<NodeSummary> = state
             .enrollments
             .values()
             .filter(|e| {
+                // RBAC: non-admin users can only see nodes in their vCluster
+                if let Some(ref allowed_vc) = allowed_vcluster {
+                    if e.vcluster_id.as_deref() != Some(allowed_vc.as_str()) {
+                        return false;
+                    }
+                }
                 if !req.state_filter.is_empty() {
                     let state_str = format!("{:?}", e.state);
                     if !state_str.eq_ignore_ascii_case(&req.state_filter) {
@@ -540,6 +661,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         request: Request<InspectNodeRequest>,
     ) -> Result<Response<InspectNodeResponse>, Status> {
         Self::require_auth(&request)?;
+        let role = Self::extract_role(&request);
         let req = request.into_inner();
         let state = self.state.read().await;
 
@@ -547,6 +669,14 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .enrollments
             .get(&req.node_id)
             .ok_or_else(|| Status::not_found(format!("node {} not found", req.node_id)))?;
+
+        // RBAC: non-admin viewers can only inspect nodes in their vCluster
+        if role != "pact-platform-admin" && (role.starts_with("pact-ops-") || role.starts_with("pact-viewer-")) {
+            let allowed_vc = role.split('-').skip(2).collect::<Vec<_>>().join("-");
+            if enrollment.vcluster_id.as_deref() != Some(&allowed_vc) {
+                return Err(Status::permission_denied("PERMISSION_DENIED: node not in your vCluster"));
+            }
+        }
 
         Ok(Response::new(InspectNodeResponse {
             node_id: enrollment.node_id.clone(),

@@ -281,9 +281,12 @@ fn when_generates_csr_for_enrollment(_world: &mut PactWorld) {}
 #[when("agent calls Enroll with hardware identity and CSR on the journal")]
 fn when_agent_calls_enroll(world: &mut PactWorld) {
     let mac = world.cli_output.clone().unwrap_or_default();
-    // Find node by MAC
-    let hw_key = format!("mac:{}", mac.to_lowercase());
-    if let Some(node_id) = world.journal.hw_index.get(&hw_key).cloned() {
+    // Find node by MAC (hw_key may include bmc serial suffix)
+    let mac_prefix = format!("mac:{}", mac.to_lowercase());
+    let node_id_opt = world.journal.hw_index.iter()
+        .find(|(k, _)| k.starts_with(&mac_prefix))
+        .map(|(_, v)| v.clone());
+    if let Some(node_id) = node_id_opt {
         let enrollment = world.journal.enrollments.get(&node_id);
         if let Some(e) = enrollment {
             match e.state {
