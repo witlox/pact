@@ -133,6 +133,57 @@ enum Commands {
         action: NodeSubcommand,
     },
 
+    /// Promote committed node deltas to vCluster overlay.
+    Promote {
+        /// Node ID to promote deltas from.
+        node: String,
+        /// Preview changes without applying.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Drain workloads from a node (delegates to lattice).
+    Drain {
+        /// Target node ID.
+        node: String,
+    },
+
+    /// Remove node from scheduling (delegates to lattice).
+    Cordon {
+        /// Target node ID.
+        node: String,
+    },
+
+    /// Return node to scheduling (delegates to lattice).
+    Uncordon {
+        /// Target node ID.
+        node: String,
+    },
+
+    /// Reboot a node via BMC (delegates to OpenCHAMI).
+    Reboot {
+        /// Target node ID.
+        node: String,
+    },
+
+    /// Re-image a node (delegates to OpenCHAMI).
+    Reimage {
+        /// Target node ID.
+        node: String,
+    },
+
+    /// vCluster group management.
+    Group {
+        #[command(subcommand)]
+        action: GroupSubcommand,
+    },
+
+    /// Manage drift detection blacklist.
+    Blacklist {
+        #[command(subcommand)]
+        action: BlacklistSubcommand,
+    },
+
     /// Extend commit window.
     Extend {
         /// Additional minutes (default: 15).
@@ -272,6 +323,40 @@ enum NodeSubcommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum GroupSubcommand {
+    /// List all vClusters.
+    List,
+    /// Show vCluster details.
+    Show {
+        /// vCluster name.
+        name: String,
+    },
+    /// Update vCluster policy.
+    SetPolicy {
+        /// vCluster name.
+        name: String,
+        /// Path to policy TOML file.
+        policy: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BlacklistSubcommand {
+    /// List current blacklist entries.
+    List,
+    /// Add a path pattern to the blacklist.
+    Add {
+        /// Glob pattern (e.g., "/custom/path/**").
+        pattern: String,
+    },
+    /// Remove a path pattern from the blacklist.
+    Remove {
+        /// Glob pattern to remove.
+        pattern: String,
+    },
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -315,6 +400,8 @@ async fn main() {
             | Commands::Cap { .. }
             | Commands::Extend { .. }
             | Commands::Node { .. }
+            | Commands::Promote { .. }
+            | Commands::Group { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -575,6 +662,87 @@ async fn main() {
                 }
             }
         }
+        Commands::Promote { node, dry_run } => {
+            // TODO: query journal for committed node deltas, export as overlay TOML
+            println!("Promote deltas from node {node}{}", if dry_run { " (dry run)" } else { "" });
+            println!("Not yet implemented — requires journal delta query API");
+            std::process::exit(1);
+        }
+        Commands::Drain { node } => {
+            let result = pact_cli::commands::delegate::drain_node(&node);
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
+        Commands::Cordon { node } => {
+            let result = pact_cli::commands::delegate::cordon_node(&node);
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
+        Commands::Uncordon { node } => {
+            let result = pact_cli::commands::delegate::uncordon_node(&node);
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
+        Commands::Reboot { node } => {
+            let result = pact_cli::commands::delegate::reboot_node(&node);
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
+        Commands::Reimage { node } => {
+            let result = pact_cli::commands::delegate::reimage_node(&node);
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
+        Commands::Group { action } => {
+            match action {
+                GroupSubcommand::List => {
+                    // TODO: query journal for all vCluster policies
+                    println!("Not yet implemented — requires journal policy query API");
+                    std::process::exit(1);
+                }
+                GroupSubcommand::Show { name } => {
+                    println!("Not yet implemented — requires journal policy query for {name}");
+                    std::process::exit(1);
+                }
+                GroupSubcommand::SetPolicy { name, policy } => {
+                    println!("Not yet implemented — set policy for {name} from {policy}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Blacklist { action } => match action {
+            BlacklistSubcommand::List => {
+                let result = pact_cli::commands::blacklist::BlacklistResult {
+                    operation: pact_cli::commands::blacklist::BlacklistOp::List,
+                    paths: pact_cli::commands::blacklist::default_blacklist(),
+                };
+                println!("{}", pact_cli::commands::blacklist::format_blacklist_result(&result));
+                Ok(String::new())
+            }
+            BlacklistSubcommand::Add { pattern } => {
+                println!("Not yet implemented — add {pattern} to blacklist via journal");
+                std::process::exit(1);
+            }
+            BlacklistSubcommand::Remove { pattern } => {
+                println!("Not yet implemented — remove {pattern} from blacklist via journal");
+                std::process::exit(1);
+            }
+        },
         Commands::Login { server, device_code, service_account } => {
             let server_url = server.unwrap_or_else(|| config.endpoint.clone());
             let flow_override = if device_code {

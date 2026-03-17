@@ -6,14 +6,18 @@
 
 pub mod apply;
 pub mod approve;
+pub mod blacklist;
 pub mod commit;
 pub mod config;
+pub mod delegate;
 pub mod diff;
 pub mod emergency;
 pub mod exec;
 pub mod execute;
+pub mod group;
 pub mod log;
 pub mod node;
+pub mod promote;
 pub mod rollback;
 pub mod service;
 pub mod status;
