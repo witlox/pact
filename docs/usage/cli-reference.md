@@ -41,6 +41,50 @@ pact [OPTIONS] <COMMAND>
 
 ---
 
+## Authentication Commands
+
+These commands manage OIDC authentication. `login` and `logout` are exempt from
+the "every command requires a valid token" rule (Auth1).
+
+### `pact login`
+
+Authenticate with the pact-journal server via OIDC.
+
+```bash
+pact login                          # Interactive (Auth Code + PKCE)
+pact login --server https://j:9443  # Explicit server URL
+pact login --device-code            # Headless (Device Code flow)
+pact login --service-account        # Machine identity (Client Credentials)
+```
+
+| Option | Description |
+|--------|-------------|
+| `--server <URL>` | Journal server URL (overrides config/env) |
+| `--device-code` | Force Device Code flow for headless environments |
+| `--service-account` | Use Client Credentials flow (requires `PACT_CLIENT_ID` and `PACT_CLIENT_SECRET` env vars) |
+
+**Flow selection:** If no flag is given, the auth crate auto-discovers the IdP
+and selects the best available flow: Auth Code + PKCE → Device Code → Manual Paste.
+
+**Token cache:** Tokens are stored at `~/.config/pact/auth/tokens-{server_hash}.json`
+with mode 0600 (PAuth1: strict permission mode).
+
+**Roles:** Not required (unauthenticated command).
+
+### `pact logout`
+
+Clear the local token cache and revoke the session at the IdP (best-effort).
+
+```bash
+pact logout
+```
+
+Local cache is always cleared, even if IdP revocation fails (Auth4).
+
+**Roles:** Not required (unauthenticated command).
+
+---
+
 ## Read Commands
 
 These commands query state without modifying anything. Available to all roles

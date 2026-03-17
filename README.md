@@ -69,6 +69,10 @@ pact emergency                 # Enter/exit emergency mode
 pact cap                       # Capability report
 pact group                     # vCluster/group management
 pact blacklist                 # Drift detection exclusions
+
+# Authentication
+pact login                     # OIDC login (Auth Code, Device Code, Service Account)
+pact logout                    # Clear session
 ```
 
 ## Boot Sequence (pact as init)
