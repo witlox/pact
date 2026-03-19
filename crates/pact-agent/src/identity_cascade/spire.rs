@@ -42,7 +42,7 @@ impl IdentityProvider for SpireProvider {
     async fn get_identity(&self) -> Result<WorkloadIdentity, IdentityError> {
         use spiffe::bundle::BundleSource;
         use spiffe::X509Source;
-        use tracing::{debug, info};
+        use tracing::info;
 
         info!(socket = %self.agent_socket, "requesting X.509 SVID from SPIRE agent");
 
