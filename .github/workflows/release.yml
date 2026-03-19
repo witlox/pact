@@ -45,42 +45,36 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- x86_64 ---
-          - name: x86_64-generic
-            target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: ebpf,spire,systemd
-            journal_features: opa
-            cross: false
-
+          # --- x86_64 (diskless HPC nodes, PactSupervisor) ---
           - name: x86_64-nvidia
             target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            agent_features: ebpf,spire,nvidia,systemd
+            agent_features: ebpf,spire,nvidia
             journal_features: opa
             cross: false
 
           - name: x86_64-amd
             target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            agent_features: ebpf,spire,amd,systemd
+            agent_features: ebpf,spire,amd
             journal_features: opa
             cross: false
 
-          # --- aarch64 ---
-          - name: aarch64-generic
-            target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: spire,systemd
-            journal_features: opa
-            cross: true
-
+          # --- aarch64 (diskless HPC nodes, PactSupervisor) ---
           - name: aarch64-nvidia
             target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            agent_features: spire,nvidia,systemd
+            agent_features: ebpf,spire,nvidia
             journal_features: opa
             cross: true
+
+          # --- systemd fallback (conservative deployments) ---
+          - name: x86_64-systemd
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            agent_features: ebpf,spire,nvidia,systemd
+            journal_features: opa
+            cross: false
 
     steps:
       - uses: actions/checkout@v6
@@ -166,13 +160,12 @@ jobs:
           body: |
             ## Build variants
 
-            | Archive | Target | Agent features |
-            |---------|--------|----------------|
-            | `pact-x86_64-generic` | x86_64-unknown-linux-gnu | ebpf, spire, systemd |
-            | `pact-x86_64-nvidia` | x86_64-unknown-linux-gnu | ebpf, spire, nvidia, systemd |
-            | `pact-x86_64-amd` | x86_64-unknown-linux-gnu | ebpf, spire, amd, systemd |
-            | `pact-aarch64-generic` | aarch64-unknown-linux-gnu | spire, systemd |
-            | `pact-aarch64-nvidia` | aarch64-unknown-linux-gnu | spire, nvidia, systemd |
+            | Archive | Target | Supervisor | Agent features |
+            |---------|--------|------------|----------------|
+            | `pact-x86_64-nvidia` | x86_64 | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-x86_64-amd` | x86_64 | PactSupervisor | ebpf, spire, amd |
+            | `pact-aarch64-nvidia` | aarch64 | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-x86_64-systemd` | x86_64 | systemd fallback | ebpf, spire, nvidia, systemd |
 
             All journal builds include OPA policy evaluation.
 

@@ -248,7 +248,13 @@ cargo build -p pact-agent --features ebpf,spire,amd
 | Scenario | Agent features | Journal features |
 |----------|---------------|------------------|
 | **Dev (macOS)** | (none) | (none) |
-| **CI (Linux)** | `systemd` | `opa` |
-| **Production (NVIDIA + Slingshot)** | `ebpf,spire,nvidia` | `opa` |
-| **Production (AMD + Ethernet)** | `ebpf,spire,amd` | `opa` |
+| **CI (Linux)** | (none) | `opa` |
+| **Production x86_64 NVIDIA** | `ebpf,spire,nvidia` | `opa` |
+| **Production x86_64 AMD** | `ebpf,spire,amd` | `opa` |
+| **Production aarch64 NVIDIA** | `ebpf,spire,nvidia` | `opa` |
+| **Systemd fallback** | `ebpf,spire,nvidia,systemd` | `opa` |
 | **Regulated site** | `ebpf,spire,nvidia` | `opa,federation` |
+
+Primary builds use `PactSupervisor` (no `systemd` feature) — the default
+for diskless HPC nodes where pact-agent runs as init. The `systemd`
+variant is for conservative deployments with persistent root filesystems.
