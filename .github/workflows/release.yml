@@ -80,7 +80,7 @@ jobs:
           scripts/set-version.sh
 
       - name: Build pact-journal
-        run: cargo build --release --target ${{ matrix.target }} -p pact-journal --features opa
+        run: cargo build --release --target ${{ matrix.target }} -p pact-journal
 
       - name: Build pact (CLI)
         run: cargo build --release --target ${{ matrix.target }} -p pact-cli
@@ -235,8 +235,8 @@ jobs:
 
             | Archive | Arch | Contents |
             |---------|------|----------|
-            | `pact-platform-x86_64` | x86_64 | pact, pact-journal (opa), pact-mcp |
-            | `pact-platform-aarch64` | aarch64 | pact, pact-journal (opa), pact-mcp |
+            | `pact-platform-x86_64` | x86_64 | pact, pact-journal (opa + federation), pact-mcp |
+            | `pact-platform-aarch64` | aarch64 | pact, pact-journal (opa + federation), pact-mcp |
 
             ## Agent binaries
 

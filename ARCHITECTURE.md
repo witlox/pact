@@ -233,9 +233,13 @@ cargo build -p pact-agent --features ebpf,spire,amd
 
 ### pact-journal
 
-| Feature | Dependency       | What it enables |
-|---------|------------------|-----------------|
-| `opa`   | `pact-policy/opa`| Forwards to `pact-policy`'s `opa` feature. Enables OPA evaluation in `PolicyServiceImpl` on the journal nodes. |
+Both features are **on by default** — they add no platform dependencies (just `reqwest`)
+and are no-ops when the respective endpoints are not configured.
+
+| Feature      | Dependency              | What it enables |
+|--------------|-------------------------|-----------------|
+| `opa`        | `pact-policy/opa`       | OPA/Rego policy evaluation via localhost REST on journal nodes (ADR-003). |
+| `federation` | `pact-policy/federation`| Sovra policy template synchronization on journal nodes. |
 
 ### pact-acceptance (test only)
 

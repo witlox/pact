@@ -9,8 +9,9 @@ name = "pact-journal"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["opa", "federation"]
 opa = ["pact-policy/opa"]
+federation = ["pact-policy/federation"]
 
 [dependencies]
 pact-common = { workspace = true }
