@@ -142,7 +142,8 @@ tar xzf pact-agent-x86_64-nvidia-pact.tar.gz -C /usr/local/bin/
 
 For diskless nodes, include the `pact-agent` binary in the base SquashFS image
 provisioned by OpenCHAMI. See [getting-started.md](getting-started.md) for the
-full list of agent variants.
+full list of agent variants and [ochami-image.md](ochami-image.md) for the
+complete image build guide.
 
 ### Create the config
 

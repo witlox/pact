@@ -10,6 +10,7 @@
 - [CLI Reference](usage/cli-reference.md)
 - [Admin Operations](usage/admin-operations.md)
 - [Deployment](usage/deployment.md)
+- [OpenCHAMI Image Build](usage/ochami-image.md)
 - [Troubleshooting](usage/troubleshooting.md)
 
 ---
