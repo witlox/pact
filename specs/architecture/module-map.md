@@ -83,7 +83,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - State observer (eBPF, inotify, netlink)
 - Drift evaluator (7-dimension comparison)
 - Commit window manager (formula-based timing, auto-rollback)
-- Capability reporter (GPU, memory, network, storage, software)
+- Capability reporter (CPU, GPU, memory, network, storage, software) — backend-per-category pattern
 - Shell server (exec endpoint + interactive shell)
 - Emergency mode manager
 - Enrollment: hardware identity detection, identity cascade (SPIRE/self-signed/bootstrap)
@@ -100,7 +100,13 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - `observer/` — eBPF, inotify, netlink observers
 - `drift/` — DriftEvaluator, blacklist filtering
 - `commit/` — CommitWindow runtime, auto-rollback, active consumer check
-- `capability/` — GpuBackend trait, CapabilityReport builder
+- `capability/` — Hardware detection backends, CapabilityReport builder
+  - `mod.rs` — `CapabilityReporter` orchestrator (takes all backends, builds CapabilityReport)
+  - `gpu.rs` — `GpuBackend` trait + `NvidiaSmiBackend` (#[cfg(feature = "nvidia")]) + `RocmSmiBackend` (#[cfg(feature = "amd")]) + `MockGpuBackend` (always compiled)
+  - `cpu.rs` — `CpuBackend` trait + `LinuxCpuBackend` (#[cfg(target_os = "linux")]) + `MockCpuBackend` (always compiled). Parses /proc/cpuinfo, /sys/devices/system/cpu/, /sys/devices/system/node/ (NUMA node count). **NEW**
+  - `memory.rs` — `MemoryBackend` trait + `LinuxMemoryBackend` (#[cfg(target_os = "linux")]) + `MockMemoryBackend` (always compiled). Parses /proc/meminfo, /sys/devices/system/node/node*/meminfo (NUMA topology), optional dmidecode for memory type. **NEW**
+  - `network.rs` — `NetworkBackend` trait + `LinuxNetworkBackend` (#[cfg(target_os = "linux")]) + `MockNetworkBackend` (always compiled). Enumerates /sys/class/net/*, reads speed/operstate/address/driver per interface. **NEW**
+  - `storage.rs` — `StorageBackend` trait + `LinuxStorageBackend` (#[cfg(target_os = "linux")]) + `MockStorageBackend` (always compiled). Parses /sys/block/, /proc/mounts, calls statvfs() for real capacity. **NEW**
 - `shell/` — ShellService gRPC, exec handler, interactive shell, whitelist
 - `emergency/` — EmergencySession lifecycle
 - `enrollment/` — HardwareIdentity detection, EnrollmentClient

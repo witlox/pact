@@ -243,15 +243,27 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Capability Detection Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| CAP1 | CPU arch accuracy | `LinuxCpuBackend::detect()` | Parses `/proc/cpuinfo` "model name" field + `uname -m` (via `std::env::consts::ARCH`). Maps to `CpuArchitecture` enum. | Reports `CpuArchitecture::Unknown` if `/proc/cpuinfo` unreadable or arch string unrecognised (F37) |
+| CAP2 | Memory total matches /proc/meminfo | `LinuxMemoryBackend::detect()` | Parses `/proc/meminfo` `MemTotal` line, converts kB to bytes. NUMA topology from `/sys/devices/system/node/node*/meminfo`. Hugepages from `/proc/meminfo` HugePages_* lines. Memory type via optional `dmidecode --type 17` (graceful fallback to `MemoryType::Unknown`). | Reports `total_bytes=0`, `available_bytes=0` if `/proc/meminfo` unreadable (F37). Reports `numa_nodes=1` with single-node fallback if `/sys/devices/system/node/` unavailable (F38). |
+| CAP3 | NIC count matches physical | `LinuxNetworkBackend::detect()` | Enumerates `/sys/class/net/*/`, filters loopback (`lo`) and virtual interfaces (no `/sys/class/net/*/device` symlink). Per interface: reads `speed`, `operstate`, `address`, detects fabric from driver symlink (`cxi` → Slingshot, others → Ethernet). | Reports empty `Vec<NetworkInterface>` if `/sys/class/net/` unreadable. Reports `speed_mbps=0` for interfaces where `/sys/class/net/*/speed` returns -1 or is unreadable (F39). |
+| CAP4 | Storage uses statvfs() | `LinuxStorageBackend::detect()` | Determines `StorageNodeType` from presence of `/sys/block/nvme*` or `/sys/block/sd*`. Enumerates local disks from `/sys/block/*/`. Parses `/proc/mounts` for active mounts. Calls `nix::sys::statvfs::statvfs()` per mount for real capacity (`total_bytes`, `available_bytes`). | Reports `total_bytes=0`, `available_bytes=0` on `statvfs` failure per mount (F41). Mount still listed with path/fs_type/source. Reports `StorageNodeType::Diskless` with `local_disks=[]` if `/sys/block/` unreadable (F40). |
+| CAP5 | Non-Linux compiles | `MockCpuBackend`, `MockMemoryBackend`, `MockNetworkBackend`, `MockStorageBackend` | All Mock backends always compiled (no `#[cfg]` gate). Store configurable test data via constructor (`with_*` pattern, matching `MockGpuBackend::with_gpus`). Return stored data from `detect()`. Linux backends are `#[cfg(target_os = "linux")]` only. | Structural — Mock impls have no platform-specific dependencies. `CapabilityReporter` accepts `Box<dyn XxxBackend>` for all 5 categories, enabling macOS development and deterministic testing. |
+
+---
+
 ## Enforcement Categories
 
 Summary of how invariants are enforced:
 
 | Category | Count | Invariants | Description |
 |----------|-------|------------|-------------|
-| **Structural** | 27 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8, RI4, RI5, RI6, IM2, IM5, IM6, NM1, PB4, WI1, WI2(assert), WI4, PB1 | Impossible to violate by design (no API exists to break them) |
+| **Structural** | 28 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8, RI4, RI5, RI6, IM2, IM5, IM6, NM1, PB4, WI1, WI2(assert), WI4, PB1, CAP5 | Impossible to violate by design (no API exists to break them) |
 | **Validation** | 14 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7, IM1, IM3 | Checked at input boundary, rejected with error |
-| **Runtime logic** | 35 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4-E6, E9-E10, PS1-PS3, RI1-RI3, IM4, IM7, NM2, WI3, WI5, WI6 | Active enforcement in business logic |
+| **Runtime logic** | 39 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4-E6, E9-E10, PS1-PS3, RI1-RI3, IM4, IM7, NM2, WI3, WI5, WI6, CAP1-CAP4 | Active enforcement in business logic |
 | **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
 | **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
 | **Degraded fallback** | 7 | P7, F2, F3, A9, CR3, PB5, PB2 | Special behavior when components unavailable |

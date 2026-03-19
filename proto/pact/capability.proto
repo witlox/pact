@@ -9,13 +9,15 @@ message CapabilityReport {
   google.protobuf.Timestamp timestamp = 2;
   repeated GpuCapability gpus = 3;
   MemoryCapability memory = 4;
-  NetworkCapability network = 5;
+  repeated NetworkInterface network_interfaces = 5;
   StorageCapability storage = 6;
   SoftwareCapability software = 7;
   ConfigState config_state = 8;
   optional pact.config.DriftVector drift_summary = 9;
   optional EmergencyInfo emergency = 10;
   SupervisorStatus supervisor = 11;
+  CpuCapability cpu = 12;
+  string report_id = 13;
 }
 
 enum ConfigState {
@@ -33,6 +35,8 @@ message SupervisorStatus {
   uint32 services_running = 3;
   uint32 services_failed = 4;
 }
+
+// --- GPU ---
 
 message GpuCapability {
   uint32 index = 1;
@@ -56,29 +60,129 @@ enum GpuHealth {
   GPU_HEALTH_FAILED = 3;
 }
 
+// --- CPU ---
+
+message CpuCapability {
+  CpuArchitecture architecture = 1;
+  string model = 2;               // e.g. "Intel Xeon w9-3495X", "NVIDIA Grace"
+  uint32 physical_cores = 3;
+  uint32 logical_cores = 4;       // includes SMT/HT threads
+  uint32 base_frequency_mhz = 5;
+  uint32 max_frequency_mhz = 6;   // turbo/boost frequency
+  repeated string features = 7;   // ISA features: "avx512f", "sve", "amx", etc.
+  uint32 numa_nodes = 8;          // number of NUMA nodes
+  uint64 cache_l3_bytes = 9;      // total L3 cache across all sockets
+}
+
+enum CpuArchitecture {
+  CPU_ARCHITECTURE_UNSPECIFIED = 0;
+  CPU_ARCHITECTURE_X86_64 = 1;
+  CPU_ARCHITECTURE_AARCH64 = 2;
+}
+
+// --- Memory ---
+
 message MemoryCapability {
   uint64 total_bytes = 1;
   uint64 available_bytes = 2;
-  uint32 numa_nodes = 3;
+  MemoryType memory_type = 3;
+  uint32 numa_nodes = 4;
+  repeated NumaNode numa_topology = 5;
+  HugePageInfo hugepages = 6;
 }
 
-message NetworkCapability {
-  string fabric_type = 1;
-  uint64 bandwidth_bps = 2;
-  double latency_us = 3;
+enum MemoryType {
+  MEMORY_TYPE_UNSPECIFIED = 0;
+  MEMORY_TYPE_DDR4 = 1;
+  MEMORY_TYPE_DDR5 = 2;
+  MEMORY_TYPE_HBM2E = 3;
+  MEMORY_TYPE_HBM3 = 4;
+  MEMORY_TYPE_HBM3E = 5;
 }
+
+message NumaNode {
+  uint32 id = 1;
+  uint64 total_bytes = 2;
+  repeated uint32 cpus = 3;       // logical CPU IDs in this NUMA node
+}
+
+message HugePageInfo {
+  uint64 size_2mb_total = 1;
+  uint64 size_2mb_free = 2;
+  uint64 size_1gb_total = 3;
+  uint64 size_1gb_free = 4;
+}
+
+// --- Network ---
+
+message NetworkInterface {
+  string name = 1;                // e.g. "cxi0", "eth0"
+  NetworkFabric fabric = 2;       // detected from driver
+  uint64 speed_mbps = 3;          // from /sys/class/net/*/speed (0 if unknown)
+  InterfaceOperState state = 4;   // from /sys/class/net/*/operstate
+  string mac = 5;                 // from /sys/class/net/*/address
+  optional string ipv4 = 6;      // primary IPv4 address if assigned
+}
+
+enum NetworkFabric {
+  NETWORK_FABRIC_UNSPECIFIED = 0;
+  NETWORK_FABRIC_SLINGSHOT = 1;
+  NETWORK_FABRIC_ETHERNET = 2;
+}
+
+enum InterfaceOperState {
+  INTERFACE_OPER_STATE_UNSPECIFIED = 0;
+  INTERFACE_OPER_STATE_UP = 1;
+  INTERFACE_OPER_STATE_DOWN = 2;
+}
+
+// --- Storage ---
 
 message StorageCapability {
-  uint64 tmpfs_bytes = 1;
-  repeated MountPoint mounts = 2;
+  StorageNodeType node_type = 1;
+  repeated LocalDisk local_disks = 2;
+  repeated MountInfo mounts = 3;
 }
 
-message MountPoint {
-  string path = 1;
-  string fs_type = 2;
-  string source = 3;
-  bool available = 4;
+enum StorageNodeType {
+  STORAGE_NODE_TYPE_UNSPECIFIED = 0;
+  STORAGE_NODE_TYPE_DISKLESS = 1;
+  STORAGE_NODE_TYPE_LOCAL_STORAGE = 2;
 }
+
+message LocalDisk {
+  string device = 1;              // e.g. "/dev/nvme0n1"
+  string model = 2;               // from /sys/block/*/device/model
+  uint64 capacity_bytes = 3;      // from /sys/block/*/size * 512
+  DiskType disk_type = 4;
+}
+
+enum DiskType {
+  DISK_TYPE_UNSPECIFIED = 0;
+  DISK_TYPE_NVME = 1;
+  DISK_TYPE_SSD = 2;
+  DISK_TYPE_HDD = 3;
+}
+
+message MountInfo {
+  string path = 1;                // mount point
+  FsType fs_type = 2;             // filesystem type
+  string source = 3;              // device or NFS server:path
+  uint64 total_bytes = 4;         // from statvfs()
+  uint64 available_bytes = 5;     // from statvfs()
+}
+
+enum FsType {
+  FS_TYPE_UNSPECIFIED = 0;
+  FS_TYPE_NFS = 1;
+  FS_TYPE_LUSTRE = 2;
+  FS_TYPE_EXT4 = 3;
+  FS_TYPE_XFS = 4;
+  FS_TYPE_TMPFS = 5;
+  FS_TYPE_OTHER = 6;
+}
+
+// --- Software ---
 
 message SoftwareCapability {
   repeated string loaded_modules = 1;
@@ -93,6 +197,8 @@ message ServiceStatus {
   uint64 uptime_seconds = 4;
   uint32 restart_count = 5;
 }
+
+// --- Emergency ---
 
 message EmergencyInfo {
   string reason = 1;

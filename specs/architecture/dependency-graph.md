@@ -63,6 +63,28 @@ pact-cli   ──REST──▶ OpenCHAMI      (reboot/reimage delegation, stubbe
 | agent →(unix socket) lattice | Namespace FD handoff (WI1, interaction N7) |
 | agent →(unix socket) SPIRE | SVID acquisition (PB4-5, interaction N10) |
 
+## Capability Detection Dependencies
+
+The expanded hardware detection backends (cpu.rs, memory.rs, network.rs, storage.rs)
+introduce **no new external crate dependencies**. All Linux backends use:
+
+- `std::fs` — reading `/proc/cpuinfo`, `/proc/meminfo`, `/proc/mounts`, `/proc/modules`,
+  `/sys/class/net/*/`, `/sys/devices/system/cpu/`, `/sys/devices/system/node/`, `/sys/block/*/`
+- `nix::sys::statvfs::statvfs()` — real filesystem capacity per mount (CAP4).
+  The `nix` crate is already a workspace dependency.
+- `std::env::consts::ARCH` — CPU architecture detection for `CpuArchitecture` enum
+
+Optional (graceful fallback if unavailable):
+- `dmidecode --type 17` — memory type detection (DDR4/DDR5/HBM). Spawned via
+  `tokio::process::Command` (same pattern as nvidia-smi/rocm-smi). Falls back to
+  `MemoryType::Unknown` if dmidecode is not installed or not running as root.
+
+Mock backends have zero dependencies beyond `std` and `async-trait`.
+
+No changes to the compile-time or runtime dependency graph structure.
+
+---
+
 ## Cycle Analysis
 
 **No cycles.** Dependency graph is a DAG:

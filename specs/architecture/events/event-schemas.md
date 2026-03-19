@@ -245,9 +245,10 @@ pub struct CapabilityReport {
     pub node_id: NodeId,
     pub timestamp: DateTime<Utc>,
     pub report_id: Uuid,
+    pub cpu: CpuCapability,
     pub gpus: Vec<GpuCapability>,
     pub memory: MemoryCapability,
-    pub network: Option<NetworkCapability>,
+    pub network: Vec<NetworkInterface>,
     pub storage: StorageCapability,
     pub software: SoftwareCapability,
     pub config_state: ConfigState,
@@ -258,6 +259,53 @@ pub struct CapabilityReport {
 ```
 
 Sub-schemas defined in `data-models/shared-kernel.md`.
+
+---
+
+## CapabilityChange Event (Agent → Journal)
+
+When the agent detects a hardware capability change between consecutive detection
+cycles, it writes a `ConfigEntry` with `entry_type: CapabilityChange` to the journal.
+This covers all hardware categories, not just GPU degradation.
+
+**Trigger conditions (any of):**
+- CPU: architecture or core count changes (unlikely but possible on hot-plug systems)
+- GPU: health state transitions (Healthy → Degraded → Failed), GPU count changes
+- Memory: total_bytes changes (DIMM failure, hot-add), NUMA topology changes
+- Network: interface added/removed, operstate changes (Up → Down), speed changes
+- Storage: local disk added/removed, mount added/removed, statvfs capacity changes beyond threshold
+
+**Event payload:**
+
+```rust
+// Recorded as ConfigEntry with:
+//   entry_type: EntryType::CapabilityChange
+//   scope: Scope::Node(node_id)
+//   author: Identity { principal: "pact-agent", principal_type: PrincipalType::Service, role: "pact-service-agent" }
+//   delta: Some(StateDelta) with capability-specific changes
+
+// The delta encodes what changed using the "gpu" dimension for GPU changes,
+// and a new "capability" key prefix convention for other hardware:
+//   key: "capability.cpu.cores" / "capability.memory.total" / "capability.network.cxi0.state" / etc.
+//   old_value: previous value (serialized)
+//   new_value: current value (serialized)
+```
+
+**Change detection categories:**
+
+| Category | Key prefix | Example key | Compared fields |
+|----------|-----------|-------------|-----------------|
+| CPU | `capability.cpu.*` | `capability.cpu.logical_cores` | architecture, physical_cores, logical_cores, features |
+| GPU | `gpu.*` (existing) | `gpu.0.health` | health, count, memory_bytes per GPU |
+| Memory | `capability.memory.*` | `capability.memory.total_bytes` | total_bytes, numa_nodes, hugepages totals |
+| Network | `capability.network.*` | `capability.network.cxi0.state` | interface count, per-interface state/speed |
+| Storage | `capability.storage.*` | `capability.storage.node_type` | node_type, local_disk count, mount count |
+
+**Consumer actions:**
+- **Journal**: records the entry, makes it available in audit log
+- **Lattice scheduler**: updates node capability model, may re-evaluate scheduling decisions
+- **Grafana/Loki**: Loki event with `event_type: "capability_change"`, dashboard panels update
+- **Alerting**: GPU health degradation and memory total changes trigger alerts
 
 ---
 
