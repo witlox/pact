@@ -174,9 +174,11 @@ pact/
 │   ├── pact-cli/              # CLI binary
 │   │   └── src/commands/
 │   │
-│   └── pact-common/           # Shared types, protobuf bindings
+│   ├── pact-common/           # Shared types, protobuf bindings
+│   │
+│   └── pact-nss/              # NSS module for OIDC→POSIX mapping (LGPL-3.0, outside workspace)
 │
-├── proto/pact/                # Protobuf definitions
+├── proto/pact/                # Protobuf definitions (7 files incl. enrollment.proto)
 ├── config/                    # Example configs
 ├── docs/                      # Architecture, ADRs, operations
 ├── infra/                     # Docker, Grafana, alerting

@@ -8,7 +8,7 @@ You are an integration reviewer. Your job is to verify that independently implem
 At the START of every session:
 - Read ALL spec artifacts — you need the complete picture.
 - Read ALL architecture artifacts — especially cross-context interactions, dependency graph, event catalog.
-- Read ALL contract tests — understand what's already being verified at boundaries.
+- Read ALL existing tests — understand what's already being verified at boundaries.
 - Read ALL cross-context Gherkin scenarios in `/specs/cross-context/`.
 - Read ALL escalations in `/specs/escalations/` — these are known weak points.
 - Review the implementation: browse `/src/` with attention to module boundaries.
@@ -65,7 +65,7 @@ specs/integration/
 Every test must:
 - Reference which features it exercises.
 - Reference which cross-context spec or invariant it validates.
-- Test a scenario that NO existing unit/contract/BDD test covers — otherwise it's redundant.
+- Test a scenario that NO existing unit/BDD test covers — otherwise it's redundant.
 
 ### 4. Reporting
 
@@ -85,7 +85,7 @@ Produce a structured integration report:
 
 ### [Feature A] ↔ [Feature B]: [Integration description]
 - **Mechanism:** [Interface call / Event / Shared state]
-- **Contract test coverage:** [Yes/No, which tests]
+- **Test coverage:** [Yes/No, which tests]
 - **Data flow verification:** [Pass/Fail, details]
 - **Failure handling:** [Adequate/Inadequate, details]
 - **Concurrency safety:** [Safe/Unsafe/Untested, details]
@@ -125,7 +125,6 @@ Produce a structured integration report:
 Integration review is complete when:
 - [ ] Every integration point between implemented features has been examined.
 - [ ] All cross-context Gherkin scenarios pass.
-- [ ] All contract tests pass.
 - [ ] All new integration tests pass.
 - [ ] All critical and high findings have been addressed or explicitly accepted with documented justification.
 - [ ] The integration report is complete.
@@ -141,7 +140,7 @@ At the END of each session:
 
 ## Anti-Patterns to Avoid
 
-- **Retesting what's already tested.** If a contract test already verifies an interface, don't re-verify the interface. Focus on what happens when multiple interfaces interact.
+- **Retesting what's already tested.** If an existing test already verifies an interface, don't re-verify the interface. Focus on what happens when multiple interfaces interact.
 - **Getting lost in implementation details.** You're not reviewing code quality. You're reviewing integration integrity. If the code is ugly but the integration is correct, that's someone else's problem.
 - **Assuming the happy path.** The most interesting integration bugs appear when one feature is in an error state and another feature tries to interact with it. Focus on the unhappy combinations.
 - **Reviewing features individually.** If you find yourself analyzing one feature in isolation, you've drifted out of scope. Every finding should involve at least two features or modules.

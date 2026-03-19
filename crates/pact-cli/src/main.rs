@@ -402,6 +402,12 @@ async fn main() {
             | Commands::Node { .. }
             | Commands::Promote { .. }
             | Commands::Group { .. }
+            | Commands::Blacklist { .. }
+            | Commands::Drain { .. }
+            | Commands::Cordon { .. }
+            | Commands::Uncordon { .. }
+            | Commands::Reboot { .. }
+            | Commands::Reimage { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -663,13 +669,12 @@ async fn main() {
             }
         }
         Commands::Promote { node, dry_run } => {
-            // TODO: query journal for committed node deltas, export as overlay TOML
-            println!("Promote deltas from node {node}{}", if dry_run { " (dry run)" } else { "" });
-            println!("Not yet implemented — requires journal delta query API");
-            std::process::exit(1);
+            pact_cli::commands::execute::promote_node(journal_client.as_mut().unwrap(), &node, dry_run).await
         }
         Commands::Drain { node } => {
-            let result = pact_cli::commands::delegate::drain_node(&node);
+            let result = pact_cli::commands::delegate::drain_node(
+                journal_client.as_mut().unwrap(), &node, &principal, &role,
+            ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
                 std::process::exit(1);
@@ -677,7 +682,9 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Cordon { node } => {
-            let result = pact_cli::commands::delegate::cordon_node(&node);
+            let result = pact_cli::commands::delegate::cordon_node(
+                journal_client.as_mut().unwrap(), &node, &principal, &role,
+            ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
                 std::process::exit(1);
@@ -685,7 +692,9 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Uncordon { node } => {
-            let result = pact_cli::commands::delegate::uncordon_node(&node);
+            let result = pact_cli::commands::delegate::uncordon_node(
+                journal_client.as_mut().unwrap(), &node, &principal, &role,
+            ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
                 std::process::exit(1);
@@ -693,7 +702,9 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Reboot { node } => {
-            let result = pact_cli::commands::delegate::reboot_node(&node);
+            let result = pact_cli::commands::delegate::reboot_node(
+                journal_client.as_mut().unwrap(), &node, &principal, &role,
+            ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
                 std::process::exit(1);
@@ -701,7 +712,9 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Reimage { node } => {
-            let result = pact_cli::commands::delegate::reimage_node(&node);
+            let result = pact_cli::commands::delegate::reimage_node(
+                journal_client.as_mut().unwrap(), &node, &principal, &role,
+            ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
                 std::process::exit(1);
@@ -709,19 +722,16 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Group { action } => {
+            let channel = journal_channel.as_ref().unwrap();
             match action {
                 GroupSubcommand::List => {
-                    // TODO: query journal for all vCluster policies
-                    println!("Not yet implemented — requires journal policy query API");
-                    std::process::exit(1);
+                    execute::group_list(channel).await
                 }
                 GroupSubcommand::Show { name } => {
-                    println!("Not yet implemented — requires journal policy query for {name}");
-                    std::process::exit(1);
+                    execute::group_show(channel, &name).await
                 }
                 GroupSubcommand::SetPolicy { name, policy } => {
-                    println!("Not yet implemented — set policy for {name} from {policy}");
-                    std::process::exit(1);
+                    execute::group_set_policy(channel, &name, &policy, &principal, &role).await
                 }
             }
         }
@@ -735,12 +745,12 @@ async fn main() {
                 Ok(String::new())
             }
             BlacklistSubcommand::Add { pattern } => {
-                println!("Not yet implemented — add {pattern} to blacklist via journal");
-                std::process::exit(1);
+                let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
+                execute::blacklist_add(journal_client.as_mut().unwrap(), &pattern, &vcluster, &principal, &role).await
             }
             BlacklistSubcommand::Remove { pattern } => {
-                println!("Not yet implemented — remove {pattern} from blacklist via journal");
-                std::process::exit(1);
+                let vcluster = config.default_vcluster.as_deref().unwrap_or("default").to_string();
+                execute::blacklist_remove(journal_client.as_mut().unwrap(), &pattern, &vcluster, &principal, &role).await
             }
         },
         Commands::Login { server, device_code, service_account } => {

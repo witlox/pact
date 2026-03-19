@@ -10,7 +10,7 @@ Three channels:
 ## Journal Metrics Endpoint
 
 Each pact-journal server exposes a Prometheus metrics endpoint via axum
-(HTTP, default port 9090). Metrics include:
+(HTTP, default port 9091 — avoids conflict with Prometheus server default on 9090). Metrics include:
 
 - `pact_raft_leader` (gauge): 1 if this node is the Raft leader
 - `pact_raft_term` (gauge): current Raft term

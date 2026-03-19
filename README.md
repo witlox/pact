@@ -55,12 +55,14 @@ pact exec <node> -- <command>  # Run diagnostic command on node
 pact shell <node>              # Interactive pact shell on node
 pact service <action> <name>   # Service management (start/stop/restart/status)
 
-# Node lifecycle
-pact promote <node>            # Promote node to active service
-pact drain <node>              # Drain workloads from node
-pact cordon <node>             # Mark node as unschedulable
-pact uncordon <node>           # Remove cordon from node
-pact reboot <node>             # Reboot node via BMC/Redfish
+# Delta promotion
+pact promote <node>            # Export committed node deltas as overlay TOML
+
+# Node lifecycle (delegated)
+pact drain <node>              # Drain workloads from node (→ lattice)
+pact cordon <node>             # Mark node as unschedulable (→ lattice)
+pact uncordon <node>           # Remove cordon from node (→ lattice)
+pact reboot <node>             # Reboot node via BMC/Redfish (→ OpenCHAMI)
 pact reimage <node>            # Re-image node via OpenCHAMI
 
 # Operational
@@ -90,7 +92,7 @@ Total: <2 seconds from pact-agent start to node ready.
 
 ## Contributing with Claude Code
 
-This project includes structured [Claude Code](https://claude.com/claude-code) profiles for different development phases: analyst, architect, adversary, contract-gen, implementer, and integrator. Each profile constrains Claude to a specific role in the workflow.
+This project includes structured [Claude Code](https://claude.com/claude-code) profiles for different development phases: analyst, architect, adversary, implementer, and integrator. Each profile constrains Claude to a specific role in the workflow.
 
 ```bash
 # Activate a profile (writes to .claude/CLAUDE.md, which is gitignored)

@@ -12,6 +12,7 @@ Authenticates as pact-service-ai principal with scoped permissions.
 - pact_rollback: revert to previous state
 - pact_log: query history
 - pact_exec: run diagnostic command on node
+- pact_cap: node hardware capability report
 - pact_query_fleet: fleet-wide health query
 - pact_emergency: start/end emergency (typically restricted to human admins)
 - pact_service_status: query service health across nodes

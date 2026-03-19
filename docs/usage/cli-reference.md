@@ -380,24 +380,38 @@ pact extend 30                       # Extend by 30 minutes
 
 ---
 
-## Node Lifecycle Commands
-
-These commands manage node state transitions. Requires `pact-ops-{vcluster}` or
-`pact-platform-admin` role. All lifecycle operations are logged to the journal.
+## Delta Promotion
 
 ### `pact promote`
 
-Promote a node to active service after enrollment and configuration.
+Export committed node deltas as overlay TOML. This aggregates per-node
+configuration changes into a vCluster-wide overlay spec that can be reviewed,
+edited, and applied with `pact apply`.
 
 ```bash
-pact promote node-042                # Promote node
-pact promote node-042 --dry-run      # Show what would happen without applying
+pact promote node-042                # Export deltas as TOML to stdout
+pact promote node-042 --dry-run      # Preview without generating output
+pact promote node-042 > changes.toml # Export to file, then: pact apply changes.toml
 ```
 
 | Option | Description |
 |--------|-------------|
-| `<node>` | Target node ID (required) |
-| `--dry-run` | Show promotion plan without executing |
+| `<node>` | Node ID whose committed deltas to export (required) |
+| `--dry-run` | Show which deltas would be exported without generating TOML |
+
+If other nodes in the vCluster have local changes on the same config keys,
+promote detects the conflict and requires explicit acknowledgment (overwrite
+or keep local). See failure-modes.md FM-8.
+
+Requires `pact-ops-{vcluster}` or `pact-platform-admin` role.
+
+---
+
+## Node Lifecycle Commands
+
+These commands manage node state transitions via delegation to external systems.
+Requires `pact-ops-{vcluster}` or `pact-platform-admin` role. All operations
+are logged to the journal.
 
 ### `pact drain`
 

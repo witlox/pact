@@ -14,6 +14,7 @@ use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 use pact_common::proto::journal::{AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest};
 
 use super::config::CliConfig;
+use super::promote;
 
 /// Resolve identity (principal + role) from a JWT token.
 ///
@@ -413,6 +414,173 @@ pub async fn apply(
     Ok(format!("{summary}\n\n{}", results.join("\n")))
 }
 
+/// Convert proto StateDelta back to domain StateDelta.
+fn proto_to_state_delta(
+    proto: &pact_common::proto::config::StateDelta,
+) -> pact_common::types::StateDelta {
+    use pact_common::types::{DeltaAction, DeltaItem};
+
+    fn proto_action(a: i32) -> DeltaAction {
+        match a {
+            1 => DeltaAction::Add,
+            2 => DeltaAction::Remove,
+            _ => DeltaAction::Modify, // 3 or unknown → Modify
+        }
+    }
+
+    pact_common::types::StateDelta {
+        kernel: proto
+            .kernel
+            .iter()
+            .map(|k| DeltaItem {
+                action: proto_action(k.action),
+                key: k.key.clone(),
+                value: k.declared_value.clone(),
+                previous: k.actual_value.clone(),
+            })
+            .collect(),
+        services: proto
+            .services
+            .iter()
+            .map(|s| DeltaItem {
+                action: proto_action(s.action),
+                key: s.name.clone(),
+                value: s.declared_state.clone(),
+                previous: s.actual_state.clone(),
+            })
+            .collect(),
+        mounts: proto
+            .mounts
+            .iter()
+            .map(|m| DeltaItem {
+                action: proto_action(m.action),
+                key: m.path.clone(),
+                value: None,
+                previous: None,
+            })
+            .collect(),
+        files: proto
+            .files
+            .iter()
+            .map(|f| DeltaItem {
+                action: proto_action(f.action),
+                key: f.path.clone(),
+                value: f.content_hash.clone(),
+                previous: f.owner.clone(),
+            })
+            .collect(),
+        network: proto
+            .network
+            .iter()
+            .map(|n| DeltaItem {
+                action: proto_action(n.action),
+                key: n.interface.clone(),
+                value: n.detail.clone(),
+                previous: None,
+            })
+            .collect(),
+        packages: proto
+            .packages
+            .iter()
+            .map(|p| DeltaItem {
+                action: proto_action(p.action),
+                key: p.name.clone(),
+                value: p.version.clone(),
+                previous: None,
+            })
+            .collect(),
+        gpu: proto
+            .gpu
+            .iter()
+            .map(|g| DeltaItem {
+                action: proto_action(g.action),
+                key: g.gpu_index.to_string(),
+                value: g.detail.clone(),
+                previous: None,
+            })
+            .collect(),
+    }
+}
+
+/// Execute `pact promote` — export committed node deltas as overlay TOML.
+pub async fn promote_node(
+    client: &mut ConfigServiceClient<Channel>,
+    node_id: &str,
+    dry_run: bool,
+) -> anyhow::Result<String> {
+    let resp = client
+        .list_entries(tonic::Request::new(ListEntriesRequest {
+            scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::NodeId(node_id.to_string())) }),
+            from_sequence: None,
+            to_sequence: None,
+            limit: None,
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("promote query failed: {e}"))?;
+
+    let mut stream = resp.into_inner();
+    let mut deltas = Vec::new();
+
+    while let Some(entry) = tokio_stream::StreamExt::next(&mut stream).await {
+        match entry {
+            Ok(e) => {
+                // Filter for Commit entries (entry_type 1) with a state_delta
+                if e.entry_type == 1 {
+                    if let Some(ref proto_delta) = e.state_delta {
+                        deltas.push(proto_to_state_delta(proto_delta));
+                    }
+                }
+            }
+            Err(e) => return Err(anyhow::anyhow!("promote stream error: {e}")),
+        }
+    }
+
+    if deltas.is_empty() {
+        return Ok(format!("No committed deltas found for node {node_id}."));
+    }
+
+    let count = deltas.len();
+
+    if dry_run {
+        // Summarize which sections would be exported
+        let mut sections = Vec::new();
+        for d in &deltas {
+            if !d.kernel.is_empty() {
+                sections.push("kernel");
+            }
+            if !d.services.is_empty() {
+                sections.push("services");
+            }
+            if !d.mounts.is_empty() {
+                sections.push("mounts");
+            }
+            if !d.files.is_empty() {
+                sections.push("files");
+            }
+            if !d.network.is_empty() {
+                sections.push("network");
+            }
+            if !d.packages.is_empty() {
+                sections.push("packages");
+            }
+            if !d.gpu.is_empty() {
+                sections.push("gpu");
+            }
+        }
+        sections.sort_unstable();
+        sections.dedup();
+        Ok(format!(
+            "DRY RUN — would export {count} delta(s) from node {node_id}\nSections: {}",
+            if sections.is_empty() { "(none)".to_string() } else { sections.join(", ") }
+        ))
+    } else {
+        let toml = promote::export_deltas_as_toml(&deltas);
+        Ok(format!(
+            "Exported {count} delta(s) from node {node_id}\n\n{toml}"
+        ))
+    }
+}
+
 /// Execute `pact emergency start` — append EmergencyStart entry through Raft.
 pub async fn emergency_start(
     client: &mut ConfigServiceClient<Channel>,
@@ -677,6 +845,311 @@ pub async fn shell_interactive(channel: Channel, token: &str) -> anyhow::Result<
     }
 
     Ok("Shell session ended.".to_string())
+}
+
+/// Execute `pact blacklist add` — append a blacklist add entry through Raft.
+pub async fn blacklist_add(
+    client: &mut ConfigServiceClient<Channel>,
+    pattern: &str,
+    vcluster: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    let entry = ProtoConfigEntry {
+        sequence: 0,
+        timestamp: None,
+        entry_type: 1, // Commit — blacklist changes are config commits
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
+        author: Some(ProtoIdentity {
+            principal: principal.to_string(),
+            principal_type: "Human".to_string(),
+            role: role.to_string(),
+        }),
+        parent: None,
+        state_delta: None,
+        policy_ref: format!("blacklist:add:{pattern}"),
+        ttl: None,
+        emergency_reason: None,
+    };
+
+    let resp = client
+        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+        .await
+        .map_err(|e| anyhow::anyhow!("blacklist add failed: {e}"))?;
+
+    let seq = resp.into_inner().sequence;
+    let result = super::blacklist::BlacklistResult {
+        operation: super::blacklist::BlacklistOp::Add(pattern.to_string()),
+        paths: vec![pattern.to_string()],
+    };
+    Ok(format!(
+        "{} (seq:{seq}) on vCluster: {vcluster}",
+        super::blacklist::format_blacklist_result(&result)
+    ))
+}
+
+/// Execute `pact blacklist remove` — append a blacklist remove entry through Raft.
+pub async fn blacklist_remove(
+    client: &mut ConfigServiceClient<Channel>,
+    pattern: &str,
+    vcluster: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    let entry = ProtoConfigEntry {
+        sequence: 0,
+        timestamp: None,
+        entry_type: 1, // Commit — blacklist changes are config commits
+        scope: Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) }),
+        author: Some(ProtoIdentity {
+            principal: principal.to_string(),
+            principal_type: "Human".to_string(),
+            role: role.to_string(),
+        }),
+        parent: None,
+        state_delta: None,
+        policy_ref: format!("blacklist:remove:{pattern}"),
+        ttl: None,
+        emergency_reason: None,
+    };
+
+    let resp = client
+        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
+        .await
+        .map_err(|e| anyhow::anyhow!("blacklist remove failed: {e}"))?;
+
+    let seq = resp.into_inner().sequence;
+    let result = super::blacklist::BlacklistResult {
+        operation: super::blacklist::BlacklistOp::Remove(pattern.to_string()),
+        paths: vec![pattern.to_string()],
+    };
+    Ok(format!(
+        "{} (seq:{seq}) on vCluster: {vcluster}",
+        super::blacklist::format_blacklist_result(&result)
+    ))
+}
+
+/// Execute `pact group list` — discover vClusters via journal entries and query their policies.
+pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
+    use pact_common::proto::policy::{
+        policy_service_client::PolicyServiceClient, GetPolicyRequest,
+    };
+    use super::group::{format_group_list, GroupSummary};
+    use std::collections::BTreeSet;
+
+    // List all journal entries (no scope filter) and collect unique vCluster IDs.
+    let mut config_client = ConfigServiceClient::new(channel.clone());
+    let resp = config_client
+        .list_entries(tonic::Request::new(ListEntriesRequest {
+            scope: None,
+            from_sequence: None,
+            to_sequence: None,
+            limit: None,
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("list entries failed: {e}"))?;
+
+    let mut stream = resp.into_inner();
+    let mut vcluster_ids = BTreeSet::new();
+
+    while let Some(entry) = tokio_stream::StreamExt::next(&mut stream).await {
+        match entry {
+            Ok(e) => {
+                if let Some(ref scope) = e.scope {
+                    if let Some(ProtoScope::VclusterId(ref vc)) = scope.scope {
+                        vcluster_ids.insert(vc.clone());
+                    }
+                }
+            }
+            Err(e) => return Err(anyhow::anyhow!("list entries stream error: {e}")),
+        }
+    }
+
+    if vcluster_ids.is_empty() {
+        return Ok("No vClusters configured.".to_string());
+    }
+
+    // Query effective policy for each discovered vCluster
+    let mut policy_client = PolicyServiceClient::new(channel.clone());
+    let mut summaries = Vec::new();
+
+    for vc_id in &vcluster_ids {
+        match policy_client
+            .get_effective_policy(tonic::Request::new(GetPolicyRequest {
+                vcluster_id: vc_id.clone(),
+            }))
+            .await
+        {
+            Ok(resp) => {
+                let policy = resp.into_inner();
+                summaries.push(GroupSummary {
+                    name: vc_id.clone(),
+                    node_count: 0, // node count requires enrollment service
+                    enforcement_mode: if policy.enforcement_mode.is_empty() {
+                        "observe".to_string()
+                    } else {
+                        policy.enforcement_mode
+                    },
+                    two_person_approval: policy.two_person_approval,
+                });
+            }
+            Err(_) => {
+                // vCluster exists in journal but has no policy yet — show with defaults
+                summaries.push(GroupSummary {
+                    name: vc_id.clone(),
+                    node_count: 0,
+                    enforcement_mode: "observe".to_string(),
+                    two_person_approval: false,
+                });
+            }
+        }
+    }
+
+    Ok(format_group_list(&summaries))
+}
+
+/// Execute `pact group show` — show details for a specific vCluster.
+pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String> {
+    use pact_common::proto::policy::{
+        policy_service_client::PolicyServiceClient, GetPolicyRequest,
+    };
+    use pact_common::types::VClusterPolicy;
+    use super::group::{format_group_detail, GroupDetail};
+
+    let mut client = PolicyServiceClient::new(channel.clone());
+    let resp = client
+        .get_effective_policy(tonic::Request::new(GetPolicyRequest {
+            vcluster_id: name.to_string(),
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("get policy for '{name}' failed: {e}"))?;
+
+    let proto_policy = resp.into_inner();
+
+    let policy = VClusterPolicy {
+        vcluster_id: proto_policy.vcluster_id.clone(),
+        policy_id: proto_policy.policy_id.clone(),
+        updated_at: proto_policy.updated_at.as_ref().and_then(|ts| {
+            chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+        }),
+        drift_sensitivity: proto_policy.drift_sensitivity,
+        base_commit_window_seconds: proto_policy.base_commit_window_seconds,
+        emergency_window_seconds: proto_policy.emergency_window_seconds,
+        auto_converge_categories: proto_policy.auto_converge_categories.clone(),
+        require_ack_categories: proto_policy.require_ack_categories.clone(),
+        enforcement_mode: if proto_policy.enforcement_mode.is_empty() {
+            "observe".to_string()
+        } else {
+            proto_policy.enforcement_mode.clone()
+        },
+        role_bindings: proto_policy
+            .role_bindings
+            .iter()
+            .map(|rb| pact_common::types::RoleBinding {
+                role: rb.role.clone(),
+                principals: rb.principals.clone(),
+                allowed_actions: rb.allowed_actions.clone(),
+            })
+            .collect(),
+        regulated: proto_policy.regulated,
+        two_person_approval: proto_policy.two_person_approval,
+        emergency_allowed: proto_policy.emergency_allowed,
+        audit_retention_days: proto_policy.audit_retention_days,
+        federation_template: proto_policy.federation_template.clone(),
+        supervisor_backend: if proto_policy.supervisor_backend.is_empty() {
+            "pact".to_string()
+        } else {
+            proto_policy.supervisor_backend.clone()
+        },
+        exec_whitelist: proto_policy.exec_whitelist.clone(),
+        shell_whitelist: proto_policy.shell_whitelist.clone(),
+    };
+
+    let detail = GroupDetail {
+        name: name.to_string(),
+        policy,
+        node_ids: vec![], // node list requires enrollment service
+    };
+
+    Ok(format_group_detail(&detail))
+}
+
+/// Execute `pact group set-policy` — update a vCluster's policy from a TOML file.
+pub async fn group_set_policy(
+    channel: &Channel,
+    name: &str,
+    policy_path: &str,
+    principal: &str,
+    role: &str,
+) -> anyhow::Result<String> {
+    use pact_common::proto::policy::{
+        policy_service_client::PolicyServiceClient, UpdatePolicyRequest,
+        VClusterPolicy as ProtoVClusterPolicy, RoleBinding as ProtoRoleBinding,
+    };
+    use pact_common::types::VClusterPolicy;
+
+    let toml_content = std::fs::read_to_string(policy_path)
+        .map_err(|e| anyhow::anyhow!("cannot read policy file {policy_path}: {e}"))?;
+
+    let policy: VClusterPolicy = toml::from_str(&toml_content)
+        .map_err(|e| anyhow::anyhow!("invalid policy TOML in {policy_path}: {e}"))?;
+
+    let proto_policy = ProtoVClusterPolicy {
+        vcluster_id: name.to_string(),
+        policy_id: policy.policy_id,
+        updated_at: None, // server assigns timestamp
+        drift_sensitivity: policy.drift_sensitivity,
+        base_commit_window_seconds: policy.base_commit_window_seconds,
+        emergency_window_seconds: policy.emergency_window_seconds,
+        auto_converge_categories: policy.auto_converge_categories,
+        require_ack_categories: policy.require_ack_categories,
+        enforcement_mode: policy.enforcement_mode,
+        role_bindings: policy
+            .role_bindings
+            .into_iter()
+            .map(|rb| ProtoRoleBinding {
+                role: rb.role,
+                principals: rb.principals,
+                allowed_actions: rb.allowed_actions,
+            })
+            .collect(),
+        regulated: policy.regulated,
+        two_person_approval: policy.two_person_approval,
+        audit_retention_days: policy.audit_retention_days,
+        federation_template: policy.federation_template,
+        supervisor_backend: policy.supervisor_backend,
+        exec_whitelist: policy.exec_whitelist,
+        shell_whitelist: policy.shell_whitelist,
+        emergency_allowed: policy.emergency_allowed,
+    };
+
+    let mut client = PolicyServiceClient::new(channel.clone());
+    let resp = client
+        .update_policy(tonic::Request::new(UpdatePolicyRequest {
+            vcluster_id: name.to_string(),
+            policy: Some(proto_policy),
+            author: Some(ProtoIdentity {
+                principal: principal.to_string(),
+                principal_type: "Human".to_string(),
+                role: role.to_string(),
+            }),
+            message: format!("Policy update from {policy_path}"),
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("update policy failed: {e}"))?;
+
+    let result = resp.into_inner();
+    if result.success {
+        Ok(format!(
+            "Policy updated for vCluster '{name}' (ref: {})",
+            result.policy_ref
+        ))
+    } else {
+        Err(anyhow::anyhow!(
+            "policy update failed: {}",
+            result.error.unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
 }
 
 /// Parse a scope filter string (e.g. "node:X", "vc:X", "global") to proto Scope.

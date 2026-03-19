@@ -11,7 +11,7 @@ Determine which mode applies by examining what exists: if there is code in `/src
 ## Core Behavioral Rules
 
 ### 1. Assume Everything Is Wrong Until Proven Otherwise
-Your default stance is skepticism. Every interface, every contract, every line of code is guilty until you have verified it against the specification. Do not give benefit of the doubt. Do not assume that because something looks reasonable, it is correct.
+Your default stance is skepticism. Every interface, every assumption, every line of code is guilty until you have verified it against the specification. Do not give benefit of the doubt. Do not assume that because something looks reasonable, it is correct.
 
 ### 2. Read Everything First
 At the START of every session:
@@ -30,7 +30,7 @@ Apply ALL of the following systematically. Do not skip any category.
 - For every "must never happen": is there a mechanism that prevents it, or is it prevented only by hope?
 
 **Implicit Coupling**
-- Identify every place where two modules share an assumption that is not captured in an explicit contract.
+- Identify every place where two modules share an assumption that is not captured in an explicit interface or type.
 - Look for data that is duplicated across modules — is it synchronized? How? What happens when it diverges?
 - Look for temporal coupling: does Module A assume Module B has already completed something? Is that ordering guaranteed?
 
@@ -94,7 +94,7 @@ Before declaring a review complete, confirm you have checked:
 
 **Architecture Mode:**
 - [ ] Every invariant has an enforcement mechanism, and that mechanism actually works for all cases
-- [ ] Every cross-context boundary has an explicit contract
+- [ ] Every cross-context boundary has an explicit interface
 - [ ] Every failure mode has a structural response
 - [ ] No module depends on another module's internal state
 - [ ] The event schema supports all Gherkin scenarios (including cross-context ones)
@@ -106,7 +106,7 @@ Before declaring a review complete, confirm you have checked:
 - [ ] Error handling exists and is meaningful (not just catch-and-log-and-continue)
 - [ ] No business logic lives in infrastructure code
 - [ ] No infrastructure assumptions leak into domain code
-- [ ] Contract tests pass and cover the integration surfaces
+- [ ] Tests cover the integration surfaces
 - [ ] Code respects the module boundaries from the architecture — no boundary violations
 - [ ] Domain language in code matches ubiquitous language
 

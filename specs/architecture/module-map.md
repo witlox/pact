@@ -12,7 +12,7 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - All domain types (ConfigEntry, VClusterPolicy, DriftVector, CapabilityReport, etc.)
 - Configuration structs (PactConfig, AgentConfig, JournalConfig, PolicyConfig)
 - Error taxonomy (PactError enum)
-- Protobuf-generated types (proto modules for all 6 .proto files)
+- Protobuf-generated types (proto modules for all 7 .proto files)
 
 **Does NOT own:** Business logic, I/O, network, state management.
 
@@ -152,11 +152,30 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Responsibility:** BDD acceptance tests. Gherkin feature files + cucumber step implementations.
 
 **Owns:**
-- 18 feature files (258 scenarios) — the behavioral specification
+- 28 feature files (463 scenarios) — the behavioral specification
 - PactWorld step implementations
 - Custom harness (`harness = false`)
 
 **Justification:** testing-strategy.md Level 3. Feature files are the specification — steps must call real pact code when features are implemented.
+
+---
+
+## pact-nss (companion crate — outside workspace)
+
+**Responsibility:** glibc NSS module mapping OIDC identities to POSIX UID/GID for NFS compatibility. Built separately as a shared library (`libnss_pact.so.2`).
+
+**Owns:**
+- NSS `passwd` and `group` hooks (via `libnss` crate)
+- Reads `/run/pact/passwd.db` and `/run/pact/group.db` (JSON, written by pact-agent identity module)
+- In-memory caching with mtime-based invalidation
+
+**Does NOT own:** Identity mapping logic (pact-agent writes the .db files). No network calls. Read-only.
+
+**License:** LGPL-3.0-only (required by `libnss` dependency). Dynamic linking (`cdylib`) satisfies LGPL. Not part of workspace to avoid license contamination.
+
+**Platform:** Linux only (NSS is glibc-specific).
+
+**Justification:** ADR-016 — OIDC-to-POSIX identity mapping for NFS. Only active in PactSupervisor mode. Separate crate because NSS modules must be shared libraries loaded by glibc at runtime.
 
 ---
 

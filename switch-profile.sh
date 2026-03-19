@@ -7,7 +7,6 @@
 #   ./switch-profile.sh analyst
 #   ./switch-profile.sh architect
 #   ./switch-profile.sh adversary
-#   ./switch-profile.sh contract-gen
 #   ./switch-profile.sh implementer "user-authentication"
 #   ./switch-profile.sh integrator
 
@@ -16,7 +15,7 @@ set -euo pipefail
 PROFILES_DIR=".claude"
 TARGET=".claude/CLAUDE.md"
 
-VALID_PROFILES=("analyst" "architect" "adversary" "contract-gen" "implementer" "integrator")
+VALID_PROFILES=("analyst" "architect" "adversary" "implementer" "integrator")
 
 usage() {
     echo "Usage: $0 <profile-name> [feature-scope]"
