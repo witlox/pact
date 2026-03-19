@@ -401,9 +401,16 @@ async fn then_cached_policy_auth(world: &mut PactWorld) {
 
 #[then("the operation should be denied")]
 async fn then_op_denied(world: &mut PactWorld) {
+    // Check operation_denied flag (resource isolation) or auth_result (policy/partition)
+    if world.operation_denied {
+        return;
+    }
     match &world.auth_result {
         Some(AuthResult::Denied { .. }) => {}
-        other => panic!("expected Denied, got {other:?}"),
+        other => panic!(
+            "expected operation denied (operation_denied={}, auth_result={other:?})",
+            world.operation_denied
+        ),
     }
 }
 

@@ -21,6 +21,7 @@ mod federation;
 mod identity_mapping; // UidMap + identity assignment
 mod journal; // JournalState::apply_command()
 mod mcp; // MCP tools: all_tools() + dispatch_tool()
+mod network; // Network management: interface config, netlink, MTU
 mod observability; // Prometheus metrics + health + Loki events
 mod overlay; // Overlay management + staleness + promote/conflict
 mod partition; // ConflictManager + cached config/policy
