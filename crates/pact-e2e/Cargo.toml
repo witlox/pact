@@ -32,6 +32,8 @@ reqwest = { workspace = true }
 chrono = { workspace = true }
 testcontainers = { workspace = true, features = ["http_wait"] }
 tempfile = { workspace = true }
+jsonwebtoken = { workspace = true }
+toml = { workspace = true }
 
 [lints]
 workspace = true
