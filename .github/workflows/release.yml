@@ -38,16 +38,50 @@ jobs:
       - run: cargo deny check
 
   build:
-    name: Build (${{ matrix.target }})
+    name: Build ${{ matrix.name }}
     needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          # --- x86_64 ---
+          - name: x86_64-generic
+            target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
+            agent_features: ebpf,spire,systemd
+            journal_features: opa
+            cross: false
+
+          - name: x86_64-nvidia
+            target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            agent_features: ebpf,spire,nvidia,systemd
+            journal_features: opa
+            cross: false
+
+          - name: x86_64-amd
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            agent_features: ebpf,spire,amd,systemd
+            journal_features: opa
+            cross: false
+
+          # --- aarch64 ---
+          - name: aarch64-generic
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            agent_features: spire,systemd
+            journal_features: opa
+            cross: true
+
+          - name: aarch64-nvidia
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            agent_features: spire,nvidia,systemd
+            journal_features: opa
+            cross: true
+
     steps:
       - uses: actions/checkout@v6
         with:
@@ -57,19 +91,61 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Install cross-compilation toolchain
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
       - name: Set version
         run: |
           chmod +x scripts/set-version.sh
           scripts/set-version.sh
-      - name: Build release
-        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      # Build each binary with its features
+      - name: Build pact-agent
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-agent --features ${{ matrix.agent_features }}
+
+      - name: Build pact-journal
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-journal --features ${{ matrix.journal_features }}
+
+      - name: Build pact (CLI)
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-cli
+
+      - name: Build pact-mcp
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-mcp
+
+      # Package binaries
+      - name: Package
+        run: |
+          mkdir -p dist
+          for bin in pact pact-agent pact-journal pact-mcp; do
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$bin" 2>/dev/null || true
+          done
+          cd dist
+          tar czf "../pact-${{ matrix.name }}.tar.gz" *
+          cd ..
+          sha256sum "pact-${{ matrix.name }}.tar.gz" > "pact-${{ matrix.name }}.tar.gz.sha256"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: pact-${{ matrix.target }}
+          name: pact-${{ matrix.name }}
           path: |
-            target/${{ matrix.target }}/release/pact
-            target/${{ matrix.target }}/release/pact-agent
-            target/${{ matrix.target }}/release/pact-journal
+            pact-${{ matrix.name }}.tar.gz
+            pact-${{ matrix.name }}.tar.gz.sha256
 
   publish:
     name: Publish release
@@ -80,13 +156,27 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.preflight.outputs.version }}
           name: pact v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
+          body: |
+            ## Build variants
+
+            | Archive | Target | Agent features |
+            |---------|--------|----------------|
+            | `pact-x86_64-generic` | x86_64-unknown-linux-gnu | ebpf, spire, systemd |
+            | `pact-x86_64-nvidia` | x86_64-unknown-linux-gnu | ebpf, spire, nvidia, systemd |
+            | `pact-x86_64-amd` | x86_64-unknown-linux-gnu | ebpf, spire, amd, systemd |
+            | `pact-aarch64-generic` | aarch64-unknown-linux-gnu | spire, systemd |
+            | `pact-aarch64-nvidia` | aarch64-unknown-linux-gnu | spire, nvidia, systemd |
+
+            All journal builds include OPA policy evaluation.
+
+            Each tarball contains: `pact` (CLI), `pact-agent`, `pact-journal`, `pact-mcp`.
           files: |
-            pact-*/pact
-            pact-*/pact-agent
-            pact-*/pact-journal
+            pact-*/pact-*.tar.gz
+            pact-*/pact-*.tar.gz.sha256
