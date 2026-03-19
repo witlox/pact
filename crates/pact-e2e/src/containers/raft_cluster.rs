@@ -37,7 +37,7 @@ pub struct RaftNode {
     pub boot_svc: BootConfigServiceImpl,
     _temp_dir: tempfile::TempDir,
     /// gRPC server handle — public so tests can abort it to simulate node failure.
-    pub _grpc_handle: tokio::task::JoinHandle<()>,
+    pub grpc_handle: tokio::task::JoinHandle<()>,
     _metrics_handle: tokio::task::JoinHandle<()>,
 }
 
@@ -166,7 +166,7 @@ impl RaftCluster {
                 policy_svc,
                 boot_svc,
                 _temp_dir: temp_dir,
-                _grpc_handle: grpc_handle,
+                grpc_handle,
                 _metrics_handle: metrics_handle,
             });
         }

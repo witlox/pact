@@ -101,6 +101,7 @@ fn make_agent_token(sub: &str, role: &str) -> String {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn full_cli_e2e_all_commands() {
     let mut results = Vec::new();
 
@@ -156,17 +157,15 @@ async fn full_cli_e2e_all_commands() {
     // 1. status (unknown node) — expect error
     // =========================================================================
     {
-        let result = execute::status(&mut config_client, "node-042").await;
-        if result.is_err() {
-            results.push(TestResult::pass(
+        match execute::status(&mut config_client, "node-042").await {
+            Err(_) => results.push(TestResult::pass(
                 "status (unknown node error)",
                 "correctly returns error for unknown node",
-            ));
-        } else {
-            results.push(TestResult::fail(
+            )),
+            Ok(output) => results.push(TestResult::fail(
                 "status (unknown node error)",
-                format!("expected error, got: {}", result.unwrap()),
-            ));
+                format!("expected error, got: {output}"),
+            )),
         }
     }
 
@@ -420,10 +419,10 @@ state = "running"
             }))
             .await;
 
-        if setup_result.is_err() {
+        if let Err(e) = setup_result {
             results.push(TestResult::fail(
                 "approve (setup)",
-                format!("policy setup failed: {}", setup_result.unwrap_err()),
+                format!("policy setup failed: {e}"),
             ));
         } else {
             // Evaluate a regulated action to get pending approval
@@ -448,8 +447,8 @@ state = "running"
             match eval_result {
                 Ok(resp) => {
                     let eval = resp.into_inner();
-                    if eval.approval.is_some() {
-                        let approval_id = eval.approval.unwrap().pending_approval_id;
+                    if let Some(approval) = eval.approval {
+                        let approval_id = approval.pending_approval_id;
 
                         // List pending approvals
                         let list_result = execute::approve_list(&channel, None).await;

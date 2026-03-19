@@ -650,7 +650,7 @@ mod tests {
 
         for tool_name in journal_tools {
             let result = dispatch_connected(tool_name, &json!({}), &connections).await;
-            let result = result.expect(&format!("{tool_name} should return Some"));
+            let result = result.unwrap_or_else(|| panic!("{tool_name} should return Some"));
             assert!(result.is_error, "{tool_name} should be error without journal");
             assert!(
                 result.content[0].text.contains("not connected to journal"),
@@ -667,7 +667,7 @@ mod tests {
 
         for tool_name in agent_tools {
             let result = dispatch_connected(tool_name, &json!({}), &connections).await;
-            let result = result.expect(&format!("{tool_name} should return Some"));
+            let result = result.unwrap_or_else(|| panic!("{tool_name} should return Some"));
             assert!(result.is_error, "{tool_name} should be error without agent");
             assert!(
                 result.content[0].text.contains("not connected to agent"),
