@@ -9,6 +9,7 @@ use std::io::{self, BufRead, Write};
 use tonic::transport::Channel;
 use tracing::warn;
 
+use pact_common::config::DelegationConfig;
 use pact_mcp::connected;
 use pact_mcp::protocol::{
     self, error_codes, error_response, success_response, JsonRpcRequest, ServerCapabilities,
@@ -36,7 +37,14 @@ async fn main() {
         .unwrap_or_else(|_| "http://localhost:9445".to_string());
     let agent_channel = try_connect(&agent_endpoint, "agent").await;
 
-    let connections = connected::Connections { journal: channel, agent: agent_channel };
+    // Build delegation config from environment for supercharged (lattice) commands
+    let delegation = DelegationConfig {
+        lattice_endpoint: std::env::var("PACT_LATTICE_ENDPOINT").ok(),
+        lattice_token: std::env::var("PACT_LATTICE_TOKEN").ok(),
+        ..DelegationConfig::default()
+    };
+
+    let connections = connected::Connections { journal: channel, agent: agent_channel, delegation };
 
     eprintln!("pact-mcp: starting MCP server on stdio");
 

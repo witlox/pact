@@ -10,10 +10,8 @@ use crate::PactWorld;
 // GIVEN
 // ---------------------------------------------------------------------------
 
-#[given("a supervisor with backend \"pact\"")]
-fn given_pact_backend(_world: &mut PactWorld) {
-    // Already default — pact mode
-}
+// NOTE: "a supervisor with backend X" is handled by supervisor.rs regex step.
+// Do NOT add a duplicate literal step here — cucumber-rs reports ambiguous match.
 
 #[given("the cgroup v2 filesystem is mounted")]
 fn given_cgroup_mounted(world: &mut PactWorld) {

@@ -6,6 +6,7 @@
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 
+use pact_common::config::DelegationConfig;
 use pact_common::proto::config::{
     scope::Scope as ProtoScope, ConfigEntry as ProtoConfigEntry, Identity as ProtoIdentity,
     Scope as ProtoScopeMsg,
@@ -18,10 +19,11 @@ use pact_common::proto::shell::{
 
 use crate::protocol::{tool_result, ToolCallResult};
 
-/// Holds optional connections to journal and agent.
+/// Holds optional connections to journal and agent, plus lattice delegation config.
 pub struct Connections {
     pub journal: Option<Channel>,
     pub agent: Option<Channel>,
+    pub delegation: DelegationConfig,
 }
 
 /// Dispatch a tool call using available gRPC connections.
@@ -82,6 +84,18 @@ pub async fn dispatch_connected(
             Some(ch) => handle_service_status(arguments, ch).await,
             None => no_agent(),
         }),
+        // Supercharged commands — delegated to lattice via DelegationConfig
+        "pact_jobs_list" => Some(handle_jobs_list(arguments, &connections.delegation).await),
+        "pact_queue_status" => Some(handle_queue_status(arguments, &connections.delegation).await),
+        "pact_cluster_health" => Some(match &connections.journal {
+            Some(ch) => handle_cluster_health(arguments, ch, &connections.delegation).await,
+            None => no_journal(),
+        }),
+        "pact_system_health" => Some(match &connections.journal {
+            Some(ch) => handle_system_health(arguments, ch, &connections.delegation).await,
+            None => no_journal(),
+        }),
+        "pact_accounting" => Some(handle_accounting(arguments, &connections.delegation).await),
         _ => None,
     }
 }
@@ -92,7 +106,11 @@ pub async fn dispatch_tool_connected(
     arguments: &serde_json::Value,
     channel: &Channel,
 ) -> Option<ToolCallResult> {
-    let connections = Connections { journal: Some(channel.clone()), agent: None };
+    let connections = Connections {
+        journal: Some(channel.clone()),
+        agent: None,
+        delegation: DelegationConfig::default(),
+    };
     dispatch_connected(name, arguments, &connections).await
 }
 
@@ -473,6 +491,63 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
     }
 }
 
+// --- Supercharged command handlers (lattice delegation) ---
+
+async fn handle_jobs_list(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
+    let node = args.get("node").and_then(|v| v.as_str());
+    let vcluster = args.get("vcluster").and_then(|v| v.as_str());
+
+    match pact_cli::commands::lattice::list_jobs(config, node, vcluster).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Jobs list failed: {e}"), true),
+    }
+}
+
+async fn handle_queue_status(
+    args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let vcluster = args.get("vcluster").and_then(|v| v.as_str());
+
+    match pact_cli::commands::lattice::queue_status(config, vcluster).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Queue status failed: {e}"), true),
+    }
+}
+
+async fn handle_cluster_health(
+    _args: &serde_json::Value,
+    channel: &Channel,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let mut client = ConfigServiceClient::new(channel.clone());
+    match pact_cli::commands::lattice::cluster_status(&mut client, config).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Cluster health failed: {e}"), true),
+    }
+}
+
+async fn handle_system_health(
+    _args: &serde_json::Value,
+    channel: &Channel,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let mut client = ConfigServiceClient::new(channel.clone());
+    match pact_cli::commands::lattice::health_check(&mut client, config).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("System health check failed: {e}"), true),
+    }
+}
+
+async fn handle_accounting(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
+    let vcluster = args.get("vcluster").and_then(|v| v.as_str());
+
+    match pact_cli::commands::lattice::accounting(config, vcluster).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Accounting query failed: {e}"), true),
+    }
+}
+
 /// Format a config entry for display. Public for testing.
 pub fn format_entry(entry: &ProtoConfigEntry) -> String {
     let entry_type_name = match entry.entry_type {
@@ -629,14 +704,16 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_unknown_tool_returns_none() {
-        let connections = Connections { journal: None, agent: None };
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let result = dispatch_connected("nonexistent_tool", &json!({}), &connections).await;
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn dispatch_connected_journal_tools_without_connection() {
-        let connections = Connections { journal: None, agent: None };
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let journal_tools = vec![
             "pact_status",
             "pact_log",
@@ -662,7 +739,8 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_agent_tools_without_connection() {
-        let connections = Connections { journal: None, agent: None };
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let agent_tools = vec!["pact_exec", "pact_cap", "pact_service_status"];
 
         for tool_name in agent_tools {
@@ -681,7 +759,8 @@ mod tests {
     async fn dispatch_tool_connected_backward_compat_returns_none_for_unknown() {
         // dispatch_tool_connected wraps dispatch_connected with journal-only connections
         // Create a fake channel that won't actually connect
-        let connections = Connections { journal: None, agent: None };
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let result = dispatch_connected("no_such_tool", &json!({}), &connections).await;
         assert!(result.is_none());
     }
@@ -697,7 +776,8 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_emergency_start_without_connection() {
-        let connections = Connections { journal: None, agent: None };
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let result = dispatch_connected(
             "pact_emergency",
             &json!({"action": "start", "reason": "test"}),
@@ -708,5 +788,59 @@ mod tests {
         // Without connection, we get "not connected" before reaching P8 check
         assert!(result.is_error);
         assert!(result.content[0].text.contains("not connected to journal"));
+    }
+
+    // --- Supercharged command dispatch tests (no lattice endpoint) ---
+
+    #[tokio::test]
+    async fn dispatch_connected_jobs_list_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_jobs_list", &json!({"vcluster": "ml"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_queue_status_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_queue_status", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_cluster_health_no_journal() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_cluster_health", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("not connected to journal"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_system_health_no_journal() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_system_health", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("not connected to journal"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_accounting_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_accounting", &json!({"vcluster": "ml"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
     }
 }

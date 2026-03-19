@@ -23,6 +23,12 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         pact_service_status(),
         pact_query_fleet(),
         pact_emergency(),
+        // Supercharged commands (read-only lattice delegation)
+        pact_jobs_list(),
+        pact_queue_status(),
+        pact_cluster_health(),
+        pact_system_health(),
+        pact_accounting(),
     ]
 }
 
@@ -272,6 +278,85 @@ fn pact_emergency() -> ToolDefinition {
     }
 }
 
+// --- Supercharged command tool definitions ---
+
+fn pact_jobs_list() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_jobs_list".into(),
+        description: "List running job allocations from the lattice scheduler.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "node": {
+                    "type": "string",
+                    "description": "Filter by node ID."
+                },
+                "vcluster": {
+                    "type": "string",
+                    "description": "Filter by vCluster."
+                }
+            }
+        }),
+    }
+}
+
+fn pact_queue_status() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_queue_status".into(),
+        description: "Show scheduling queue depth and status from the lattice scheduler.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "vcluster": {
+                    "type": "string",
+                    "description": "vCluster to query queue for. Defaults to 'default'."
+                }
+            }
+        }),
+    }
+}
+
+fn pact_cluster_health() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_cluster_health".into(),
+        description: "Combined cluster health: pact journal Raft status and lattice Raft status."
+            .into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn pact_system_health() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_system_health".into(),
+        description: "Combined system health check across pact journal and lattice scheduler."
+            .into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn pact_accounting() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_accounting".into(),
+        description: "Resource usage accounting (CPU hours, GPU hours, storage) from lattice."
+            .into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "vcluster": {
+                    "type": "string",
+                    "description": "vCluster (maps to tenant) to query accounting for."
+                }
+            }
+        }),
+    }
+}
+
 /// Dispatch a tool call to the appropriate handler.
 pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResult {
     match name {
@@ -286,6 +371,11 @@ pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResul
         "pact_service_status" => handle_service_status(arguments),
         "pact_query_fleet" => handle_query_fleet(arguments),
         "pact_emergency" => handle_emergency(arguments),
+        "pact_jobs_list" => handle_jobs_list(arguments),
+        "pact_queue_status" => handle_queue_status(arguments),
+        "pact_cluster_health" => handle_cluster_health(arguments),
+        "pact_system_health" => handle_system_health(arguments),
+        "pact_accounting" => handle_accounting(arguments),
         _ => tool_result(format!("Unknown tool: {name}"), true),
     }
 }
@@ -392,6 +482,32 @@ fn handle_emergency(args: &serde_json::Value) -> ToolCallResult {
     tool_result(format!("Emergency: action={action} (gRPC client required)"), false)
 }
 
+// --- Supercharged command stub handlers ---
+
+fn handle_jobs_list(args: &serde_json::Value) -> ToolCallResult {
+    let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("all");
+    let vc = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("all");
+    tool_result(format!("Jobs list: node={node}, vcluster={vc} (lattice client required)"), false)
+}
+
+fn handle_queue_status(args: &serde_json::Value) -> ToolCallResult {
+    let vc = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
+    tool_result(format!("Queue status: vcluster={vc} (lattice client required)"), false)
+}
+
+fn handle_cluster_health(_args: &serde_json::Value) -> ToolCallResult {
+    tool_result("Cluster health: (gRPC + lattice client required)".to_string(), false)
+}
+
+fn handle_system_health(_args: &serde_json::Value) -> ToolCallResult {
+    tool_result("System health: (gRPC + lattice client required)".to_string(), false)
+}
+
+fn handle_accounting(args: &serde_json::Value) -> ToolCallResult {
+    let vc = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("all");
+    tool_result(format!("Accounting: vcluster={vc} (lattice client required)"), false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,7 +515,7 @@ mod tests {
     #[test]
     fn all_tools_count() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 16);
     }
 
     #[test]
@@ -567,6 +683,83 @@ mod tests {
     fn tool_names_start_with_pact() {
         for tool in all_tools() {
             assert!(tool.name.starts_with("pact_"), "tool {} doesn't start with pact_", tool.name);
+        }
+    }
+
+    // --- Supercharged command tests ---
+
+    #[test]
+    fn dispatch_pact_jobs_list() {
+        let result = dispatch_tool("pact_jobs_list", &json!({"node": "node042", "vcluster": "ml"}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("node042"));
+        assert!(result.content[0].text.contains("ml"));
+    }
+
+    #[test]
+    fn dispatch_pact_jobs_list_defaults() {
+        let result = dispatch_tool("pact_jobs_list", &json!({}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("all"));
+    }
+
+    #[test]
+    fn dispatch_pact_queue_status() {
+        let result = dispatch_tool("pact_queue_status", &json!({"vcluster": "ml-training"}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("ml-training"));
+    }
+
+    #[test]
+    fn dispatch_pact_queue_status_default() {
+        let result = dispatch_tool("pact_queue_status", &json!({}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("default"));
+    }
+
+    #[test]
+    fn dispatch_pact_cluster_health() {
+        let result = dispatch_tool("pact_cluster_health", &json!({}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("Cluster health"));
+    }
+
+    #[test]
+    fn dispatch_pact_system_health() {
+        let result = dispatch_tool("pact_system_health", &json!({}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("System health"));
+    }
+
+    #[test]
+    fn dispatch_pact_accounting() {
+        let result = dispatch_tool("pact_accounting", &json!({"vcluster": "ml"}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("ml"));
+    }
+
+    #[test]
+    fn dispatch_pact_accounting_default() {
+        let result = dispatch_tool("pact_accounting", &json!({}));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("all"));
+    }
+
+    #[test]
+    fn supercharged_tools_have_definitions() {
+        let tools = all_tools();
+        let supercharged = [
+            "pact_jobs_list",
+            "pact_queue_status",
+            "pact_cluster_health",
+            "pact_system_health",
+            "pact_accounting",
+        ];
+        for name in &supercharged {
+            assert!(
+                tools.iter().any(|t| t.name == *name),
+                "supercharged tool {name} not found in all_tools()"
+            );
         }
     }
 

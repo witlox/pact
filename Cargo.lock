@@ -2783,6 +2783,8 @@ version = "2026.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "lattice-client",
+ "pact-cli",
  "pact-common",
  "serde",
  "serde_json",

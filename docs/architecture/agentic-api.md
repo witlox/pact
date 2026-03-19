@@ -41,20 +41,22 @@ Authenticates as pact-service-ai principal with scoped permissions.
    → applied to all nodes, policy authorized
 ```
 
-## Future Work: Supercharged Command Tools
+## Supercharged Command Tools
 
-The supercharged CLI commands (pact + lattice) expose read-only cross-system views
-that would be valuable for AI agent workflows. The following are candidates for
-MCP tool exposure:
+Read-only cross-system views exposed as MCP tools, delegating to the lattice
+scheduler via `DelegationConfig`:
 
-| CLI Command | Proposed MCP Tool | Rationale |
-|-------------|-------------------|-----------|
-| `pact jobs list` | `pact_jobs_list` | AI agents investigating node issues need job context |
-| `pact queue` | `pact_queue_status` | Queue depth informs auto-scaling decisions |
-| `pact cluster` | `pact_cluster_health` | Cluster health is essential for diagnostics |
-| `pact health` | `pact_system_health` | Combined health check for triage workflows |
-| `pact accounting` | `pact_accounting` | Resource usage for capacity planning agents |
+| MCP Tool | CLI Equivalent | Description |
+|----------|---------------|-------------|
+| `pact_jobs_list` | `pact jobs list` | List running allocations with node/vCluster filters |
+| `pact_queue_status` | `pact queue` | Queue depth and scheduling status per vCluster |
+| `pact_cluster_health` | `pact cluster` | Combined pact journal + lattice Raft health |
+| `pact_system_health` | `pact health` | Combined health check across pact and lattice |
+| `pact_accounting` | `pact accounting` | Resource usage (CPU/GPU hours, storage) per tenant |
 
-Write commands (`pact jobs cancel`) should remain human-only unless explicitly
+These tools require `PACT_LATTICE_ENDPOINT` (and optionally `PACT_LATTICE_TOKEN`)
+to be set. Without a lattice connection, they return descriptive error messages.
+
+Write commands (`pact jobs cancel`) remain human-only unless explicitly
 authorized via policy. `pact audit` is useful but may expose sensitive data and
 should be scoped carefully.
