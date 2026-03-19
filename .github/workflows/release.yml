@@ -34,7 +34,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --run-ignored all
+      - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e --run-ignored all
+      - run: cargo test -p pact-acceptance
       - run: cargo deny check
 
   # ---------------------------------------------------------------------------
