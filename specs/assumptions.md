@@ -322,7 +322,6 @@ Assumptions that, if wrong, would invalidate architectural decisions. Ordered by
 | NEW | dbus-daemon actually needed for DCGM? | If not needed, one fewer service | Test nv-hostengine standalone mode |
 | NEW | rpcbind needed for NFSv4? | If NFSv4 only, rpcbind can be dropped | Check VAST NFS version in use |
 | NEW | SPIRE Workload API socket path on HPE Cray? | Needed for N10 integration | Check /run/spire/agent.sock or equivalent |
-| NEW | SPIRE Workload API socket path on HPE Cray? | Needed for N10 integration | Check /run/spire/agent.sock or equivalent |
 
 ---
 

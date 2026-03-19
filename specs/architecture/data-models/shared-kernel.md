@@ -258,7 +258,17 @@ pub struct NumaNode {
     pub total_bytes: u64,
     pub cpus: Vec<u32>,                   // logical CPU IDs in this NUMA node
 }
+```
 
+**NUMA CPU list**: `NumaNode.cpus` contains logical CPU IDs (0-based) parsed from
+`/sys/devices/system/node/node*/cpulist`. Range format "0-27,112-139" is expanded
+to individual IDs [0,1,...,27,112,...,139].
+
+**CPU features**: `CpuCapability.features` contains raw flag strings from
+`/proc/cpuinfo flags` field (x86_64) or `Features` field (aarch64). No
+normalization is performed — consumers must understand vendor-specific naming.
+
+```rust
 pub struct HugePageInfo {
     pub size_2mb_total: u64,
     pub size_2mb_free: u64,
@@ -346,6 +356,10 @@ pub struct SupervisorStatus {
     pub services_failed: u32,
 }
 ```
+
+**Note**: Service counts in `SupervisorStatus` are a point-in-time snapshot taken
+at `CapabilityReport.timestamp`. Between reports, services may crash or restart.
+Consumers should treat counts as advisory.
 
 ## Node Enrollment & Domain Membership (ADR-008)
 

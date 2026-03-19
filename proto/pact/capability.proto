@@ -18,6 +18,7 @@ message CapabilityReport {
   SupervisorStatus supervisor = 11;
   CpuCapability cpu = 12;
   string report_id = 13;
+  uint32 schema_version = 14;
 }
 
 enum ConfigState {
@@ -51,6 +52,7 @@ enum GpuVendor {
   GPU_VENDOR_UNSPECIFIED = 0;
   GPU_VENDOR_NVIDIA = 1;
   GPU_VENDOR_AMD = 2;
+  GPU_VENDOR_UNKNOWN = 3;
 }
 
 enum GpuHealth {

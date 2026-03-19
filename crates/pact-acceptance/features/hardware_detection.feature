@@ -315,3 +315,30 @@ Feature: Hardware Detection
       | cxi0  | cxi    | 200000     | up    | 02:00:00:00:00:01 | 10.0.0.1  |
     When interface "cxi0" transitions from up to down
     Then a new capability report should be sent immediately
+
+  # --- Failure mode scenarios ---
+
+  Scenario: CPU detection fails gracefully on unreadable /proc/cpuinfo
+    Given a capability reporter with a mock CPU backend returning error
+    When capability detection runs
+    Then the CPU architecture should be "Unknown"
+    And the CPU physical cores should be 0
+
+  Scenario: Network speed returns -1 for virtual interface
+    Given a capability reporter with mock network interfaces
+    And interface "veth0" has speed -1
+    When capability detection runs
+    Then interface "veth0" should have speed_mbps 0
+
+  Scenario: NVMe detection fails on unreadable /sys/block
+    Given a capability reporter with a mock storage backend returning no disks
+    When capability detection runs
+    Then the storage node type should be "Diskless"
+    And the local disks list should be empty
+
+  Scenario: statvfs fails on stale NFS mount
+    Given a capability reporter with mock storage backend
+    And mount "/data/nfs" has statvfs error
+    When capability detection runs
+    Then mount "/data/nfs" should have total_bytes 0
+    And mount "/data/nfs" should have available_bytes 0

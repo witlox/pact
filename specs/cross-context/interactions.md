@@ -242,6 +242,11 @@ Integration points between bounded contexts and external systems.
 **Failure mode:** lattice-node-agent not running — capability not reported to scheduler
 **Invariant:** A-Int4 (lattice-node-agent mediates), CAP1-CAP5 (detection accuracy)
 
+**Backward compatibility**: New fields (cpu, numa_topology, local_disks, per-interface
+network) are additive. Proto3 ignores unknown fields on deserialization. Old
+lattice-node-agent versions will receive the expanded report and silently skip
+new fields, using only the fields they understand.
+
 ### E2: OpenCHAMI → pact-agent (Boot Provisioning)
 
 **Direction:** OpenCHAMI provisions base image containing pact-agent + mTLS cert.

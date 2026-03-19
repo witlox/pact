@@ -114,6 +114,27 @@ pub trait StorageBackend: Send + Sync {
 }
 ```
 
+## Capability Report Delivery
+
+**Manifest file**: JSON at `/run/pact/capability.json`
+- Written atomically (write to temp + rename)
+- Schema matches CapabilityReport proto serialized as JSON
+
+**Unix socket**: `/run/pact/capability.sock`
+- Request-response: client sends empty request, server responds with latest CapabilityReport as JSON
+- Used by lattice-node-agent for live polling
+
+**Timeouts**:
+- dmidecode subprocess: 2 second timeout. On timeout → MemoryType::Unknown.
+- statvfs() per mount: 2 second timeout via tokio::time::timeout on blocking task. On timeout → total_bytes=0, available_bytes=0.
+- Network speed read: parse /sys/class/net/*/speed as i64. Negative values (including -1) → speed_mbps=0.
+
+**Interface filtering**:
+- Include: all interfaces with `/sys/class/net/*/device` symlink (physical NICs)
+- Exclude: loopback (`lo`), interfaces without device symlink (pure virtual: bridges, tunnels)
+- VLANs: included (they have device symlinks pointing to parent)
+- Mark unknown-driver interfaces as NetworkFabric::Unknown
+
 ## StateObserver Trait
 
 ```rust
