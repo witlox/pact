@@ -355,6 +355,38 @@ const fn default_sync_interval() -> u32 {
     300
 }
 
+/// External system delegation endpoints.
+///
+/// Used by the CLI to connect to lattice (drain/cordon/uncordon) and
+/// OpenCHAMI (reboot/reimage) APIs. All fields are optional — delegation
+/// commands return "not configured" when the relevant endpoint is absent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DelegationConfig {
+    /// Lattice gRPC endpoint (e.g., "http://localhost:50051").
+    pub lattice_endpoint: Option<String>,
+    /// Lattice auth token.
+    pub lattice_token: Option<String>,
+    /// OpenCHAMI SMD base URL (e.g., "https://smd.example.com").
+    pub openchami_smd_url: Option<String>,
+    /// OpenCHAMI auth token.
+    pub openchami_token: Option<String>,
+    /// Timeout in seconds for delegation calls.
+    pub timeout_secs: u64,
+}
+
+impl Default for DelegationConfig {
+    fn default() -> Self {
+        Self {
+            lattice_endpoint: None,
+            lattice_token: None,
+            openchami_smd_url: None,
+            openchami_token: None,
+            timeout_secs: 30,
+        }
+    }
+}
+
 /// Telemetry and logging configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryConfig {
@@ -450,6 +482,30 @@ mod tests {
         assert_eq!(config.base_window_seconds, 900);
         assert!((config.drift_sensitivity - 2.0).abs() < f64::EPSILON);
         assert_eq!(config.emergency_window_seconds, 14400);
+    }
+
+    #[test]
+    fn delegation_config_defaults() {
+        let config = DelegationConfig::default();
+        assert!(config.lattice_endpoint.is_none());
+        assert!(config.lattice_token.is_none());
+        assert!(config.openchami_smd_url.is_none());
+        assert!(config.openchami_token.is_none());
+        assert_eq!(config.timeout_secs, 30);
+    }
+
+    #[test]
+    fn delegation_config_deserializes() {
+        let toml_str = r#"
+            lattice_endpoint = "http://lattice:50051"
+            openchami_smd_url = "https://smd.example.com"
+            timeout_secs = 60
+        "#;
+        let config: DelegationConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.lattice_endpoint.as_deref(), Some("http://lattice:50051"));
+        assert_eq!(config.openchami_smd_url.as_deref(), Some("https://smd.example.com"));
+        assert!(config.lattice_token.is_none());
+        assert_eq!(config.timeout_secs, 60);
     }
 
     #[test]

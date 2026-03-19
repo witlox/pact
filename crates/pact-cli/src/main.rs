@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use pact_cli::commands::config::CliConfig;
 use pact_cli::commands::execute;
 
+use pact_common::config::DelegationConfig;
 use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 
 /// pact — promise-based config management for HPC/AI infrastructure.
@@ -424,6 +425,15 @@ async fn main() {
     let mut journal_client =
         journal_channel.as_ref().map(|ch| ConfigServiceClient::new(ch.clone()));
 
+    // Load delegation config from env vars (lattice + OpenCHAMI endpoints)
+    let delegation_config = DelegationConfig {
+        lattice_endpoint: std::env::var("PACT_LATTICE_ENDPOINT").ok(),
+        lattice_token: std::env::var("PACT_LATTICE_TOKEN").ok(),
+        openchami_smd_url: std::env::var("PACT_OPENCHAMI_SMD_URL").ok(),
+        openchami_token: std::env::var("PACT_OPENCHAMI_TOKEN").ok(),
+        timeout_secs: 30,
+    };
+
     // Resolve identity from token (if available)
     let token = config.resolve_token().unwrap_or_default();
     let (principal, role) = execute::resolve_identity_from_token(&token);
@@ -673,7 +683,7 @@ async fn main() {
         }
         Commands::Drain { node } => {
             let result = pact_cli::commands::delegate::drain_node(
-                journal_client.as_mut().unwrap(), &node, &principal, &role,
+                journal_client.as_mut().unwrap(), &node, &principal, &role, &delegation_config,
             ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
@@ -683,7 +693,7 @@ async fn main() {
         }
         Commands::Cordon { node } => {
             let result = pact_cli::commands::delegate::cordon_node(
-                journal_client.as_mut().unwrap(), &node, &principal, &role,
+                journal_client.as_mut().unwrap(), &node, &principal, &role, &delegation_config,
             ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
@@ -693,7 +703,7 @@ async fn main() {
         }
         Commands::Uncordon { node } => {
             let result = pact_cli::commands::delegate::uncordon_node(
-                journal_client.as_mut().unwrap(), &node, &principal, &role,
+                journal_client.as_mut().unwrap(), &node, &principal, &role, &delegation_config,
             ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
@@ -703,7 +713,7 @@ async fn main() {
         }
         Commands::Reboot { node } => {
             let result = pact_cli::commands::delegate::reboot_node(
-                journal_client.as_mut().unwrap(), &node, &principal, &role,
+                journal_client.as_mut().unwrap(), &node, &principal, &role, &delegation_config,
             ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {
@@ -713,7 +723,7 @@ async fn main() {
         }
         Commands::Reimage { node } => {
             let result = pact_cli::commands::delegate::reimage_node(
-                journal_client.as_mut().unwrap(), &node, &principal, &role,
+                journal_client.as_mut().unwrap(), &node, &principal, &role, &delegation_config,
             ).await;
             println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
             if !result.success {

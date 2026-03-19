@@ -17,7 +17,7 @@ use pact_agent::shell::grpc_service::ShellServiceImpl;
 use pact_agent::shell::ShellServer;
 use pact_cli::commands::delegate;
 use pact_cli::commands::execute;
-use pact_common::config::CommitWindowConfig;
+use pact_common::config::{CommitWindowConfig, DelegationConfig};
 use pact_common::proto::policy::policy_service_client::PolicyServiceClient;
 use pact_common::proto::shell::shell_service_server::ShellServiceServer;
 use pact_e2e::containers::raft_cluster::RaftCluster;
@@ -855,11 +855,13 @@ supervisor_backend = "pact"
     // 21. drain — delegation, verify audit logged
     // =========================================================================
     {
+        let delegation_config = DelegationConfig::default();
         let result = delegate::drain_node(
             &mut config_client,
             "node-042",
             "admin@example.com",
             "pact-platform-admin",
+            &delegation_config,
         )
         .await;
         if result.message.contains("audit seq:") {
@@ -876,11 +878,13 @@ supervisor_backend = "pact"
     // 22. cordon — delegation, verify audit logged
     // =========================================================================
     {
+        let delegation_config = DelegationConfig::default();
         let result = delegate::cordon_node(
             &mut config_client,
             "node-042",
             "admin@example.com",
             "pact-platform-admin",
+            &delegation_config,
         )
         .await;
         if result.message.contains("audit seq:") {
@@ -897,11 +901,13 @@ supervisor_backend = "pact"
     // 23. uncordon — delegation, verify audit logged
     // =========================================================================
     {
+        let delegation_config = DelegationConfig::default();
         let result = delegate::uncordon_node(
             &mut config_client,
             "node-042",
             "admin@example.com",
             "pact-platform-admin",
+            &delegation_config,
         )
         .await;
         if result.message.contains("audit seq:") {
@@ -918,11 +924,13 @@ supervisor_backend = "pact"
     // 24. reboot — delegation, verify audit logged
     // =========================================================================
     {
+        let delegation_config = DelegationConfig::default();
         let result = delegate::reboot_node(
             &mut config_client,
             "node-042",
             "admin@example.com",
             "pact-platform-admin",
+            &delegation_config,
         )
         .await;
         if result.message.contains("audit seq:") {
@@ -939,11 +947,13 @@ supervisor_backend = "pact"
     // 25. reimage — delegation, verify audit logged
     // =========================================================================
     {
+        let delegation_config = DelegationConfig::default();
         let result = delegate::reimage_node(
             &mut config_client,
             "node-042",
             "admin@example.com",
             "pact-platform-admin",
+            &delegation_config,
         )
         .await;
         if result.message.contains("audit seq:") {

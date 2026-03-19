@@ -5,12 +5,15 @@
 //! Each delegation is audit-logged in the journal before attempting
 //! the external call.
 
+use pact_common::config::DelegationConfig;
 use pact_common::proto::config::{
     scope::Scope as ProtoScope, ConfigEntry as ProtoConfigEntry, Identity as ProtoIdentity,
     Scope as ProtoScopeMsg,
 };
 use pact_common::proto::journal::{config_service_client::ConfigServiceClient, AppendEntryRequest};
 use tonic::transport::Channel;
+
+use super::openchami::OpenChamiClient;
 
 /// Result of a delegation command.
 #[derive(Debug, Clone)]
@@ -82,20 +85,57 @@ pub async fn drain_node(
     node_id: &str,
     principal: &str,
     role: &str,
+    delegation_config: &DelegationConfig,
 ) -> DelegationResult {
     let audit_seq = audit_delegation(client, "drain", node_id, "lattice", principal, role).await;
-
-    // TODO: Call lattice drain API via lattice Rust client (A-Int1)
-    let audit_msg = match audit_seq {
-        Ok(seq) => format!(" (audit seq:{seq})"),
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
-    DelegationResult {
-        command: "drain".into(),
-        node_id: node_id.into(),
-        target_system: "lattice".into(),
-        success: false,
-        message: format!("lattice drain API not yet integrated{audit_msg}"),
+
+    let Some(ref endpoint) = delegation_config.lattice_endpoint else {
+        return DelegationResult {
+            command: "drain".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("lattice endpoint not configured ({audit_msg})"),
+        };
+    };
+
+    let config = lattice_client::ClientConfig {
+        endpoint: endpoint.clone(),
+        timeout_secs: delegation_config.timeout_secs,
+        token: delegation_config.lattice_token.clone(),
+    };
+
+    match lattice_client::LatticeClient::connect(config).await {
+        Ok(mut lc) => match lc.drain_node(node_id, "pact drain").await {
+            Ok(resp) => DelegationResult {
+                command: "drain".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: resp.success,
+                message: format!(
+                    "drained ({} active allocations, {audit_msg})",
+                    resp.active_allocations
+                ),
+            },
+            Err(e) => DelegationResult {
+                command: "drain".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            },
+        },
+        Err(e) => DelegationResult {
+            command: "drain".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("connection failed: {e} ({audit_msg})"),
+        },
     }
 }
 
@@ -108,20 +148,54 @@ pub async fn cordon_node(
     node_id: &str,
     principal: &str,
     role: &str,
+    delegation_config: &DelegationConfig,
 ) -> DelegationResult {
     let audit_seq = audit_delegation(client, "cordon", node_id, "lattice", principal, role).await;
-
-    // TODO: Call lattice cordon API via lattice Rust client
-    let audit_msg = match audit_seq {
-        Ok(seq) => format!(" (audit seq:{seq})"),
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
-    DelegationResult {
-        command: "cordon".into(),
-        node_id: node_id.into(),
-        target_system: "lattice".into(),
-        success: false,
-        message: format!("lattice cordon API not yet integrated{audit_msg}"),
+
+    let Some(ref endpoint) = delegation_config.lattice_endpoint else {
+        return DelegationResult {
+            command: "cordon".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("lattice endpoint not configured ({audit_msg})"),
+        };
+    };
+
+    let config = lattice_client::ClientConfig {
+        endpoint: endpoint.clone(),
+        timeout_secs: delegation_config.timeout_secs,
+        token: delegation_config.lattice_token.clone(),
+    };
+
+    match lattice_client::LatticeClient::connect(config).await {
+        Ok(mut lc) => match lc.disable_node(node_id, "pact cordon").await {
+            Ok(resp) => DelegationResult {
+                command: "cordon".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: resp.success,
+                message: format!("cordoned ({audit_msg})"),
+            },
+            Err(e) => DelegationResult {
+                command: "cordon".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            },
+        },
+        Err(e) => DelegationResult {
+            command: "cordon".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("connection failed: {e} ({audit_msg})"),
+        },
     }
 }
 
@@ -134,21 +208,55 @@ pub async fn uncordon_node(
     node_id: &str,
     principal: &str,
     role: &str,
+    delegation_config: &DelegationConfig,
 ) -> DelegationResult {
     let audit_seq =
         audit_delegation(client, "uncordon", node_id, "lattice", principal, role).await;
-
-    // TODO: Call lattice uncordon API via lattice Rust client
-    let audit_msg = match audit_seq {
-        Ok(seq) => format!(" (audit seq:{seq})"),
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
-    DelegationResult {
-        command: "uncordon".into(),
-        node_id: node_id.into(),
-        target_system: "lattice".into(),
-        success: false,
-        message: format!("lattice uncordon API not yet integrated{audit_msg}"),
+
+    let Some(ref endpoint) = delegation_config.lattice_endpoint else {
+        return DelegationResult {
+            command: "uncordon".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("lattice endpoint not configured ({audit_msg})"),
+        };
+    };
+
+    let config = lattice_client::ClientConfig {
+        endpoint: endpoint.clone(),
+        timeout_secs: delegation_config.timeout_secs,
+        token: delegation_config.lattice_token.clone(),
+    };
+
+    match lattice_client::LatticeClient::connect(config).await {
+        Ok(mut lc) => match lc.enable_node(node_id).await {
+            Ok(resp) => DelegationResult {
+                command: "uncordon".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: resp.success,
+                message: format!("uncordoned ({audit_msg})"),
+            },
+            Err(e) => DelegationResult {
+                command: "uncordon".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            },
+        },
+        Err(e) => DelegationResult {
+            command: "uncordon".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("connection failed: {e} ({audit_msg})"),
+        },
     }
 }
 
@@ -163,21 +271,46 @@ pub async fn reboot_node(
     node_id: &str,
     principal: &str,
     role: &str,
+    delegation_config: &DelegationConfig,
 ) -> DelegationResult {
     let audit_seq =
         audit_delegation(client, "reboot", node_id, "OpenCHAMI", principal, role).await;
-
-    // TODO: Call OpenCHAMI Redfish API (A-Int2: client status unknown)
-    let audit_msg = match audit_seq {
-        Ok(seq) => format!(" (audit seq:{seq})"),
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
-    DelegationResult {
-        command: "reboot".into(),
-        node_id: node_id.into(),
-        target_system: "OpenCHAMI".into(),
-        success: false,
-        message: format!("OpenCHAMI reboot API not yet integrated{audit_msg}"),
+
+    let Some(ref smd_url) = delegation_config.openchami_smd_url else {
+        return DelegationResult {
+            command: "reboot".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: false,
+            message: format!("OpenCHAMI SMD URL not configured ({audit_msg})"),
+        };
+    };
+
+    let oc = OpenChamiClient::new(
+        smd_url,
+        delegation_config.openchami_token.as_deref(),
+        delegation_config.timeout_secs,
+    );
+
+    match oc.reboot(node_id).await {
+        Ok(msg) => DelegationResult {
+            command: "reboot".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: true,
+            message: format!("{msg} ({audit_msg})"),
+        },
+        Err(e) => DelegationResult {
+            command: "reboot".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: false,
+            message: format!("{e} ({audit_msg})"),
+        },
     }
 }
 
@@ -190,21 +323,46 @@ pub async fn reimage_node(
     node_id: &str,
     principal: &str,
     role: &str,
+    delegation_config: &DelegationConfig,
 ) -> DelegationResult {
     let audit_seq =
         audit_delegation(client, "reimage", node_id, "OpenCHAMI", principal, role).await;
-
-    // TODO: Call OpenCHAMI Manta API (A-Int2: client status unknown)
-    let audit_msg = match audit_seq {
-        Ok(seq) => format!(" (audit seq:{seq})"),
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
-    DelegationResult {
-        command: "reimage".into(),
-        node_id: node_id.into(),
-        target_system: "OpenCHAMI".into(),
-        success: false,
-        message: format!("OpenCHAMI reimage API not yet integrated{audit_msg}"),
+
+    let Some(ref smd_url) = delegation_config.openchami_smd_url else {
+        return DelegationResult {
+            command: "reimage".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: false,
+            message: format!("OpenCHAMI SMD URL not configured ({audit_msg})"),
+        };
+    };
+
+    let oc = OpenChamiClient::new(
+        smd_url,
+        delegation_config.openchami_token.as_deref(),
+        delegation_config.timeout_secs,
+    );
+
+    match oc.reimage(node_id).await {
+        Ok(msg) => DelegationResult {
+            command: "reimage".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: true,
+            message: format!("{msg} ({audit_msg})"),
+        },
+        Err(e) => DelegationResult {
+            command: "reimage".into(),
+            node_id: node_id.into(),
+            target_system: "OpenCHAMI".into(),
+            success: false,
+            message: format!("{e} ({audit_msg})"),
+        },
     }
 }
 
@@ -247,7 +405,7 @@ mod tests {
             node_id: "node-001".into(),
             target_system: "lattice".into(),
             success: false,
-            message: "lattice drain API not yet integrated (audit seq:42)".into(),
+            message: "lattice endpoint not configured (audit seq:42)".into(),
         };
         let output = format_delegation_result(&result);
         assert!(output.contains("audit seq:42"));

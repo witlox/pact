@@ -16,6 +16,7 @@ pub mod exec;
 pub mod execute;
 pub mod group;
 pub mod log;
+pub mod openchami;
 pub mod node;
 pub mod promote;
 pub mod rollback;
