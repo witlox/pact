@@ -149,12 +149,14 @@ reconnects with `from_sequence` to resume from the last received update.
 
 ### Capability Reporter (`src/capability/`)
 
-Multi-vendor GPU detection behind a `GpuBackend` trait:
-- **NVIDIA**: NVML bindings (feature `nvidia`), fallback: `nvidia-smi` shell-out
-- **AMD**: ROCm SMI bindings (feature `amd`), fallback: `rocm-smi` shell-out
-- Feature-gated: non-GPU nodes skip GPU detection entirely
+Five hardware detection backends, each following the trait + Linux/Mock pattern:
+- **GPU** (`GpuBackend`): NVIDIA (nvidia-smi, feature `nvidia`) + AMD (rocm-smi, feature `amd`) + Mock
+- **CPU** (`CpuBackend`): /proc/cpuinfo + sysfs (arch, cores, freq, ISA features, NUMA, L3 cache)
+- **Memory** (`MemoryBackend`): /proc/meminfo + sysfs NUMA + dmidecode for type (DDR/HBM, 2s timeout)
+- **Network** (`NetworkBackend`): /sys/class/net/ enumeration, Slingshot (cxi driver), speed, link state
+- **Storage** (`StorageBackend`): /sys/block/ NVMe, /proc/mounts + statvfs (2s timeout), diskless detection
 
-Reports to lattice scheduler (gRPC) and local tmpfs manifest + unix socket
+Reports to lattice scheduler via tmpfs manifest (`/run/pact/capability.json`) + unix socket
 (consumed by lattice-node-agent, which pact supervises as a child process).
 
 ### Emergency Mode (`src/emergency/`)
@@ -167,7 +169,8 @@ Must end with explicit commit or rollback. Stale emergency → alert + schedulin
 Three-tier strategy for macOS development:
 1. **Feature-gate**: `#[cfg(target_os = "linux")]` for cgroup v2, eBPF, netlink,
    inotify, PTY allocation. Stubs compile on macOS.
-2. **Mock implementations**: `MockSupervisor`, `MockObserver`, `MockGpuBackend`
+2. **Mock implementations**: `MockSupervisor`, `MockObserver`, `MockGpuBackend`,
+   `MockCpuBackend`, `MockMemoryBackend`, `MockNetworkBackend`, `MockStorageBackend`
    for local dev/test on macOS. Unit + integration tests run with mocks.
 3. **Devcontainer**: Linux container for integration + acceptance tests (BDD/cucumber).
    Real supervisor, real observers, real cgroups. CI runs in this environment.

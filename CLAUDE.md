@@ -157,7 +157,7 @@ pact/
 │   │       ├── observer/      # eBPF, inotify, netlink state observers
 │   │       ├── drift/         # Drift evaluator
 │   │       ├── commit/        # Commit window manager
-│   │       ├── capability/    # Hardware capability reporter
+│   │       ├── capability/    # Hardware capability (cpu, gpu, memory, network, storage)
 │   │       └── emergency/     # Emergency mode
 │   │
 │   ├── pact-journal/          # Distributed immutable log
