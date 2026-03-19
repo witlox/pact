@@ -420,10 +420,7 @@ state = "running"
             .await;
 
         if let Err(e) = setup_result {
-            results.push(TestResult::fail(
-                "approve (setup)",
-                format!("policy setup failed: {e}"),
-            ));
+            results.push(TestResult::fail("approve (setup)", format!("policy setup failed: {e}")));
         } else {
             // Evaluate a regulated action to get pending approval
             let eval_result = policy_client
