@@ -19,6 +19,7 @@ use pact_common::proto::policy::{
 };
 use pact_common::types::{ApprovalStatus, Identity, PendingApproval, PrincipalType, Scope};
 use pact_policy::rbac::{RbacDecision, RbacEngine};
+use pact_policy::rules::opa;
 
 use crate::raft::types::{JournalCommand, JournalResponse, JournalTypeConfig};
 use crate::JournalState;
@@ -28,11 +29,18 @@ use crate::JournalState;
 pub struct PolicyServiceImpl {
     raft: Raft<JournalTypeConfig>,
     state: Arc<RwLock<JournalState>>,
+    opa_client: Option<Box<dyn opa::OpaClient>>,
 }
 
 impl PolicyServiceImpl {
     pub fn new(raft: Raft<JournalTypeConfig>, state: Arc<RwLock<JournalState>>) -> Self {
-        Self { raft, state }
+        Self { raft, state, opa_client: None }
+    }
+
+    /// Attach an OPA client for external policy evaluation on Defer.
+    pub fn with_opa(mut self, client: Box<dyn opa::OpaClient>) -> Self {
+        self.opa_client = Some(client);
+        self
     }
 
     /// Convert proto Identity to domain Identity.
@@ -119,35 +127,105 @@ impl PolicyService for PolicyServiceImpl {
                 approval: None,
             })),
             RbacDecision::Defer => {
-                // Defer = two-person approval needed — persist through Raft
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now();
-                let approval = PendingApproval {
-                    approval_id: approval_id.clone(),
-                    original_request: req.command.clone().unwrap_or_else(|| req.action.clone()),
-                    action: req.action.clone(),
-                    scope: scope.clone(),
-                    requester: identity,
-                    approver: None,
-                    status: ApprovalStatus::Pending,
-                    created_at: now,
-                    expires_at: now + chrono::Duration::hours(24),
-                };
-                let cmd = JournalCommand::CreateApproval(approval);
-                self.raft
-                    .client_write(cmd)
-                    .await
-                    .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
+                if policy.two_person_approval {
+                    // Two-person approval needed — persist through Raft
+                    let approval_id = uuid::Uuid::new_v4().to_string();
+                    let now = chrono::Utc::now();
+                    let approval = PendingApproval {
+                        approval_id: approval_id.clone(),
+                        original_request: req.command.clone().unwrap_or_else(|| req.action.clone()),
+                        action: req.action.clone(),
+                        scope: scope.clone(),
+                        requester: identity,
+                        approver: None,
+                        status: ApprovalStatus::Pending,
+                        created_at: now,
+                        expires_at: now + chrono::Duration::hours(24),
+                    };
+                    let cmd = JournalCommand::CreateApproval(approval);
+                    self.raft
+                        .client_write(cmd)
+                        .await
+                        .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
-                Ok(Response::new(PolicyEvalResponse {
-                    authorized: false,
-                    policy_ref: format!("rbac:deferred:{}", req.action),
-                    denial_reason: None,
-                    approval: Some(ProtoApprovalRequired {
-                        approval_type: "two_person".into(),
-                        pending_approval_id: approval_id,
-                    }),
-                }))
+                    Ok(Response::new(PolicyEvalResponse {
+                        authorized: false,
+                        policy_ref: format!("rbac:deferred:{}", req.action),
+                        denial_reason: None,
+                        approval: Some(ProtoApprovalRequired {
+                            approval_type: "two_person".into(),
+                            pending_approval_id: approval_id,
+                        }),
+                    }))
+                } else if let Some(ref opa_client) = self.opa_client {
+                    // OPA evaluation for complex rules (ADR-003)
+                    let opa_input = opa::OpaInput {
+                        identity: opa::OpaIdentity {
+                            principal: identity.principal.clone(),
+                            role: identity.role.clone(),
+                            principal_type: format!("{:?}", identity.principal_type),
+                        },
+                        action: req.action.clone(),
+                        scope: opa::OpaScope {
+                            vcluster: match &scope {
+                                Scope::VCluster(vc) | Scope::Node(vc) => vc.clone(),
+                                Scope::Global => String::new(),
+                            },
+                        },
+                        command: req.command.clone(),
+                    };
+                    match opa_client.evaluate(&opa_input).await {
+                        Ok(opa::OpaDecision::Allow) => {
+                            let policy_ref = vcluster_policy.as_ref().map_or_else(
+                                || format!("opa:default:{}", req.action),
+                                |p| format!("opa:{}:{}", p.policy_id, req.action),
+                            );
+                            Ok(Response::new(PolicyEvalResponse {
+                                authorized: true,
+                                policy_ref,
+                                denial_reason: None,
+                                approval: None,
+                            }))
+                        }
+                        Ok(opa::OpaDecision::Deny { reason }) => {
+                            Ok(Response::new(PolicyEvalResponse {
+                                authorized: false,
+                                policy_ref: format!("opa:denied:{}", req.action),
+                                denial_reason: Some(reason),
+                                approval: None,
+                            }))
+                        }
+                        Err(e) => {
+                            // ADR-011: degraded mode — warn and allow
+                            tracing::warn!(
+                                error = %e,
+                                "OPA evaluation failed, degraded mode allow"
+                            );
+                            let policy_ref = vcluster_policy.as_ref().map_or_else(
+                                || format!("degraded:default:{}", req.action),
+                                |p| format!("degraded:{}:{}", p.policy_id, req.action),
+                            );
+                            Ok(Response::new(PolicyEvalResponse {
+                                authorized: true,
+                                policy_ref,
+                                denial_reason: None,
+                                approval: None,
+                            }))
+                        }
+                    }
+                } else {
+                    // No two-person approval, no OPA — allow
+                    let policy_ref = vcluster_policy.as_ref().map_or_else(
+                        || format!("rbac:default:{}", req.action),
+                        |p| format!("rbac:{}:{}", p.policy_id, req.action),
+                    );
+                    Ok(Response::new(PolicyEvalResponse {
+                        authorized: true,
+                        policy_ref,
+                        denial_reason: None,
+                        approval: None,
+                    }))
+                }
             }
         }
     }

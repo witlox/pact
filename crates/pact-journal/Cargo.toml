@@ -8,6 +8,10 @@ license.workspace = true
 name = "pact-journal"
 path = "src/main.rs"
 
+[features]
+default = []
+opa = ["pact-policy/opa"]
+
 [dependencies]
 pact-common = { workspace = true }
 pact-policy = { path = "../pact-policy", version = "2026.1.0" }

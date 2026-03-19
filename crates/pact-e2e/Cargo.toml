@@ -14,7 +14,7 @@ pact-journal = { workspace = true }
 hpc-audit = { workspace = true }
 hpc-node = { workspace = true }
 pact-mcp = { workspace = true }
-pact-policy = { workspace = true }
+pact-policy = { workspace = true, features = ["opa"] }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
