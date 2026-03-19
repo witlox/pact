@@ -263,6 +263,22 @@ Rationale: HPC vClusters assume uniform node configuration for scheduling correc
 
 ---
 
+## Hardware Detection Assumptions
+
+### A-Hw4: GH200 unified memory visible via standard interfaces [Accepted]
+GH200 unified memory appears as standard `/proc/meminfo` (~854 GB total) with NUMA topology visible in `/sys/devices/system/node/`. No vendor-specific parsing needed for memory detection. GPU memory is reported separately via NVML (GpuBackend).
+
+### A-Hw5: MI300A unified HBM visible via standard interfaces [Accepted]
+MI300A unified HBM appears similarly in standard Linux memory interfaces. ROCm SMI is needed only for GPU-specific queries (health, temperature, utilization), not for base memory detection. Memory type detection via `dmidecode --type 17` reports HBM correctly.
+
+### A-Hw6: Slingshot NICs use cxi kernel driver [Validated]
+Slingshot NICs use the `cxi` kernel driver. Interface names follow `cxi0`-`cxiN` pattern. Driver detection via `/sys/class/net/*/device/driver` symlink resolves to `cxi` for Slingshot interfaces. This is used by NetworkBackend to classify interfaces as Slingshot fabric.
+
+### A-Hw7: Standard /proc and /sys sufficient for hardware detection [Accepted]
+All hardware detection (CPU, memory, network, storage) uses standard `/proc` and `/sys` interfaces available on any Linux kernel 5.x+. No vendor libraries or tools are needed except for GPU detection (nvidia-smi/NVML, rocm-smi). This means no feature flags are needed for CPU, memory, network, or storage backends.
+
+---
+
 ## Assumption Risk Assessment
 
 Assumptions that, if wrong, would invalidate architectural decisions. Ordered by impact.
@@ -292,6 +308,10 @@ Assumptions that, if wrong, would invalidate architectural decisions. Ordered by
 | A-Id5: Stride 10,000 sufficient | IM2, IM3: precursor ranges | If an org has >10,000 users, stride must be increased. Requires UID remapping for that org. Operationally painful but not architecturally breaking. |
 | A-Int8: libnss 0.9.0 suitable | Identity Mapping implementation | If crate is abandoned or incompatible, write NSS module manually. Small C shim + Rust FFI. ~200 lines of code. |
 | A-WI3: Hold timer default TBD | WI3: mount caching | Need benchmarking. Wrong default = suboptimal performance, not correctness issue. |
+| A-Hw4: GH200 unified memory via standard interfaces | MemoryBackend: no vendor-specific parsing | If GH200 reports memory differently, need vendor-specific detection path for memory type. Total bytes still from /proc/meminfo. |
+| A-Hw5: MI300A HBM via standard interfaces | MemoryBackend: no vendor-specific parsing | Same as A-Hw4 — fallback to vendor-specific detection for memory type only. |
+| A-Hw6: Slingshot uses cxi driver | NetworkBackend: fabric classification | If driver name changes, update the driver-to-fabric mapping table. Single string comparison. |
+| A-Hw7: /proc and /sys sufficient | All hardware backends: no feature flags | If a hardware category needs vendor libraries, add a feature flag for that category (same pattern as GPU). |
 
 ### Open Unknowns
 

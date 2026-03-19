@@ -207,9 +207,10 @@ pub struct CapabilityReport {
     pub node_id: NodeId,
     pub timestamp: DateTime<Utc>,
     pub report_id: Uuid,
+    pub cpu: CpuCapability,
     pub gpus: Vec<GpuCapability>,
     pub memory: MemoryCapability,
-    pub network: Option<NetworkCapability>,
+    pub network: Vec<NetworkInterface>,
     pub storage: StorageCapability,
     pub software: SoftwareCapability,
     pub config_state: ConfigState,
@@ -217,6 +218,8 @@ pub struct CapabilityReport {
     pub emergency: Option<EmergencyInfo>,
     pub supervisor_status: SupervisorStatus,
 }
+
+// --- GPU (unchanged, already complete) ---
 
 pub enum GpuVendor { Nvidia, Amd }
 pub enum GpuHealth { Healthy, Degraded, Failed }
@@ -230,29 +233,90 @@ pub struct GpuCapability {
     pub pci_bus_id: String,
 }
 
+// --- CPU ---
+
+pub enum CpuArchitecture { X86_64, Aarch64, Unknown }
+
+pub struct CpuCapability {
+    pub architecture: CpuArchitecture,
+    pub model: String,                    // e.g. "Intel Xeon w9-3495X", "NVIDIA Grace"
+    pub physical_cores: u32,
+    pub logical_cores: u32,               // includes SMT/HT threads
+    pub base_frequency_mhz: u32,
+    pub max_frequency_mhz: u32,          // turbo/boost frequency
+    pub features: Vec<String>,            // ISA features: "avx512f", "sve", "amx", etc.
+    pub numa_nodes: u32,                  // number of NUMA nodes (matches memory topology)
+    pub cache_l3_bytes: u64,              // total L3 cache across all sockets
+}
+
+// --- Memory (expanded with NUMA topology, huge pages, memory type) ---
+
+pub enum MemoryType { Ddr4, Ddr5, Hbm2e, Hbm3, Hbm3e, Unknown }
+
+pub struct NumaNode {
+    pub id: u32,
+    pub total_bytes: u64,
+    pub cpus: Vec<u32>,                   // logical CPU IDs in this NUMA node
+}
+
+pub struct HugePageInfo {
+    pub size_2mb_total: u64,
+    pub size_2mb_free: u64,
+    pub size_1gb_total: u64,
+    pub size_1gb_free: u64,
+}
+
 pub struct MemoryCapability {
     pub total_bytes: u64,
     pub available_bytes: u64,
+    pub memory_type: MemoryType,
     pub numa_nodes: u32,
+    pub numa_topology: Vec<NumaNode>,     // per-node memory and CPU affinity
+    pub hugepages: HugePageInfo,
 }
 
-pub struct NetworkCapability {
-    pub fabric_type: String,
-    pub bandwidth_bps: u64,
-    pub latency_us: f64,
+// --- Network (per-interface, replacing single struct) ---
+
+pub enum NetworkFabric { Slingshot, Ethernet, Unknown }
+pub enum InterfaceOperState { Up, Down }
+
+pub struct NetworkInterface {
+    pub name: String,                     // e.g. "cxi0", "eth0"
+    pub fabric: NetworkFabric,            // detected from driver: cxi → Slingshot
+    pub speed_mbps: u64,                  // from /sys/class/net/*/speed (0 if unknown)
+    pub state: InterfaceOperState,        // from /sys/class/net/*/operstate
+    pub mac: String,                      // from /sys/class/net/*/address
+    pub ipv4: Option<String>,             // primary IPv4 address if assigned
+}
+
+// --- Storage (expanded with NVMe, real capacity) ---
+
+pub enum StorageNodeType { Diskless, LocalStorage }
+pub enum DiskType { Nvme, Ssd, Hdd, Unknown }
+pub enum FsType { Nfs, Lustre, Ext4, Xfs, Tmpfs, Other(String) }
+
+pub struct LocalDisk {
+    pub device: String,                   // e.g. "/dev/nvme0n1"
+    pub model: String,                    // from /sys/block/*/device/model
+    pub capacity_bytes: u64,              // from /sys/block/*/size * 512
+    pub disk_type: DiskType,
+}
+
+pub struct MountInfo {
+    pub path: String,                     // mount point
+    pub fs_type: FsType,                  // filesystem type
+    pub source: String,                   // device or NFS server:path
+    pub total_bytes: u64,                 // from statvfs()
+    pub available_bytes: u64,             // from statvfs()
 }
 
 pub struct StorageCapability {
-    pub tmpfs_bytes: u64,
-    pub mounts: Vec<MountPointInfo>,
+    pub node_type: StorageNodeType,
+    pub local_disks: Vec<LocalDisk>,      // empty for diskless nodes
+    pub mounts: Vec<MountInfo>,           // active mounts with real capacity
 }
 
-pub struct MountPointInfo {
-    pub path: String,
-    pub fs_type: String,
-    pub source: String,
-    pub available: bool,
-}
+// --- Software (unchanged) ---
 
 pub struct SoftwareCapability {
     pub loaded_modules: Vec<String>,

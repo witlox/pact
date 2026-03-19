@@ -62,10 +62,26 @@ Node management is decomposed into six sub-contexts, each with a **strategy patt
 | `SupervisorBackend` | Pact (default) / Systemd (fallback) |
 | `GpuHealth` | Healthy/Degraded/Failed |
 | `GpuCapability` | Index, vendor, model, memory, health, PCI bus |
-| `MemoryCapability` | Total bytes, available bytes, NUMA nodes |
-| `NetworkCapability` | Fabric type, bandwidth, latency |
-| `StorageCapability` | tmpfs size, mount points |
+| `CpuCapability` | CPU hardware snapshot: architecture, core count, frequency, ISA features |
+| `CpuArchitecture` | X86_64/Aarch64/Unknown |
+| `MemoryCapability` | Total bytes, available bytes, memory type, NUMA topology, huge pages |
+| `MemoryType` | DDR4/DDR5/HBM2e/HBM3/HBM3e/Unknown |
+| `NumaNode` | Per-NUMA-node info: id, total bytes, CPU list |
+| `HugePageInfo` | Huge page allocation: 2MB and 1GB totals and free counts |
+| `NetworkInterface` | Per-interface: name, fabric, speed, state, MAC, IPv4 |
+| `NetworkFabric` | Slingshot/Ethernet/Unknown |
+| `InterfaceOperState` | Up/Down |
+| `StorageCapability` | Node type, local disks, mounts |
+| `StorageNodeType` | Diskless/LocalStorage |
+| `LocalDisk` | Per-disk: device, model, capacity, disk type |
+| `DiskType` | Nvme/Ssd/Hdd/Unknown |
+| `MountInfo` | Per-mount: path, fs type, source, total bytes, available bytes |
+| `FsType` | Nfs/Lustre/Ext4/Xfs/Tmpfs/Other |
 | `SoftwareCapability` | Loaded modules, uenv image, service statuses |
+
+**Hardware Detection Backends:**
+
+CPU, Memory, Network, and Storage detection each use a backend trait following the GpuBackend pattern. Each has a Linux implementation (parsing `/proc` and `/sys`) and a Mock implementation (configurable for tests and macOS development). No feature flags are required — all use standard Linux interfaces. GPU detection remains feature-gated per vendor (NVIDIA/AMD).
 
 #### 2a. Process Supervision
 
@@ -402,9 +418,10 @@ ConfigEntry ──0:1──▶ parent ConfigEntry (chain)
 ConfigEntry ──1:1──▶ Identity (author)
 ConfigEntry ──1:1──▶ Scope
 
+CapabilityReport ──1:1──▶ CpuCapability
 CapabilityReport ──1:N──▶ GpuCapability
 CapabilityReport ──1:1──▶ MemoryCapability
-CapabilityReport ──0:1──▶ NetworkCapability
+CapabilityReport ──0:N──▶ NetworkInterface
 CapabilityReport ──1:1──▶ StorageCapability
 CapabilityReport ──1:1──▶ SoftwareCapability
 ```

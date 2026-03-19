@@ -901,6 +901,121 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F37: CPU detection fails
+
+**Trigger:** `/proc/cpuinfo` is unreadable or returns unexpected format.
+
+**Impact:**
+- Scheduler has no architecture info for the node
+- Binary compatibility cannot be verified (wrong arch binaries could be scheduled)
+
+**Degradation:**
+- Report CpuArchitecture::Unknown, physical_cores=0, logical_cores=0
+- Log warning: "CPU detection failed, reporting Unknown architecture"
+- Node is still schedulable but scheduler should treat as degraded capability
+
+**Recovery:**
+- Investigate `/proc/cpuinfo` availability (kernel config, container restrictions)
+- Agent restart re-attempts detection
+
+**Detection:**
+- Missing `cpu` field or `architecture=Unknown` in CapabilityReport
+- Alert: node reporting unknown CPU architecture
+
+---
+
+## F38: NUMA detection fails
+
+**Trigger:** `/sys/devices/system/node/` not available (non-NUMA kernel, container without sysfs).
+
+**Impact:**
+- NUMA-aware scheduling disabled for this node
+- Memory affinity optimizations unavailable
+
+**Degradation:**
+- Report numa_nodes=1 with single NumaNode containing total memory and all CPUs
+- Log warning: "NUMA topology unavailable, reporting single node"
+- Memory total still reported correctly from `/proc/meminfo`
+
+**Recovery:**
+- Verify kernel NUMA support (CONFIG_NUMA)
+- Check sysfs mount permissions
+
+**Detection:**
+- CapabilityReport shows numa_nodes=1 on a system expected to have multiple NUMA nodes
+- Log entry: "NUMA detection fallback"
+
+---
+
+## F39: Network speed detection fails
+
+**Trigger:** `/sys/class/net/*/speed` returns -1 or is unreadable (common on virtual interfaces, interfaces in down state).
+
+**Impact:**
+- Bandwidth unknown for affected interface
+- Scheduler cannot account for fabric bandwidth
+
+**Degradation:**
+- Report speed_mbps=0 for the affected interface
+- Log warning: "speed detection failed for interface {name}, reporting 0"
+- Interface is still listed in report with other attributes (name, fabric, state, MAC)
+
+**Recovery:**
+- Interface link up may make speed readable
+- Virtual interfaces never report speed — expected behavior
+
+**Detection:**
+- Interface with speed_mbps=0 in CapabilityReport
+- Common for virtual/loopback interfaces — only alert on physical NICs
+
+---
+
+## F40: NVMe detection fails
+
+**Trigger:** `/sys/block/nvme*` unreadable due to permissions or missing udev rules.
+
+**Impact:**
+- Local storage capacity unknown
+- Node reported as diskless when it has NVMe drives
+
+**Degradation:**
+- Report StorageNodeType::Diskless, local_disks=[]
+- Log warning: "NVMe detection failed, reporting as diskless"
+- Mount detection still works independently
+
+**Recovery:**
+- Fix sysfs permissions or udev rules
+- Agent restart re-attempts detection
+
+**Detection:**
+- Node expected to have NVMe shows as Diskless
+- Log entry: "NVMe detection failed"
+
+---
+
+## F41: statvfs fails on NFS mount
+
+**Trigger:** NFS server unreachable, mount stale, or permissions issue during `statvfs()` call.
+
+**Impact:**
+- Mount capacity unknown for affected mount
+- Scheduler may over-commit or under-commit storage
+
+**Degradation:**
+- Report total_bytes=0, available_bytes=0 for the affected mount
+- Mount is still listed in report (path, fs_type, source present)
+- Log warning: "statvfs failed for mount {path}, reporting 0 capacity"
+
+**Recovery:**
+- NFS server becomes reachable → next detection cycle reports real values
+- Stale mount requires admin intervention (umount -l, remount)
+
+**Detection:**
+- Mount with total_bytes=0 in CapabilityReport
+- Log entry: "statvfs failed"
+
+---
+
 ## Unacceptable Failure Behaviors
 
 The following must NEVER happen, regardless of failure scenario:
@@ -960,3 +1075,8 @@ The following must NEVER happen, regardless of failure scenario:
 | F34: Emergency override failure | Critical | No | Yes (BMC reboot) |
 | F35: Namespace leak | Low | Yes (periodic reconciliation) | No |
 | F36: Simultaneous multi-service failure | High | Yes (dependency-ordered restart) | If OOM persists |
+| F37: CPU detection fails | Medium | Yes (next detection cycle) | If persistent |
+| F38: NUMA detection fails | Low | Yes (single-node fallback) | No |
+| F39: Network speed detection fails | Low | Yes (report 0, auto-retry) | No |
+| F40: NVMe detection fails | Medium | Yes (next detection cycle) | If permissions |
+| F41: statvfs fails on NFS mount | Low | Yes (next detection cycle) | If mount stale |

@@ -283,6 +283,25 @@ If Sovra is unreachable, the system continues with locally cached policy templat
 
 ---
 
+## Capability Detection Invariants
+
+### CAP1: CPU architecture accuracy
+CPU architecture MUST be reported accurately (X86_64 or Aarch64). Misreporting causes wrong binary execution on the node. If `/proc/cpuinfo` is unreadable, architecture is reported as Unknown.
+
+### CAP2: Memory total matches /proc/meminfo
+Memory total_bytes MUST match MemTotal from `/proc/meminfo`. Under-reporting causes OOM from over-scheduling; over-reporting causes overcommit. Available_bytes is a point-in-time snapshot and may change between reads.
+
+### CAP3: Network interface count matches physical NICs
+Network interface count MUST match physical NICs visible in `/sys/class/net/`. Missing an interface means jobs cannot use that fabric link. Virtual and loopback interfaces are excluded.
+
+### CAP4: Storage capacity uses statvfs() actual values
+Mount capacity (total_bytes, available_bytes) MUST use `statvfs()` actual values, not estimates or cached values. Stale capacity causes failed job staging when the filesystem is fuller than reported.
+
+### CAP5: Detection backends compile on non-Linux
+All detection backends MUST compile and return valid defaults on non-Linux platforms (macOS development). Mock backends return configurable test data. Linux backends are the production path.
+
+---
+
 ## Conflict Resolution Invariants
 
 ### CR1: Local changes fed back before journal sync

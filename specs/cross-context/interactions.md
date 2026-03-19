@@ -238,8 +238,9 @@ Integration points between bounded contexts and external systems.
 - Agent writes JSON manifest to tmpfs
 - lattice-node-agent reads manifest and reports to scheduler
 - pact does NOT gRPC-stream directly to scheduler
+- Report includes: CPU architecture and ISA features, GPU inventory and health, memory total/available with NUMA topology and huge pages, per-interface network info (fabric type, speed, state), storage type and mount capacities via statvfs(), loaded kernel modules, uenv image, and supervisor status
 **Failure mode:** lattice-node-agent not running — capability not reported to scheduler
-**Invariant:** A-Int4 (lattice-node-agent mediates)
+**Invariant:** A-Int4 (lattice-node-agent mediates), CAP1-CAP5 (detection accuracy)
 
 ### E2: OpenCHAMI → pact-agent (Boot Provisioning)
 

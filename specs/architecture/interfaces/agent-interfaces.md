@@ -47,6 +47,73 @@ pub trait GpuBackend: Send + Sync {
 }
 ```
 
+## CpuBackend Trait
+
+```rust
+/// CPU hardware detection. Parses /proc/cpuinfo and /sys/devices/system/cpu/.
+/// - LinuxCpuBackend: reads /proc/cpuinfo (model, features, core count),
+///   /sys/devices/system/cpu/ (frequency, topology), /sys/devices/system/node/ (NUMA)
+/// - MockCpuBackend: configurable for tests and macOS development
+/// No feature flag needed — uses standard Linux interfaces.
+/// Source: hardware_detection.feature
+#[async_trait]
+pub trait CpuBackend: Send + Sync {
+    /// Detect CPU capabilities and return snapshot.
+    async fn detect(&self) -> Result<CpuCapability, PactError>;
+}
+```
+
+## MemoryBackend Trait
+
+```rust
+/// Memory hardware detection. Parses /proc/meminfo and sysfs NUMA topology.
+/// - LinuxMemoryBackend: reads /proc/meminfo (total, available, hugepages),
+///   /sys/devices/system/node/node*/meminfo (NUMA topology),
+///   optional dmidecode --type 17 for memory type (needs root, graceful fallback)
+/// - MockMemoryBackend: configurable for tests and macOS development
+/// No feature flag needed — uses standard Linux interfaces.
+/// Source: hardware_detection.feature
+#[async_trait]
+pub trait MemoryBackend: Send + Sync {
+    /// Detect memory capabilities and return snapshot.
+    async fn detect(&self) -> Result<MemoryCapability, PactError>;
+}
+```
+
+## NetworkBackend Trait
+
+```rust
+/// Network interface detection. Parses /sys/class/net/*/.
+/// - LinuxNetworkBackend: reads /sys/class/net/*/speed (link speed),
+///   /sys/class/net/*/operstate (link state), /sys/class/net/*/address (MAC),
+///   /sys/class/net/*/device/driver symlink (driver → fabric: cxi = Slingshot)
+/// - MockNetworkBackend: configurable for tests and macOS development
+/// No feature flag needed — uses standard Linux interfaces.
+/// Source: hardware_detection.feature
+#[async_trait]
+pub trait NetworkBackend: Send + Sync {
+    /// Detect all network interfaces and return per-interface info.
+    async fn detect(&self) -> Result<Vec<NetworkInterface>, PactError>;
+}
+```
+
+## StorageBackend Trait
+
+```rust
+/// Storage detection. Parses /sys/block/, /proc/mounts, and statvfs().
+/// - LinuxStorageBackend: reads /sys/block/nvme*/ (NVMe devices),
+///   /proc/mounts (active mounts), statvfs() for real capacity per mount.
+///   Node is Diskless if no /sys/block/nvme* or /sys/block/sd* found.
+/// - MockStorageBackend: configurable for tests and macOS development
+/// No feature flag needed — uses standard Linux interfaces.
+/// Source: hardware_detection.feature
+#[async_trait]
+pub trait StorageBackend: Send + Sync {
+    /// Detect storage capabilities and return snapshot.
+    async fn detect(&self) -> Result<StorageCapability, PactError>;
+}
+```
+
 ## StateObserver Trait
 
 ```rust
