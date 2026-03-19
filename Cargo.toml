@@ -82,7 +82,7 @@ rustls = "0.23"
 rcgen = "0.13"
 
 # JWT / OIDC
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 
 # Metrics
 prometheus = "0.13"
