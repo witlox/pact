@@ -436,6 +436,11 @@ pub enum AdminOperationType {
 }
 // Proto fix needed: define AdminOperationType enum in proto
 
+pub enum AdminOperationType {
+    // ... existing variants ...
+    DiagCollect,        // Diagnostic log retrieval (pact diag)
+}
+
 pub enum ApprovalStatus { Pending, Approved, Rejected, Expired }
 
 pub struct PendingApproval {
@@ -453,3 +458,30 @@ pub struct PendingApproval {
 // The PendingApproval struct is the state_delta payload.
 // Approval/rejection creates a new ConfigEntry referencing the original via parent.
 ```
+
+---
+
+## Proto-Only Types (Request/Response Messages)
+
+The following types exist only as protobuf messages on the wire. They are not domain types in pact-common and have no persistent state.
+
+### DiagRequest / DiagChunk (ShellService.CollectDiag)
+
+```protobuf
+message DiagRequest {
+    string source_filter = 1;     // "system", "service", "all" (default: "all")
+    string service_name = 2;      // specific service (empty = all services)
+    string grep_pattern = 3;      // server-side grep (empty = no filter)
+    uint32 line_limit = 4;        // max lines per source (0 = default 100, max 10000)
+}
+
+message DiagChunk {
+    string source = 1;            // "dmesg", "syslog", "nvidia-persistenced", etc.
+    repeated string lines = 2;    // batch of log lines
+    bool truncated = 3;           // true if hit line_limit for this source
+}
+```
+
+Source: `diag_retrieval.feature`, agent-interfaces.md (DiagService section).
+Invariants: LOG1 (authorization), LOG2 (server-side grep), LOG3 (line limit).
+Failure modes: F42 (agent unreachable), F43 (source missing).

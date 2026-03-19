@@ -1016,6 +1016,51 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F42: Agent unreachable during fleet-wide diagnostic query
+
+**Trigger:** Network partition, agent crashed, or node rebooting during `pact diag --vcluster X`.
+
+**Impact:**
+- Incomplete diagnostic view — logs from unreachable nodes are missing
+
+**Degradation:**
+- Return collected results from reachable agents
+- List unreachable node IDs with connection error
+- Connection timeout per agent: 5 seconds
+- Reported in CLI output as `[WARN] node-042: unreachable`
+
+**Recovery:**
+- Retry with `pact diag <specific-unreachable-node>` once node is back
+- No data loss — logs remain on the node
+
+**Detection:**
+- Connection timeout per agent (5 seconds)
+- CLI output includes warning lines for each unreachable node
+
+---
+
+## F43: Log source missing on node
+
+**Trigger:** Minimal SquashFS image without /var/log/syslog, or service not declared in supervisor.
+
+**Impact:**
+- Partial diagnostic data — some sources return empty
+
+**Degradation:**
+- Skip missing source, return results from available sources
+- DiagChunk for missing source: `{ source, lines: [], truncated: false }`
+- Include note in output for missing sources
+
+**Recovery:**
+- None needed — missing source is informational
+- Service not found in supervisor returns descriptive message
+
+**Detection:**
+- File not found (syslog path), journalctl unit not found, or service name not in supervisor list
+- DiagChunk with empty lines list indicates skipped source
+
+---
+
 ## Unacceptable Failure Behaviors
 
 The following must NEVER happen, regardless of failure scenario:
@@ -1080,3 +1125,5 @@ The following must NEVER happen, regardless of failure scenario:
 | F39: Network speed detection fails | Low | Yes (report 0, auto-retry) | No |
 | F40: NVMe detection fails | Medium | Yes (next detection cycle) | If permissions |
 | F41: statvfs fails on NFS mount | Low | Yes (next detection cycle) | If mount stale |
+| F42: Agent unreachable (fleet diag) | Low | Yes (retry per node) | No |
+| F43: Log source missing on node | Low | Yes (skip + report) | No |

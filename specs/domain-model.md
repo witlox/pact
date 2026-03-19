@@ -344,6 +344,16 @@ The CLI connects to journal (config commands) and agent (exec/shell commands) vi
 
 **No persistent entities** — the CLI is stateless. All state lives in journal or agent.
 
+**Diagnostic Queries:**
+
+| Value Object | Description |
+|--------------|-------------|
+| `DiagQuery` | Request parameters: node_id (or vcluster_id for fleet), source_filter (system/service/all), service_name, grep_pattern, line_limit |
+| `DiagResult` | Response per source per node: node_id, source, lines (Vec<String>), truncated (bool) |
+| `DiagSource` | Enum: Dmesg, Syslog, Journalctl, ServiceLog(name). Determines which local log source the agent reads. |
+
+DiagQuery and DiagResult are wire-only types (proto messages on ShellService). They are not domain entities — no persistent state. The CLI constructs a DiagQuery, the agent collects and returns DiagResults.
+
 ### 5. Federation (Optional)
 
 Config state is site-local. Policy templates are federated via Sovra.

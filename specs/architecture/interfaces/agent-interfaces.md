@@ -228,3 +228,37 @@ impl ShellService for AgentServer {
 - Platform admin can bypass whitelist (S2), still logged
 - Shell does NOT pre-classify commands — drift observer detects changes (S6)
 - Learning mode captures command-not-found events
+
+## DiagService (on ShellService)
+
+```rust
+/// Collect diagnostic logs from the node. Server-side filtering.
+/// Source: diag_retrieval.feature
+/// Authorization: pact-ops-{vcluster} or pact-platform-admin (LOG1)
+type CollectDiagStream: Stream<Item = Result<DiagChunk, Status>>;
+async fn collect_diag(&self, request: DiagRequest)
+    -> Result<Response<Self::CollectDiagStream>, Status>;
+```
+
+```protobuf
+message DiagRequest {
+    string source_filter = 1;     // "system", "service", "all" (default: "all")
+    string service_name = 2;      // specific service (empty = all services)
+    string grep_pattern = 3;      // server-side grep (empty = no filter)
+    uint32 line_limit = 4;        // max lines per source (0 = default 100, max 10000)
+}
+
+message DiagChunk {
+    string source = 1;            // "dmesg", "syslog", "nvidia-persistenced", etc.
+    repeated string lines = 2;    // batch of log lines
+    bool truncated = 3;           // true if hit line_limit for this source
+}
+```
+
+**Contract:**
+- Agent reads from local sources only (no network calls)
+- Grep is applied per-line before transmission (LOG2)
+- Line limit enforced per source, not total (LOG3)
+- PactSupervisor mode: reads /dev/kmsg (dmesg), /var/log/syslog or /var/log/messages, /run/pact/logs/{service}.log
+- Systemd mode: runs `dmesg`, `journalctl --no-pager -n {limit}`, `journalctl -u {service} --no-pager -n {limit}`
+- Missing source: skip with `DiagChunk { source, lines: [], truncated: false }` (F43)

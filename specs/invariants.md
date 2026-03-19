@@ -428,3 +428,16 @@ When the IdP is down and tokens are expired, the break-glass path is BMC console
 
 ### PAuth5: Two-person approval requires distinct identities
 Two-person approval validates that the approver's token identity differs from the requester's. Same-identity approval is rejected regardless of token freshness.
+
+---
+
+## Diagnostic Log Retrieval Invariants
+
+### LOG1: Diagnostic log retrieval authorization
+Diagnostic log retrieval (`pact diag`) requires `pact-ops-{vcluster}` or `pact-platform-admin` role. Viewers MUST NOT retrieve node logs. Same authorization as `pact exec`.
+
+### LOG2: Server-side grep filtering
+Grep filtering MUST execute on the agent, not the CLI. Only matching lines are transmitted over the management network. This prevents large log transfers saturating the management network.
+
+### LOG3: Agent-side line limit enforcement
+Line limit MUST be enforced on the agent per source. Default: 100 lines. Maximum: 10000 lines. Agent MUST reject requests with line_limit > 10000.

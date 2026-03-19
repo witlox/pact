@@ -359,6 +359,19 @@ new fields, using only the fields they understand.
 **Failure mode:** F1 (quorum loss) — write blocked, retry
 **Invariants:** E10 (platform-admin for enroll/decommission), E8 (assignment independent)
 
+### I20: CLI → Agent (Diagnostic Log Retrieval)
+
+**Direction:** CLI calls agent's ShellService.CollectDiag RPC.
+**Protocol:** gRPC server-streaming (`DiagRequest → stream DiagChunk`)
+**Data flow:**
+- Single node: CLI connects to one agent, calls CollectDiag, displays chunks as they arrive
+- Fleet-wide: CLI queries EnrollmentService for nodes in vCluster, connects to each agent concurrently (max 50 parallel), aggregates results. Each output line prefixed with `[node_id]`. Errors reported inline.
+- Agent reads from local log sources only (no network calls to other services)
+- Grep filter and line limit applied on agent before transmission
+**Auth:** Same OIDC token as exec, passed in gRPC metadata.
+**Failure mode:** F42 (agent unreachable → partial results with warning), F43 (source missing → skip with empty chunk)
+**Invariants:** LOG1 (ops role required), LOG2 (server-side grep), LOG3 (line limit enforced per source)
+
 ---
 
 ## Interaction Summary Matrix
@@ -393,3 +406,4 @@ new fields, using only the fields they understand.
 | Supervision loop | Watchdog | Internal | Pet | BMC reboot (F23) |
 | Workload Int. | Isolation | Internal | Delegate | Namespace creation or fallback |
 | Workload Int. | Isolation | Internal | Mount mgmt | Refcount reconstruction (WI6) |
+| CLI | Agent (diag) | gRPC stream | Request | Partial results + warning (F42) |

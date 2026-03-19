@@ -313,6 +313,19 @@ Assumptions that, if wrong, would invalidate architectural decisions. Ordered by
 | A-Hw6: Slingshot uses cxi driver | NetworkBackend: fabric classification | If driver name changes, update the driver-to-fabric mapping table. Single string comparison. |
 | A-Hw7: /proc and /sys sufficient | All hardware backends: no feature flags | If a hardware category needs vendor libraries, add a feature flag for that category (same pattern as GPU). |
 
+---
+
+## Diagnostic Log Retrieval Assumptions
+
+### A-Log1: dmesg ring buffer available [Accepted]
+dmesg ring buffer is available via /dev/kmsg (read) or `dmesg` command on all compute nodes. Buffer size is kernel-configured (typically 256KB-1MB). Reading /dev/kmsg does not require root when pact-agent runs as PID 1.
+
+### A-Log2: Service stdout/stderr captured to log files [Accepted]
+In PactSupervisor mode, service stdout/stderr is captured to `/run/pact/logs/{service_name}.log` (rotated by pact-agent). In systemd mode, `journalctl -u {service}` is used. Log files are on tmpfs and do not survive reboot (diskless nodes).
+
+### A-Log3: Syslog path varies by distribution [Accepted]
+Syslog is at /var/log/syslog (Debian/Ubuntu) or /var/log/messages (RHEL/SLES). Agent checks both paths, uses whichever exists. If neither exists, syslog source is skipped (F43).
+
 ### Open Unknowns
 
 | ID | Question | Impact if wrong | Next step |
