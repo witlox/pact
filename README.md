@@ -54,6 +54,8 @@ pact apply <spec.toml>         # Apply declarative config spec
 pact exec <node> -- <command>  # Run diagnostic command on node
 pact shell <node>              # Interactive pact shell on node
 pact service <action> <name>   # Service management (start/stop/restart/status)
+pact diag <node>              # Diagnostic logs (dmesg, syslog, services)
+pact diag --vcluster X --grep "ECC"  # Fleet-wide log grep
 
 # Delta promotion
 pact promote <node>            # Export committed node deltas as overlay TOML

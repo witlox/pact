@@ -296,6 +296,49 @@ Streams the last 50 log lines for the service.
 
 ---
 
+## Diagnostic Commands
+
+Structured diagnostic log retrieval from nodes. Replaces ad-hoc `pact exec`
+for common log retrieval tasks with a purpose-built command that enforces
+server-side filtering.
+
+### `pact diag`
+
+Collect diagnostic logs from one or more nodes. Logs are retrieved directly
+from the agent, which reads local sources (dmesg via `/dev/kmsg`, syslog,
+service logs under `/run/pact/logs/`). Grep filtering and line limits are
+enforced on the agent side, so only matching data crosses the network.
+
+```bash
+pact diag node-042                              # All sources, last 200 lines
+pact diag node-042 --lines 500                  # Last 500 lines per source
+pact diag node-042 --source dmesg               # Only kernel messages
+pact diag node-042 --service nvidia-persistenced # Logs for a specific service
+pact diag node-042 --grep "ECC"                 # Server-side grep across all sources
+pact diag --vcluster ml-training                # Fleet-wide: all nodes in vCluster
+pact diag --vcluster ml-training --grep "ECC"   # Fleet-wide log grep
+```
+
+| Option | Description |
+|--------|-------------|
+| `[node]` | Target node ID (required unless `--vcluster` is given) |
+| `--lines <N>` | Number of lines per source (default: 200) |
+| `--source <SOURCE>` | Log source filter: `dmesg`, `syslog`, or `service` (default: all) |
+| `--service <NAME>` | Restrict to a specific service's logs (implies `--source service`) |
+| `--grep <PATTERN>` | Server-side grep pattern applied before streaming |
+| `--vcluster <NAME>` | Fleet mode: query all nodes in the vCluster (fans out concurrently) |
+
+In fleet mode (`--vcluster`), output lines are prefixed with `[node_id]`.
+Unreachable agents produce a warning and partial results are returned.
+
+**Roles:** Requires `pact-ops-{vcluster}` or `pact-platform-admin` role (LOG1).
+
+**Design notes:**
+- Grep and line limit are enforced on the agent, not the CLI (LOG2, LOG3).
+- Fleet fan-out: max 50 concurrent agent connections, 5s timeout per agent.
+
+---
+
 ## Admin Commands
 
 These commands handle emergency operations and approval workflows.

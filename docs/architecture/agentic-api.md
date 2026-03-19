@@ -60,3 +60,9 @@ to be set. Without a lattice connection, they return descriptive error messages.
 Write commands (`pact jobs cancel`) remain human-only unless explicitly
 authorized via policy. `pact audit` is useful but may expose sensitive data and
 should be scoped carefully.
+
+## Future MCP Tool Candidates
+
+| MCP Tool | CLI Equivalent | Description |
+|----------|---------------|-------------|
+| `pact_diag` | `pact diag` | Read-only fleet diagnostic log retrieval. Server-side grep + line limit. Natural fit for AI-driven incident triage — agent can collect logs across a vCluster, grep for error patterns, and correlate with capability/drift data without requiring exec privileges. |

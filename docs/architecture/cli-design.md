@@ -33,6 +33,8 @@ authorized, and logged.
 | `pact service status <name>` | Service status |
 | `pact service restart <name>` | Restart service (commit window applies) |
 | `pact service logs <name>` | Stream service logs |
+| `pact diag <node>` | Structured diagnostic log collection (dmesg, syslog, services) |
+| `pact diag --vcluster X` | Fleet-wide diagnostic log retrieval |
 | `pact cap [node]` | Capability report |
 | `pact blacklist` | Manage drift detection exclusions |
 

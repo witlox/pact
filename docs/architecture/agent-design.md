@@ -31,7 +31,9 @@ Two backends behind the `ServiceManager` trait:
 
 ### Shell Server (`src/shell/`)
 
-Replaces SSH. Listens on a gRPC endpoint (mTLS authenticated).
+Replaces SSH. Listens on a gRPC endpoint (mTLS authenticated). Provides three
+RPC operations: exec (single command), shell (interactive session), and
+CollectDiag (structured diagnostic log retrieval).
 
 **pact exec** (single command):
 ```
