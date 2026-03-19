@@ -171,7 +171,7 @@ pub async fn boot(
     // Phase 6: Generate initial capability report
     info!("Boot phase 6: generating capability report");
     let gpu_backend: Box<dyn GpuBackend> = Box::new(MockGpuBackend::new());
-    let reporter = CapabilityReporter::new(config.node_id.clone(), gpu_backend);
+    let reporter = CapabilityReporter::with_gpu_only(config.node_id.clone(), gpu_backend);
     let report = reporter.report().await?;
 
     // Write capability manifest (only if path is writable — skip on macOS dev)

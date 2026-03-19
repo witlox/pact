@@ -2,9 +2,9 @@
 
 use cucumber::{given, then, when};
 use pact_common::types::{
-    CapabilityReport, ConfigState, EmergencyInfo, GpuCapability, GpuHealth, GpuVendor, Identity,
-    MemoryCapability, PrincipalType, SoftwareCapability, StorageCapability, SupervisorBackend,
-    SupervisorStatus,
+    CapabilityReport, ConfigState, CpuCapability, EmergencyInfo, GpuCapability, GpuHealth,
+    GpuVendor, HugePageInfo, Identity, MemoryCapability, MemoryType, PrincipalType,
+    SoftwareCapability, StorageCapability, StorageNodeType, SupervisorBackend, SupervisorStatus,
 };
 use pact_journal::JournalCommand;
 use tempfile::TempDir;
@@ -49,10 +49,22 @@ fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
         node_id: node_id.into(),
         timestamp: chrono::Utc::now(),
         report_id: uuid::Uuid::new_v4(),
+        cpu: CpuCapability::default(),
         gpus: world.gpu_capabilities.clone(),
-        memory: MemoryCapability { total_bytes: 0, available_bytes: 0, numa_nodes: 1 },
-        network: None,
-        storage: StorageCapability { tmpfs_bytes: 0, mounts: vec![] },
+        memory: MemoryCapability {
+            total_bytes: 0,
+            available_bytes: 0,
+            memory_type: MemoryType::default(),
+            numa_nodes: 1,
+            numa_topology: vec![],
+            hugepages: HugePageInfo::default(),
+        },
+        network: vec![],
+        storage: StorageCapability {
+            node_type: StorageNodeType::Diskless,
+            local_disks: vec![],
+            mounts: vec![],
+        },
         software: SoftwareCapability { loaded_modules: vec![], uenv_image: None, services: vec![] },
         config_state,
         drift_summary: None,
@@ -122,14 +134,22 @@ async fn given_memory(world: &mut PactWorld, gb: u64) {
         node_id: "test-node".into(),
         timestamp: chrono::Utc::now(),
         report_id: uuid::Uuid::new_v4(),
+        cpu: CpuCapability::default(),
         gpus: vec![],
         memory: MemoryCapability {
             total_bytes: gb * 1024 * 1024 * 1024,
             available_bytes: gb * 1024 * 1024 * 1024,
+            memory_type: MemoryType::default(),
             numa_nodes: 1,
+            numa_topology: vec![],
+            hugepages: HugePageInfo::default(),
         },
-        network: None,
-        storage: StorageCapability { tmpfs_bytes: 0, mounts: vec![] },
+        network: vec![],
+        storage: StorageCapability {
+            node_type: StorageNodeType::Diskless,
+            local_disks: vec![],
+            mounts: vec![],
+        },
         software: SoftwareCapability { loaded_modules: vec![], uenv_image: None, services: vec![] },
         config_state: ConfigState::ObserveOnly,
         drift_summary: None,
@@ -185,9 +205,7 @@ async fn when_detection_runs(world: &mut PactWorld) {
     let existing_memory = world
         .capability_report
         .as_ref()
-        .map_or(MemoryCapability { total_bytes: 0, available_bytes: 0, numa_nodes: 1 }, |r| {
-            r.memory.clone()
-        });
+        .map_or_else(MemoryCapability::default, |r| r.memory.clone());
 
     let mut report = build_report(world, "test-node");
     report.memory = existing_memory;

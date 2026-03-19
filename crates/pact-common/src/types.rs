@@ -247,9 +247,10 @@ pub struct CapabilityReport {
     pub node_id: NodeId,
     pub timestamp: DateTime<Utc>,
     pub report_id: Uuid,
+    pub cpu: CpuCapability,
     pub gpus: Vec<GpuCapability>,
     pub memory: MemoryCapability,
-    pub network: Option<NetworkCapability>,
+    pub network: Vec<NetworkInterface>,
     pub storage: StorageCapability,
     pub software: SoftwareCapability,
     pub config_state: ConfigState,
@@ -258,36 +259,184 @@ pub struct CapabilityReport {
     pub supervisor_status: SupervisorStatus,
 }
 
+/// CPU architecture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CpuArchitecture {
+    X86_64,
+    Aarch64,
+    #[default]
+    Unknown,
+}
+
+/// CPU capability information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuCapability {
+    pub architecture: CpuArchitecture,
+    /// CPU model name, e.g. "Intel Xeon w9-3495X", "NVIDIA Grace".
+    pub model: String,
+    pub physical_cores: u32,
+    /// Logical cores including SMT/HT threads.
+    pub logical_cores: u32,
+    pub base_frequency_mhz: u32,
+    /// Turbo/boost frequency.
+    pub max_frequency_mhz: u32,
+    /// ISA features: "avx512f", "sve", "amx", etc.
+    pub features: Vec<String>,
+    /// Number of NUMA nodes (matches memory topology).
+    pub numa_nodes: u32,
+    /// Total L3 cache across all sockets.
+    pub cache_l3_bytes: u64,
+}
+
+impl Default for CpuCapability {
+    fn default() -> Self {
+        Self {
+            architecture: CpuArchitecture::default(),
+            model: String::new(),
+            physical_cores: 0,
+            logical_cores: 0,
+            base_frequency_mhz: 0,
+            max_frequency_mhz: 0,
+            features: Vec::new(),
+            numa_nodes: 1,
+            cache_l3_bytes: 0,
+        }
+    }
+}
+
+/// Memory type classification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MemoryType {
+    Ddr4,
+    Ddr5,
+    Hbm2e,
+    Hbm3,
+    Hbm3e,
+    #[default]
+    Unknown,
+}
+
+/// A NUMA node with per-node memory and CPU affinity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumaNode {
+    pub id: u32,
+    pub total_bytes: u64,
+    /// Logical CPU IDs in this NUMA node.
+    pub cpus: Vec<u32>,
+}
+
+/// Huge page allocation information.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HugePageInfo {
+    pub size_2mb_total: u64,
+    pub size_2mb_free: u64,
+    pub size_1gb_total: u64,
+    pub size_1gb_free: u64,
+}
+
 /// Memory capability information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryCapability {
     pub total_bytes: u64,
     pub available_bytes: u64,
+    pub memory_type: MemoryType,
     pub numa_nodes: u32,
+    /// Per-node memory and CPU affinity.
+    pub numa_topology: Vec<NumaNode>,
+    pub hugepages: HugePageInfo,
 }
 
-/// Network fabric capability information.
+impl Default for MemoryCapability {
+    fn default() -> Self {
+        Self {
+            total_bytes: 0,
+            available_bytes: 0,
+            memory_type: MemoryType::default(),
+            numa_nodes: 1,
+            numa_topology: Vec::new(),
+            hugepages: HugePageInfo::default(),
+        }
+    }
+}
+
+/// Network fabric type detected from driver.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkFabric {
+    Slingshot,
+    Ethernet,
+    Unknown,
+}
+
+/// Operational state of a network interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InterfaceOperState {
+    Up,
+    Down,
+}
+
+/// A detected network interface on the node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkCapability {
-    pub fabric_type: String,
-    pub bandwidth_bps: u64,
-    pub latency_us: f64,
+pub struct NetworkInterface {
+    pub name: String,
+    pub fabric: NetworkFabric,
+    pub speed_mbps: u64,
+    pub state: InterfaceOperState,
+    pub mac: String,
+    pub ipv4: Option<String>,
+}
+
+/// Whether this node has local storage or is diskless.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StorageNodeType {
+    Diskless,
+    LocalStorage,
+}
+
+/// Type of local disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiskType {
+    Nvme,
+    Ssd,
+    Hdd,
+    Unknown,
+}
+
+/// Filesystem type for a mount point.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FsType {
+    Nfs,
+    Lustre,
+    Ext4,
+    Xfs,
+    Tmpfs,
+    Other(String),
+}
+
+/// A local disk detected on the node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalDisk {
+    pub device: String,
+    pub model: String,
+    pub capacity_bytes: u64,
+    pub disk_type: DiskType,
+}
+
+/// A mount point with filesystem and capacity information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountInfo {
+    pub path: String,
+    pub fs_type: FsType,
+    pub source: String,
+    pub total_bytes: u64,
+    pub available_bytes: u64,
 }
 
 /// Storage capability information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageCapability {
-    pub tmpfs_bytes: u64,
-    pub mounts: Vec<MountPointInfo>,
-}
-
-/// Information about a mount point.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MountPointInfo {
-    pub path: String,
-    pub fs_type: String,
-    pub source: String,
-    pub available: bool,
+    pub node_type: StorageNodeType,
+    pub local_disks: Vec<LocalDisk>,
+    pub mounts: Vec<MountInfo>,
 }
 
 /// Software capability information.
@@ -724,23 +873,32 @@ mod tests {
                 health: GpuHealth::Healthy,
                 pci_bus_id: "0000:3b:00.0".into(),
             }],
+            cpu: CpuCapability::default(),
             memory: MemoryCapability {
                 total_bytes: 549_755_813_888,
                 available_bytes: 500_000_000_000,
+                memory_type: MemoryType::default(),
                 numa_nodes: 2,
+                numa_topology: vec![],
+                hugepages: HugePageInfo::default(),
             },
-            network: Some(NetworkCapability {
-                fabric_type: "slingshot".into(),
-                bandwidth_bps: 200_000_000_000,
-                latency_us: 1.5,
-            }),
+            network: vec![NetworkInterface {
+                name: "cxi0".into(),
+                fabric: NetworkFabric::Slingshot,
+                speed_mbps: 200_000,
+                state: InterfaceOperState::Up,
+                mac: "00:11:22:33:44:55".into(),
+                ipv4: None,
+            }],
             storage: StorageCapability {
-                tmpfs_bytes: 1_073_741_824,
-                mounts: vec![MountPointInfo {
+                node_type: StorageNodeType::Diskless,
+                local_disks: vec![],
+                mounts: vec![MountInfo {
                     path: "/scratch".into(),
-                    fs_type: "lustre".into(),
+                    fs_type: FsType::Lustre,
                     source: "mds01:/scratch".into(),
-                    available: true,
+                    total_bytes: 1_073_741_824,
+                    available_bytes: 500_000_000,
                 }],
             },
             software: SoftwareCapability {
@@ -763,7 +921,8 @@ mod tests {
         assert_eq!(decoded.node_id, "node-001");
         assert_eq!(decoded.gpus.len(), 1);
         assert_eq!(decoded.gpus[0].health, GpuHealth::Healthy);
-        assert!(decoded.network.is_some());
+        assert_eq!(decoded.network.len(), 1);
+        assert_eq!(decoded.network[0].fabric, NetworkFabric::Slingshot);
         assert_eq!(decoded.memory.numa_nodes, 2);
     }
 }

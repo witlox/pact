@@ -1526,8 +1526,7 @@ fn when_decommission(world: &mut PactWorld, node_id: String) {
     }
 
     // Check for active sessions (warn if any)
-    let active_sessions =
-        world.journal.enrollments.get(&node_id).map_or(0, |e| e.active_sessions);
+    let active_sessions = world.journal.enrollments.get(&node_id).map_or(0, |e| e.active_sessions);
     if active_sessions > 0 {
         world.cli_output = Some(format!("{active_sessions} active session(s) on this node"));
         world.cli_exit_code = Some(1);

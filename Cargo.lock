@@ -2633,6 +2633,7 @@ dependencies = [
  "hpc-identity",
  "hpc-node",
  "jsonwebtoken",
+ "libc",
  "nix",
  "pact-common",
  "pact-test-harness",

@@ -1,23 +1,35 @@
 //! Capability reporter — hardware detection and reporting.
 //!
-//! Detects GPU, memory, storage, network, and software capabilities.
+//! Detects GPU, CPU, memory, storage, network, and software capabilities.
 //! Writes `CapabilityReport` to:
 //! - tmpfs manifest at `/run/pact/capability.json`
 //! - unix socket for lattice-node-agent
 //!
-//! GPU detection is vendor-neutral behind the `GpuBackend` trait:
-//! - NVIDIA: NVML (feature `nvidia`)
-//! - AMD: ROCm SMI (feature `amd`)
-//! - MockGpuBackend for macOS development
+//! Detection is modular behind backend traits:
+//! - GPU: `GpuBackend` (NVIDIA via nvidia-smi, AMD via rocm-smi)
+//! - CPU: `CpuBackend` (Linux /proc/cpuinfo + sysfs)
+//! - Network: `NetworkBackend` (Linux /sys/class/net)
+//! - Storage: `StorageBackend` (Linux /sys/block + /proc/mounts)
+//! - Mock backends for macOS development
+
+pub mod cpu;
+pub mod memory;
+pub mod network;
+pub mod storage;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
 use pact_common::types::{
-    CapabilityReport, ConfigState, GpuCapability, MemoryCapability, MountPointInfo,
-    NetworkCapability, SoftwareCapability, StorageCapability, SupervisorBackend, SupervisorStatus,
+    CapabilityReport, ConfigState, GpuCapability, SoftwareCapability, StorageCapability,
+    StorageNodeType, SupervisorBackend, SupervisorStatus,
 };
+
+use self::cpu::CpuBackend;
+use self::memory::MemoryBackend;
+use self::network::NetworkBackend;
+use self::storage::StorageBackend;
 
 /// Trait for GPU detection backends.
 #[async_trait]
@@ -58,26 +70,62 @@ impl GpuBackend for MockGpuBackend {
 /// Builds a `CapabilityReport` by querying system capabilities.
 pub struct CapabilityReporter {
     node_id: String,
+    cpu_backend: Box<dyn CpuBackend>,
     gpu_backend: Box<dyn GpuBackend>,
+    memory_backend: Box<dyn MemoryBackend>,
+    network_backend: Box<dyn NetworkBackend>,
+    storage_backend: Box<dyn StorageBackend>,
 }
 
 impl CapabilityReporter {
-    pub fn new(node_id: String, gpu_backend: Box<dyn GpuBackend>) -> Self {
-        Self { node_id, gpu_backend }
+    /// Create a reporter with all five backends.
+    pub fn new(
+        node_id: String,
+        cpu_backend: Box<dyn CpuBackend>,
+        gpu_backend: Box<dyn GpuBackend>,
+        memory_backend: Box<dyn MemoryBackend>,
+        network_backend: Box<dyn NetworkBackend>,
+        storage_backend: Box<dyn StorageBackend>,
+    ) -> Self {
+        Self { node_id, cpu_backend, gpu_backend, memory_backend, network_backend, storage_backend }
+    }
+
+    /// Create a reporter with only a GPU backend (convenience for existing callers).
+    ///
+    /// Uses default/mock backends for CPU, memory, network, and storage.
+    pub fn with_gpu_only(node_id: String, gpu_backend: Box<dyn GpuBackend>) -> Self {
+        Self {
+            node_id,
+            cpu_backend: Box::new(cpu::MockCpuBackend::new()),
+            gpu_backend,
+            memory_backend: Box::new(memory::MockMemoryBackend::new()),
+            network_backend: Box::new(network::MockNetworkBackend::new()),
+            storage_backend: Box::new(storage::MockStorageBackend::new()),
+        }
     }
 
     /// Generate a full capability report.
     pub async fn report(&self) -> anyhow::Result<CapabilityReport> {
+        let cpu = self.cpu_backend.detect().await.unwrap_or_default();
         let gpus = self.gpu_backend.detect().await?;
+        let mem = self.memory_backend.detect().await.unwrap_or_default();
+        let network_interfaces = self.network_backend.detect().await.unwrap_or_default();
+        let storage_cap =
+            self.storage_backend.detect().await.unwrap_or_else(|_| StorageCapability {
+                node_type: StorageNodeType::Diskless,
+                local_disks: vec![],
+                mounts: vec![],
+            });
 
         Ok(CapabilityReport {
             node_id: self.node_id.clone(),
             timestamp: Utc::now(),
             report_id: Uuid::new_v4(),
+            cpu,
             gpus,
-            memory: detect_memory(),
-            network: detect_network(),
-            storage: detect_storage(),
+            memory: mem,
+            network: network_interfaces,
+            storage: storage_cap,
             software: detect_software(),
             config_state: ConfigState::ObserveOnly,
             drift_summary: None,
@@ -106,106 +154,10 @@ impl CapabilityReporter {
     }
 }
 
-/// Detect system memory.
-fn detect_memory() -> MemoryCapability {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
-            return parse_meminfo(&meminfo);
-        }
-    }
-    MemoryCapability { total_bytes: 0, available_bytes: 0, numa_nodes: 1 }
-}
-
-/// Parse /proc/meminfo content into MemoryCapability.
-///
-/// Extracted for testability — this is the real parsing logic.
-#[cfg(any(test, target_os = "linux"))]
-fn parse_meminfo(content: &str) -> MemoryCapability {
-    let mut total = 0u64;
-    let mut available = 0u64;
-    for line in content.lines() {
-        if line.starts_with("MemTotal:") {
-            if let Some(kb) = parse_meminfo_kb(line) {
-                total = kb * 1024;
-            }
-        } else if line.starts_with("MemAvailable:") {
-            if let Some(kb) = parse_meminfo_kb(line) {
-                available = kb * 1024;
-            }
-        }
-    }
-    MemoryCapability { total_bytes: total, available_bytes: available, numa_nodes: 1 }
-}
-
-/// Parse a single line from /proc/meminfo, extracting the kB value.
-#[cfg(any(test, target_os = "linux"))]
-fn parse_meminfo_kb(line: &str) -> Option<u64> {
-    line.split_whitespace().nth(1)?.parse().ok()
-}
-
-/// Detect storage capabilities from /proc/mounts (Linux) or defaults.
-fn detect_storage() -> StorageCapability {
-    let mounts = parse_proc_mounts();
-    let tmpfs_bytes =
-        mounts.iter().filter(|m| m.fs_type == "tmpfs").count() as u64 * 64 * 1024 * 1024; // estimate 64MB per tmpfs
-    StorageCapability { tmpfs_bytes, mounts }
-}
-
-/// Parse /proc/mounts into MountPointInfo entries.
-fn parse_proc_mounts() -> Vec<MountPointInfo> {
-    let content = match std::fs::read_to_string("/proc/mounts") {
-        Ok(c) => c,
-        Err(_) => return vec![], // non-Linux or unreadable
-    };
-    content
-        .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                Some(MountPointInfo {
-                    source: parts[0].to_string(),
-                    path: parts[1].to_string(),
-                    fs_type: parts[2].to_string(),
-                    available: true,
-                })
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
 /// Detect software capabilities from /proc/modules (Linux) or defaults.
 fn detect_software() -> SoftwareCapability {
     let loaded_modules = parse_proc_modules();
     SoftwareCapability { loaded_modules, uenv_image: None, services: vec![] }
-}
-
-/// Detect network capabilities by checking for high-speed fabric interfaces.
-fn detect_network() -> Option<NetworkCapability> {
-    // Check for common HPC fabric types via /sys/class/infiniband or loaded modules
-    let has_infiniband = std::path::Path::new("/sys/class/infiniband").exists();
-    if has_infiniband {
-        return Some(NetworkCapability {
-            fabric_type: "InfiniBand".to_string(),
-            bandwidth_bps: 200_000_000_000, // 200 Gbps default
-            latency_us: 1.0,
-        });
-    }
-
-    // Check for Slingshot (Cray/HPE)
-    let modules = parse_proc_modules();
-    if modules.iter().any(|m| m.starts_with("cxi") || m.starts_with("slingshot")) {
-        return Some(NetworkCapability {
-            fabric_type: "Slingshot".to_string(),
-            bandwidth_bps: 200_000_000_000,
-            latency_us: 0.5,
-        });
-    }
-
-    // Default Ethernet
-    None
 }
 
 /// Parse /proc/modules into a list of loaded module names.
@@ -442,72 +394,11 @@ mod tests {
         }
     }
 
-    // --- parse_meminfo_kb tests (the real parsing logic) ---
-
-    #[test]
-    fn parse_meminfo_kb_standard_line() {
-        assert_eq!(parse_meminfo_kb("MemTotal:       65536000 kB"), Some(65_536_000));
-    }
-
-    #[test]
-    fn parse_meminfo_kb_with_varying_whitespace() {
-        assert_eq!(parse_meminfo_kb("MemAvailable:    1234567 kB"), Some(1_234_567));
-        assert_eq!(parse_meminfo_kb("Buffers:         42 kB"), Some(42));
-    }
-
-    #[test]
-    fn parse_meminfo_kb_malformed_returns_none() {
-        assert_eq!(parse_meminfo_kb("MemTotal:"), None);
-        assert_eq!(parse_meminfo_kb("MemTotal: not_a_number kB"), None);
-        assert_eq!(parse_meminfo_kb(""), None);
-    }
-
-    // --- parse_meminfo tests (full /proc/meminfo parsing) ---
-
-    #[test]
-    fn parse_meminfo_real_format() {
-        let content = "\
-MemTotal:       65797240 kB
-MemFree:        12345678 kB
-MemAvailable:   50000000 kB
-Buffers:          234567 kB
-Cached:         20000000 kB
-SwapCached:            0 kB
-";
-        let mem = parse_meminfo(content);
-        assert_eq!(mem.total_bytes, 65_797_240 * 1024);
-        assert_eq!(mem.available_bytes, 50_000_000 * 1024);
-        assert_eq!(mem.numa_nodes, 1);
-    }
-
-    #[test]
-    fn parse_meminfo_missing_available() {
-        // Some kernels might not have MemAvailable
-        let content = "MemTotal:       16000000 kB\nMemFree:        8000000 kB\n";
-        let mem = parse_meminfo(content);
-        assert_eq!(mem.total_bytes, 16_000_000 * 1024);
-        assert_eq!(mem.available_bytes, 0); // Not present → 0
-    }
-
-    #[test]
-    fn parse_meminfo_empty_input() {
-        let mem = parse_meminfo("");
-        assert_eq!(mem.total_bytes, 0);
-        assert_eq!(mem.available_bytes, 0);
-    }
-
-    #[test]
-    fn parse_meminfo_garbage_input() {
-        let mem = parse_meminfo("this is not meminfo\nrandom garbage\n");
-        assert_eq!(mem.total_bytes, 0);
-        assert_eq!(mem.available_bytes, 0);
-    }
-
     // --- CapabilityReport structure tests ---
 
     #[tokio::test]
     async fn report_with_gpus_includes_all_fields() {
-        let reporter = CapabilityReporter::new(
+        let reporter = CapabilityReporter::with_gpu_only(
             "node-001".into(),
             Box::new(MockGpuBackend::with_gpus(vec![test_gpu()])),
         );
@@ -520,8 +411,6 @@ SwapCached:            0 kB
         assert_eq!(report.gpus[0].health, GpuHealth::Healthy);
         assert_eq!(report.gpus[0].memory_bytes, 80 * 1024 * 1024 * 1024);
         assert_eq!(report.config_state, ConfigState::ObserveOnly);
-        // Network detection is platform-dependent (may find InfiniBand/Slingshot on HPC nodes)
-        // so we don't assert is_none — just verify the report was generated
         assert!(report.drift_summary.is_none());
         assert!(report.emergency.is_none());
 
@@ -534,7 +423,8 @@ SwapCached:            0 kB
 
     #[tokio::test]
     async fn report_without_gpus() {
-        let reporter = CapabilityReporter::new("node-002".into(), Box::new(MockGpuBackend::new()));
+        let reporter =
+            CapabilityReporter::with_gpu_only("node-002".into(), Box::new(MockGpuBackend::new()));
         let report = reporter.report().await.unwrap();
 
         assert_eq!(report.node_id, "node-002");
@@ -563,8 +453,10 @@ SwapCached:            0 kB
                 pci_bus_id: "0000:86:00.0".into(),
             },
         ];
-        let reporter =
-            CapabilityReporter::new("gpu-node".into(), Box::new(MockGpuBackend::with_gpus(gpus)));
+        let reporter = CapabilityReporter::with_gpu_only(
+            "gpu-node".into(),
+            Box::new(MockGpuBackend::with_gpus(gpus)),
+        );
         let report = reporter.report().await.unwrap();
         assert_eq!(report.gpus.len(), 2);
         assert_eq!(report.gpus[1].health, GpuHealth::Degraded);
@@ -575,7 +467,7 @@ SwapCached:            0 kB
 
     #[tokio::test]
     async fn write_manifest_roundtrip_preserves_all_fields() {
-        let reporter = CapabilityReporter::new(
+        let reporter = CapabilityReporter::with_gpu_only(
             "node-001".into(),
             Box::new(MockGpuBackend::with_gpus(vec![test_gpu()])),
         );
@@ -651,7 +543,7 @@ SwapCached:            0 kB
     fn parse_nvidia_csv_malformed_line_skipped() {
         let csv = "not,enough,columns\n0, A100, 81920, 00:00.0\n";
         let gpus = NvidiaSmiBackend::parse_nvidia_csv(csv);
-        // First line has 4 columns but "not" is not a valid u32 → skipped
+        // First line has 4 columns but "not" is not a valid u32 -> skipped
         // Second line is valid
         assert_eq!(gpus.len(), 1);
         assert_eq!(gpus[0].model, "A100");
@@ -701,10 +593,70 @@ SwapCached:            0 kB
 
     #[tokio::test]
     async fn gpu_detection_failure_propagates() {
-        let reporter = CapabilityReporter::new("node-err".into(), Box::new(FailingGpuBackend));
+        let reporter =
+            CapabilityReporter::with_gpu_only("node-err".into(), Box::new(FailingGpuBackend));
         let result = reporter.report().await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("NVML init failed"));
+    }
+
+    // --- Backend integration tests ---
+
+    #[tokio::test]
+    async fn report_with_all_backends() {
+        use pact_common::types::{
+            DiskType, FsType, InterfaceOperState, LocalDisk, MountInfo, NetworkFabric,
+            NetworkInterface, StorageNodeType,
+        };
+
+        let network_backend = network::MockNetworkBackend {
+            interfaces: vec![NetworkInterface {
+                name: "cxi0".into(),
+                fabric: NetworkFabric::Slingshot,
+                speed_mbps: 200_000,
+                state: InterfaceOperState::Up,
+                mac: "00:11:22:33:44:55".into(),
+                ipv4: None,
+            }],
+        };
+
+        let storage_backend = storage::MockStorageBackend {
+            storage: StorageCapability {
+                node_type: StorageNodeType::LocalStorage,
+                local_disks: vec![LocalDisk {
+                    device: "/dev/nvme0n1".into(),
+                    model: "Samsung 990 PRO".into(),
+                    capacity_bytes: 1_000_000_000_000,
+                    disk_type: DiskType::Nvme,
+                }],
+                mounts: vec![MountInfo {
+                    path: "/scratch".into(),
+                    fs_type: FsType::Lustre,
+                    source: "mds01:/scratch".into(),
+                    total_bytes: 10_000_000_000_000,
+                    available_bytes: 5_000_000_000_000,
+                }],
+            },
+        };
+
+        let reporter = CapabilityReporter::new(
+            "full-node".into(),
+            Box::new(cpu::MockCpuBackend::new()),
+            Box::new(MockGpuBackend::with_gpus(vec![test_gpu()])),
+            Box::new(memory::MockMemoryBackend::new()),
+            Box::new(network_backend),
+            Box::new(storage_backend),
+        );
+
+        let report = reporter.report().await.unwrap();
+        assert_eq!(report.node_id, "full-node");
+        assert_eq!(report.gpus.len(), 1);
+        assert_eq!(report.network.len(), 1);
+        assert_eq!(report.network[0].fabric, NetworkFabric::Slingshot);
+        assert_eq!(report.storage.node_type, StorageNodeType::LocalStorage);
+        assert_eq!(report.storage.local_disks.len(), 1);
+        assert_eq!(report.storage.mounts.len(), 1);
+        assert_eq!(report.storage.mounts[0].fs_type, FsType::Lustre);
     }
 }
