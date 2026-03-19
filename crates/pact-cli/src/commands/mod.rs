@@ -15,6 +15,7 @@ pub mod emergency;
 pub mod exec;
 pub mod execute;
 pub mod group;
+pub mod lattice;
 pub mod log;
 pub mod node;
 pub mod openchami;

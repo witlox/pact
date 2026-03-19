@@ -997,6 +997,197 @@ supervisor_backend = "pact"
     }
 
     // =========================================================================
+    // 27. jobs list — no lattice endpoint, verify graceful failure
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::list_jobs(&delegation_config, None, None).await;
+        match result {
+            Err(ref e) if e.to_string().contains("not configured") => {
+                results.push(TestResult::pass(
+                    "jobs list (no lattice)",
+                    "graceful: lattice endpoint not configured",
+                ));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "jobs list (no lattice)",
+                    format!("expected error, got: {output}"),
+                ));
+            }
+            Err(e) => {
+                results.push(TestResult::fail(
+                    "jobs list (no lattice)",
+                    format!("unexpected error: {e}"),
+                ));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 28. jobs cancel — no lattice endpoint, verify graceful failure
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::cancel_job(&delegation_config, "job-123").await;
+        match result {
+            Err(ref e) if e.to_string().contains("not configured") => {
+                results.push(TestResult::pass(
+                    "jobs cancel (no lattice)",
+                    "graceful: lattice endpoint not configured",
+                ));
+            }
+            _ => {
+                results.push(TestResult::fail(
+                    "jobs cancel (no lattice)",
+                    "expected not-configured error",
+                ));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 29. jobs inspect — no lattice endpoint, verify graceful failure
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::inspect_job(&delegation_config, "job-123").await;
+        match result {
+            Err(ref e) if e.to_string().contains("not configured") => {
+                results.push(TestResult::pass(
+                    "jobs inspect (no lattice)",
+                    "graceful: lattice endpoint not configured",
+                ));
+            }
+            _ => {
+                results.push(TestResult::fail(
+                    "jobs inspect (no lattice)",
+                    "expected not-configured error",
+                ));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 30. queue — no lattice endpoint, verify graceful failure
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::queue_status(&delegation_config, None).await;
+        match result {
+            Err(ref e) if e.to_string().contains("not configured") => {
+                results.push(TestResult::pass(
+                    "queue (no lattice)",
+                    "graceful: lattice endpoint not configured",
+                ));
+            }
+            _ => {
+                results
+                    .push(TestResult::fail("queue (no lattice)", "expected not-configured error"));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 31. cluster status — pact works, lattice shows "not configured"
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result =
+            pact_cli::commands::lattice::cluster_status(&mut config_client, &delegation_config)
+                .await;
+        match result {
+            Ok(ref output) if output.contains("Pact Journal") && output.contains("Lattice") => {
+                results.push(TestResult::pass("cluster status", "both sections present"));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "cluster status",
+                    format!("unexpected output: {output}"),
+                ));
+            }
+            Err(e) => {
+                results.push(TestResult::fail("cluster status", format!("error: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 32. audit — combined audit from both sources
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::audit_combined(
+            &mut config_client,
+            &delegation_config,
+            "all",
+            5,
+        )
+        .await;
+        match result {
+            Ok(ref output)
+                if output.contains("Pact Audit Log") && output.contains("Lattice Audit Log") =>
+            {
+                results.push(TestResult::pass("audit (combined)", "both sections present"));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "audit (combined)",
+                    format!("unexpected output: {output}"),
+                ));
+            }
+            Err(e) => {
+                results.push(TestResult::fail("audit (combined)", format!("error: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 33. accounting — no lattice endpoint, verify graceful failure
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result = pact_cli::commands::lattice::accounting(&delegation_config, None).await;
+        match result {
+            Err(ref e) if e.to_string().contains("not configured") => {
+                results.push(TestResult::pass(
+                    "accounting (no lattice)",
+                    "graceful: lattice endpoint not configured",
+                ));
+            }
+            _ => {
+                results.push(TestResult::fail(
+                    "accounting (no lattice)",
+                    "expected not-configured error",
+                ));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 34. health — pact works, lattice shows unavailable
+    // =========================================================================
+    {
+        let delegation_config = DelegationConfig::default();
+        let result =
+            pact_cli::commands::lattice::health_check(&mut config_client, &delegation_config).await;
+        match result {
+            Ok(ref output) if output.contains("Pact Journal") && output.contains("Lattice") => {
+                results.push(TestResult::pass("health (combined)", "both sections present"));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "health (combined)",
+                    format!("unexpected output: {output}"),
+                ));
+            }
+            Err(e) => {
+                results.push(TestResult::fail("health (combined)", format!("error: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
     // SKIPPED: login/logout (needs real OIDC provider)
     // =========================================================================
     println!("\n[SKIP] login — requires real OIDC provider");

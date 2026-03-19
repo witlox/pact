@@ -185,6 +185,43 @@ enum Commands {
         action: BlacklistSubcommand,
     },
 
+    /// Job/allocation management (lattice).
+    Jobs {
+        #[command(subcommand)]
+        action: JobsSubcommand,
+    },
+
+    /// Show scheduling queue status (lattice).
+    Queue {
+        /// vCluster to query.
+        #[arg(long)]
+        vcluster: Option<String>,
+    },
+
+    /// Combined cluster status (pact + lattice).
+    #[command(name = "cluster")]
+    ClusterStatus,
+
+    /// Query audit logs (pact, lattice, or both).
+    Audit {
+        /// Source: pact, lattice, or all (default: all).
+        #[arg(long, default_value = "all")]
+        source: String,
+        /// Number of entries.
+        #[arg(short, long, default_value = "20")]
+        n: u32,
+    },
+
+    /// Resource accounting (lattice).
+    Accounting {
+        /// vCluster filter.
+        #[arg(long)]
+        vcluster: Option<String>,
+    },
+
+    /// Combined system health check (pact + lattice).
+    Health,
+
     /// Extend commit window.
     Extend {
         /// Additional minutes (default: 15).
@@ -343,6 +380,29 @@ enum GroupSubcommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum JobsSubcommand {
+    /// List running jobs.
+    List {
+        /// Filter by node.
+        #[arg(long)]
+        node: Option<String>,
+        /// Filter by vCluster.
+        #[arg(long)]
+        vcluster: Option<String>,
+    },
+    /// Cancel a running job.
+    Cancel {
+        /// Job/allocation ID.
+        id: String,
+    },
+    /// Inspect job details.
+    Inspect {
+        /// Job/allocation ID.
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum BlacklistSubcommand {
     /// List current blacklist entries.
     List,
@@ -409,6 +469,9 @@ async fn main() {
             | Commands::Uncordon { .. }
             | Commands::Reboot { .. }
             | Commands::Reimage { .. }
+            | Commands::ClusterStatus
+            | Commands::Audit { .. }
+            | Commands::Health
     );
 
     let journal_channel = if needs_journal {
@@ -803,6 +866,51 @@ async fn main() {
                 .await
             }
         },
+        Commands::Jobs { action } => match action {
+            JobsSubcommand::List { node, vcluster } => {
+                pact_cli::commands::lattice::list_jobs(
+                    &delegation_config,
+                    node.as_deref(),
+                    vcluster.as_deref(),
+                )
+                .await
+            }
+            JobsSubcommand::Cancel { id } => {
+                pact_cli::commands::lattice::cancel_job(&delegation_config, &id).await
+            }
+            JobsSubcommand::Inspect { id } => {
+                pact_cli::commands::lattice::inspect_job(&delegation_config, &id).await
+            }
+        },
+        Commands::Queue { vcluster } => {
+            pact_cli::commands::lattice::queue_status(&delegation_config, vcluster.as_deref()).await
+        }
+        Commands::ClusterStatus => {
+            pact_cli::commands::lattice::cluster_status(
+                journal_client.as_mut().unwrap(),
+                &delegation_config,
+            )
+            .await
+        }
+        Commands::Audit { source, n } => {
+            pact_cli::commands::lattice::audit_combined(
+                journal_client.as_mut().unwrap(),
+                &delegation_config,
+                &source,
+                n,
+            )
+            .await
+        }
+        Commands::Accounting { vcluster } => {
+            pact_cli::commands::lattice::accounting(&delegation_config, vcluster.as_deref()).await
+        }
+        Commands::Health => {
+            pact_cli::commands::lattice::health_check(
+                journal_client.as_mut().unwrap(),
+                &delegation_config,
+            )
+            .await
+        }
         Commands::Login { server, device_code, service_account } => {
             let server_url = server.unwrap_or_else(|| config.endpoint.clone());
             let flow_override = if device_code {
