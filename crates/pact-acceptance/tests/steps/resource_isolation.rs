@@ -382,7 +382,7 @@ fn then_scope_released(world: &mut PactWorld, name: String) {
     assert!(!has_scope, "cgroup scope for {name} should be released but still exists");
 }
 
-#[then(regex = r#"^all (\d+) child processes should be killed via cgroup\.kill$"#)]
+#[then(regex = r"^all (\d+) child processes should be killed via cgroup\.kill$")]
 fn then_child_processes_killed(world: &mut PactWorld, _count: u32) {
     // All processes (main + children) killed when scope was destroyed
     assert!(
@@ -479,7 +479,7 @@ fn then_namespace_set_cleaned_up(world: &mut PactWorld, alloc_id: String) {
     );
 }
 
-#[then(regex = r#"^a systemd scope unit should be created with MemoryMax=([\w]+)$"#)]
+#[then(regex = r"^a systemd scope unit should be created with MemoryMax=([\w]+)$")]
 fn then_systemd_scope_created(world: &mut PactWorld, mem_limit: String) {
     let expected = format!("MemoryMax={mem_limit}");
     assert_eq!(

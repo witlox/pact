@@ -710,7 +710,7 @@ async fn then_all_n_services_in_state(world: &mut PactWorld, count: usize, state
     assert_eq!(matching, count, "expected {count} services in state {state_str}, found {matching}");
 }
 
-#[then(regex = r#"^services should have started in order (.+)$"#)]
+#[then(regex = r"^services should have started in order (.+)$")]
 async fn then_started_in_order(world: &mut PactWorld, order_str: String) {
     // Parse expected order numbers: "1, 2, 3, 4, 5, 6, 10"
     let expected_orders: Vec<u32> =
@@ -733,13 +733,13 @@ async fn then_started_in_order(world: &mut PactWorld, order_str: String) {
     );
 }
 
-#[then(regex = r#"^(\d+) service instances should be running$"#)]
+#[then(regex = r"^(\d+) service instances should be running$")]
 async fn then_n_services_running(world: &mut PactWorld, count: usize) {
     let running = world.service_states.values().filter(|s| **s == ServiceState::Running).count();
     assert_eq!(running, count, "expected {count} running services, found {running}");
 }
 
-#[then(regex = r#"^([\w-]+) should start after ([\w-]+) and before ([\w-]+)$"#)]
+#[then(regex = r"^([\w-]+) should start after ([\w-]+) and before ([\w-]+)$")]
 async fn then_start_between(world: &mut PactWorld, mid: String, before: String, after: String) {
     let before_idx = world
         .service_start_order

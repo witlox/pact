@@ -27,23 +27,20 @@ fn run_configure_network(world: &mut PactWorld) {
     // Use the stub network manager to configure interfaces
     let pact_mode = world.supervisor_backend == pact_common::types::SupervisorBackend::Pact;
     let mgr = pact_agent::network::create_network_manager(pact_mode);
-    match mgr.configure(&world.network_configs) {
-        Ok(states) => {
-            // Record default route if any config has a gateway
-            for cfg in &world.network_configs {
-                if let Some(ref gw) = cfg.gateway {
-                    world.network_default_route = Some(gw.clone());
-                }
+    if let Ok(states) = mgr.configure(&world.network_configs) {
+        // Record default route if any config has a gateway
+        for cfg in &world.network_configs {
+            if let Some(ref gw) = cfg.gateway {
+                world.network_default_route = Some(gw.clone());
             }
-            world.network_interface_states = states;
-            world.network_configured = true;
-            world.network_configured_by_pact = pact_mode;
-            world.boot_phases_completed.push("ConfigureNetwork".into());
         }
-        Err(_) => {
-            world.boot_state = "BootFailed".to_string();
-            world.boot_failed_at = Some("ConfigureNetwork".to_string());
-        }
+        world.network_interface_states = states;
+        world.network_configured = true;
+        world.network_configured_by_pact = pact_mode;
+        world.boot_phases_completed.push("ConfigureNetwork".into());
+    } else {
+        world.boot_state = "BootFailed".to_string();
+        world.boot_failed_at = Some("ConfigureNetwork".to_string());
     }
 }
 
@@ -249,7 +246,10 @@ async fn when_link_lost(world: &mut PactWorld) {
     // Record drift event via observer event
     world.drift_evaluator.process_event(&pact_agent::observer::ObserverEvent {
         category: "network".into(),
-        path: world.network_interface_states.first().map_or("eth0".into(), |s| s.name.clone()),
+        path: world
+            .network_interface_states
+            .first()
+            .map_or_else(|| "eth0".into(), |s| s.name.clone()),
         detail: "link down".into(),
         timestamp: chrono::Utc::now(),
     });

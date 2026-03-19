@@ -96,7 +96,7 @@ fn given_alloc_has_ns_and_cgroup(world: &mut PactWorld, alloc_id: String) {
     world.active_allocations.insert(alloc_id, None);
 }
 
-#[given(regex = r#"^(\d+) processes are running in the CgroupScope$"#)]
+#[given(regex = r"^(\d+) processes are running in the CgroupScope$")]
 fn given_processes_in_scope(world: &mut PactWorld, count: u32) {
     // Update the last added scope's process count
     if let Some(scope) = world.cgroup_scopes.keys().last().cloned() {
@@ -253,7 +253,7 @@ fn when_lattice_needs_namespaces(world: &mut PactWorld, alloc_id: String) {
     }
 }
 
-#[when(regex = r#"^all (\d+) processes exit$"#)]
+#[when(regex = r"^all (\d+) processes exit$")]
 fn when_n_processes_exit(world: &mut PactWorld, _count: u32) {
     // Empty all scopes and clean up namespace sets
     let alloc_scopes: Vec<(String, String)> = world
@@ -368,7 +368,7 @@ fn then_mounted_once(world: &mut PactWorld) {
     assert_eq!(mgr.mount_count(), 1, "expected exactly 1 mount");
 }
 
-#[then(regex = r#"^a MountRef should be created with refcount (\d+)$"#)]
+#[then(regex = r"^a MountRef should be created with refcount (\d+)$")]
 fn then_mountref_created(world: &mut PactWorld, expected: u32) {
     let mgr = world.mount_manager.as_ref().expect("no mount manager");
     let binding = mgr.states();
@@ -376,7 +376,7 @@ fn then_mountref_created(world: &mut PactWorld, expected: u32) {
     assert_eq!(state.refcount, expected);
 }
 
-#[then(regex = r#"^a bind-mount should be placed in (.+)'s mount namespace$"#)]
+#[then(regex = r"^a bind-mount should be placed in (.+)'s mount namespace$")]
 fn then_bind_mount_in_namespace(_world: &mut PactWorld, _alloc: String) {
     // In stub mode, bind-mount is simulated — verify mount exists
 }
@@ -594,7 +594,7 @@ fn then_no_mounts_disrupted(world: &mut PactWorld) {
     assert!(mgr.mount_count() > 0, "mounts should not be disrupted");
 }
 
-#[then(regex = r#"^the mount for alloc-01's uenv should have refcount (\d+)$"#)]
+#[then(regex = r"^the mount for alloc-01's uenv should have refcount (\d+)$")]
 fn then_alloc01_mount_refcount(world: &mut PactWorld, expected: u32) {
     let mgr = world.mount_manager.as_ref().expect("no mount manager");
     let binding = mgr.states();
@@ -654,7 +654,7 @@ fn then_no_handoff_attempted(world: &mut PactWorld) {
     );
 }
 
-#[then(regex = r#"^the CgroupScope should be released$"#)]
+#[then(regex = r"^the CgroupScope should be released$")]
 fn then_cgroup_scope_released(world: &mut PactWorld) {
     // Check that killed scopes were released
     assert!(!world.killed_scopes.is_empty(), "CgroupScope should be released");

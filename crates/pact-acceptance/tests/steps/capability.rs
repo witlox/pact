@@ -111,7 +111,7 @@ fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
 
     let cpu = world.cpu_capability.clone().unwrap_or_default();
 
-    let memory = world.memory_capability.clone().unwrap_or(MemoryCapability {
+    let memory = world.memory_capability.clone().unwrap_or_else(|| MemoryCapability {
         total_bytes: 0,
         available_bytes: 0,
         memory_type: MemoryType::default(),
@@ -302,13 +302,13 @@ async fn given_x86_cpu(world: &mut PactWorld, step: &Step) {
             let field = &row[0];
             let value = &row[1];
             match field.as_str() {
-                "model" => cpu.model = value.clone(),
+                "model" => value.clone_into(&mut cpu.model),
                 "physical_cores" => cpu.physical_cores = value.parse().unwrap(),
                 "logical_cores" => cpu.logical_cores = value.parse().unwrap(),
                 "base_freq_mhz" => cpu.base_frequency_mhz = value.parse().unwrap(),
                 "max_freq_mhz" => cpu.max_frequency_mhz = value.parse().unwrap(),
                 "features" => {
-                    cpu.features = value.split(',').map(|s| s.trim().to_string()).collect()
+                    cpu.features = value.split(',').map(|s| s.trim().to_string()).collect();
                 }
                 "numa_nodes" => cpu.numa_nodes = value.parse().unwrap(),
                 "cache_l3_bytes" => cpu.cache_l3_bytes = value.parse().unwrap(),
@@ -328,13 +328,13 @@ async fn given_aarch64_cpu(world: &mut PactWorld, step: &Step) {
             let field = &row[0];
             let value = &row[1];
             match field.as_str() {
-                "model" => cpu.model = value.clone(),
+                "model" => value.clone_into(&mut cpu.model),
                 "physical_cores" => cpu.physical_cores = value.parse().unwrap(),
                 "logical_cores" => cpu.logical_cores = value.parse().unwrap(),
                 "base_freq_mhz" => cpu.base_frequency_mhz = value.parse().unwrap(),
                 "max_freq_mhz" => cpu.max_frequency_mhz = value.parse().unwrap(),
                 "features" => {
-                    cpu.features = value.split(',').map(|s| s.trim().to_string()).collect()
+                    cpu.features = value.split(',').map(|s| s.trim().to_string()).collect();
                 }
                 "numa_nodes" => cpu.numa_nodes = value.parse().unwrap(),
                 "cache_l3_bytes" => cpu.cache_l3_bytes = value.parse().unwrap(),
@@ -391,7 +391,7 @@ async fn given_numa_nodes(world: &mut PactWorld, count: u32, step: &Step) {
             topology.push(NumaNode { id: node_id, total_bytes, cpus });
         }
     }
-    let mem = world.memory_capability.get_or_insert(MemoryCapability {
+    let mem = world.memory_capability.get_or_insert_with(|| MemoryCapability {
         total_bytes: 0,
         available_bytes: 0,
         memory_type: MemoryType::default(),
@@ -419,7 +419,7 @@ async fn given_huge_pages(world: &mut PactWorld, step: &Step) {
             }
         }
     }
-    let mem = world.memory_capability.get_or_insert(MemoryCapability {
+    let mem = world.memory_capability.get_or_insert_with(|| MemoryCapability {
         total_bytes: 0,
         available_bytes: 0,
         memory_type: MemoryType::default(),
@@ -1005,7 +1005,9 @@ async fn then_memory_available(world: &mut PactWorld, bytes: u64) {
 async fn then_memory_numa_count(world: &mut PactWorld, count: u32) {
     let report = world.capability_report.as_ref().expect("no capability report");
     // Check either the topology length or the numa_nodes field
-    if !report.memory.numa_topology.is_empty() {
+    if report.memory.numa_topology.is_empty() {
+        assert_eq!(report.memory.numa_nodes, count);
+    } else {
         assert_eq!(
             report.memory.numa_topology.len() as u32,
             count,
@@ -1013,8 +1015,6 @@ async fn then_memory_numa_count(world: &mut PactWorld, count: u32) {
             count,
             report.memory.numa_topology.len()
         );
-    } else {
-        assert_eq!(report.memory.numa_nodes, count);
     }
 }
 

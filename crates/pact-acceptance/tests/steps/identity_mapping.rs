@@ -205,7 +205,7 @@ fn given_user_member_of_groups(world: &mut PactWorld, subject: String, step: &St
         map.users.insert(
             subject.clone(),
             UidEntry {
-                subject: subject.clone(),
+                subject,
                 uid: 10_000,
                 gid: 10_000,
                 username: username.clone(),
@@ -591,7 +591,7 @@ fn then_groups_returned(world: &mut PactWorld, groups_str: String) {
     let map = world.uid_map.as_ref().expect("UidMap not initialized");
     // Parse "lp16, csstaff, and gpu-users" into group names
     let names: Vec<&str> = groups_str
-        .split(|c: char| c == ',' || c == ' ')
+        .split([',', ' '])
         .map(str::trim)
         .filter(|s| !s.is_empty() && *s != "and")
         .collect();
@@ -604,7 +604,7 @@ fn then_groups_returned(world: &mut PactWorld, groups_str: String) {
 fn then_gids_included(world: &mut PactWorld, gids_str: String) {
     let map = world.uid_map.as_ref().expect("UidMap not initialized");
     let expected_gids: Vec<u32> = gids_str
-        .split(|c: char| c == ',' || c == ' ')
+        .split([',', ' '])
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.parse().unwrap())
