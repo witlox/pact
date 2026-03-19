@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 pact-common = { workspace = true }
-pact-cli = { path = "../pact-cli" }
+pact-cli = { path = "../pact-cli", version = "2026.1" }
 lattice-client = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

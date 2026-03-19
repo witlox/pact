@@ -178,6 +178,7 @@ async fn statvfs_with_timeout(path: &str) -> (u64, u64) {
 
 /// Synchronous statvfs call. Linux-only.
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 fn statvfs_sync(path: &str) -> anyhow::Result<(u64, u64)> {
     use std::ffi::CString;
     use std::mem::MaybeUninit;
