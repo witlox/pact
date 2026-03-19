@@ -1,0 +1,62 @@
+# vCluster overlay — Regulated/sensitive compute
+#
+# Extends the ML training config with audit services and
+# two-person approval for state-changing operations.
+#
+# Apply with:
+#   pact apply examples/config/vcluster-regulated.toml
+
+[vcluster.regulated-bio]
+
+# --- Kernel parameters ---
+
+[vcluster.regulated-bio.sysctl]
+"vm.nr_hugepages" = "2048"
+"vm.swappiness" = "1"
+
+# --- Services (includes audit services) ---
+
+[[vcluster.regulated-bio.services]]
+name = "chronyd"
+binary = "/usr/sbin/chronyd"
+order = 1
+restart = "always"
+cgroup_slice = "pact.slice/infra"
+
+[[vcluster.regulated-bio.services]]
+name = "nvidia-persistenced"
+binary = "/usr/bin/nvidia-persistenced"
+order = 2
+restart = "always"
+cgroup_slice = "pact.slice/gpu"
+
+[[vcluster.regulated-bio.services]]
+name = "auditd"
+binary = "/usr/sbin/auditd"
+order = 7
+restart = "always"
+cgroup_slice = "pact.slice/audit"
+
+[[vcluster.regulated-bio.services]]
+name = "audit-forwarder"
+binary = "/usr/bin/audit-forwarder"
+order = 8
+restart = "always"
+depends_on = ["auditd"]
+cgroup_slice = "pact.slice/audit"
+
+[[vcluster.regulated-bio.services]]
+name = "lattice-node-agent"
+binary = "/usr/bin/lattice-node-agent"
+order = 10
+restart = "always"
+depends_on = ["chronyd"]
+cgroup_slice = "workload"
+
+# --- Policy (two-person approval enabled) ---
+
+[vcluster.regulated-bio.policy]
+drift_sensitivity = 5.0           # Higher sensitivity = shorter commit windows
+base_commit_window_seconds = 600  # 10 minutes (tighter than default)
+two_person_approval = true        # State-changing ops require second admin
+approval_timeout_seconds = 1800   # 30 minutes for approval before expiry
