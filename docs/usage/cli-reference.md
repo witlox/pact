@@ -559,6 +559,118 @@ pact blacklist remove "/var/cache/**"
 
 ---
 
+## Supercharged Commands (pact + lattice)
+
+These commands combine pact and lattice data into unified views. They require
+`PACT_LATTICE_ENDPOINT` to be configured (or `--lattice-endpoint` flag).
+
+### `pact jobs list`
+
+List running job allocations across nodes.
+
+```bash
+pact jobs list                           # All jobs in default vCluster
+pact jobs list --node node-042           # Jobs on a specific node
+pact jobs list --vcluster ml-training    # Jobs in a vCluster
+```
+
+| Option | Description |
+|--------|-------------|
+| `--node <NODE>` | Filter by node ID |
+| `--vcluster <NAME>` | Filter by vCluster |
+
+### `pact jobs cancel`
+
+Cancel a stuck or runaway job allocation.
+
+```bash
+pact jobs cancel alloc-7f3a
+```
+
+| Option | Description |
+|--------|-------------|
+| `<id>` | Allocation ID to cancel (required) |
+
+Requires `pact-ops-{vcluster}` or `pact-platform-admin` role.
+
+### `pact jobs inspect`
+
+Show detailed information about a job allocation.
+
+```bash
+pact jobs inspect alloc-7f3a
+```
+
+| Option | Description |
+|--------|-------------|
+| `<id>` | Allocation ID to inspect (required) |
+
+### `pact queue`
+
+Show the scheduling queue status from lattice.
+
+```bash
+pact queue                               # Default vCluster
+pact queue --vcluster ml-training        # Specific vCluster
+```
+
+| Option | Description |
+|--------|-------------|
+| `--vcluster <NAME>` | Filter by vCluster |
+
+### `pact cluster`
+
+Show combined Raft cluster health for both pact-journal and lattice quorums.
+
+```bash
+pact cluster
+```
+
+Displays leader status, term, committed index, and member health for both
+the pact journal Raft group and the lattice Raft group.
+
+### `pact audit`
+
+Show a unified audit trail combining pact journal events and lattice audit events.
+
+```bash
+pact audit                               # pact events only (default)
+pact audit --source all                  # Combined pact + lattice events
+pact audit --source lattice              # Lattice events only
+pact audit -n 50                         # Last 50 entries
+```
+
+| Option | Description |
+|--------|-------------|
+| `--source <SOURCE>` | Event source: `pact` (default), `lattice`, or `all` |
+| `-n <COUNT>` | Number of entries to show (default: 20) |
+
+### `pact accounting`
+
+Show resource usage accounting (GPU hours, CPU hours) aggregated from lattice.
+
+```bash
+pact accounting                          # Default vCluster
+pact accounting --vcluster ml-training   # Specific vCluster
+```
+
+| Option | Description |
+|--------|-------------|
+| `--vcluster <NAME>` | Filter by vCluster |
+
+### `pact health`
+
+Combined system health check across pact and lattice components.
+
+```bash
+pact health
+```
+
+Reports health status for: pact-journal Raft quorum, pact-agent connectivity,
+lattice scheduler, lattice node-agents, OPA policy engine, and telemetry pipeline.
+
+---
+
 ## Configuration File
 
 The CLI reads its configuration from `~/.config/pact/cli.toml`:

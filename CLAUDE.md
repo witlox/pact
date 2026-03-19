@@ -39,7 +39,9 @@ Five components:
 3. **pact-policy** (library crate, linked into pact-journal) — IAM/OIDC, RBAC,
    OPA policy evaluation, Sovra federation sync
 4. **pact CLI** (admin workstation) — remote: commit, rollback, diff, status, exec,
-   shell. local (on-node): same commands in pact shell mode
+   shell, plus supercharged commands (jobs, queue, cluster, audit, accounting,
+   health) that combine pact + lattice data. local (on-node): same commands in
+   pact shell mode
 5. **pact MCP server** (optional) — AI agent tool-use interface
 
 See `docs/architecture/` for detailed design documents.

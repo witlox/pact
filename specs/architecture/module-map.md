@@ -119,16 +119,19 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Owns:**
 - Command parsing (clap derive)
 - gRPC client connections (journal ConfigService/PolicyService/BootConfigService/EnrollmentService, agent ShellService)
+- Lattice client connection (for supercharged commands: jobs, queue, cluster, audit, accounting, health)
 - OIDC token acquisition
 - Output formatting (table, JSON)
 - Exit code semantics
 - Delegation stubs (lattice drain/cordon, OpenCHAMI reboot/reimage)
 
 **Submodules:**
-- `commands/` — one module per command group (status, diff, commit, exec, shell, etc.)
-- `client/` — gRPC client wrappers
+- `commands/` — one module per command group (status, diff, commit, exec, shell, jobs, queue, cluster, audit, accounting, health, etc.)
+- `client/` — gRPC client wrappers (journal + lattice)
 - `auth/` — OIDC token flow
 - `output/` — formatting
+
+**Lattice integration:** The supercharged commands (`jobs list/cancel/inspect`, `queue`, `cluster`, `audit`, `accounting`, `health`) require a lattice-client dependency to query the lattice scheduler and audit APIs. Configured via `PACT_LATTICE_ENDPOINT`.
 
 **Justification:** CLI is the Admin Operations bounded context entry point (domain-model.md). cli-design.md defines the full command set.
 

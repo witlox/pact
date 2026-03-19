@@ -54,6 +54,22 @@ authorized, and logged.
 | `pact group show <name>` | Show vCluster config |
 | `pact group set-policy` | Update vCluster policy |
 
+### Supercharged (pact + lattice)
+
+These commands combine data from pact and lattice into unified views.
+Requires `PACT_LATTICE_ENDPOINT` to be configured.
+
+| Command | Description |
+|---------|-------------|
+| `pact jobs list [--node X]` | List running allocations |
+| `pact jobs cancel <id>` | Cancel a stuck job |
+| `pact jobs inspect <id>` | Job details |
+| `pact queue [--vcluster X]` | Scheduling queue status |
+| `pact cluster` | Combined Raft cluster health |
+| `pact audit [--source all]` | Unified audit trail (pact + lattice) |
+| `pact accounting [--vcluster X]` | Resource usage (GPU/CPU hours) |
+| `pact health` | Combined system health check |
+
 ## Example: Debug Session
 
 ```bash

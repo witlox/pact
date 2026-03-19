@@ -75,6 +75,16 @@ pact blacklist                 # Drift detection exclusions
 # Authentication
 pact login                     # OIDC login (Auth Code, Device Code, Service Account)
 pact logout                    # Clear session
+
+# Supercharged (pact + lattice)
+pact jobs list [--node X]         # List running allocations
+pact jobs cancel <id>             # Cancel a stuck job
+pact jobs inspect <id>            # Job details
+pact queue [--vcluster X]         # Scheduling queue status
+pact cluster                      # Combined Raft cluster health
+pact audit [--source all]         # Unified audit trail
+pact accounting [--vcluster X]    # Resource usage (GPU/CPU hours)
+pact health                       # Combined system health check
 ```
 
 ## Boot Sequence (pact as init)

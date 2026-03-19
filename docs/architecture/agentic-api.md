@@ -40,3 +40,21 @@ Authenticates as pact-service-ai principal with scoped permissions.
 4. pact_apply(scope="ml-training", config={...}, message="auto-remediation")
    → applied to all nodes, policy authorized
 ```
+
+## Future Work: Supercharged Command Tools
+
+The supercharged CLI commands (pact + lattice) expose read-only cross-system views
+that would be valuable for AI agent workflows. The following are candidates for
+MCP tool exposure:
+
+| CLI Command | Proposed MCP Tool | Rationale |
+|-------------|-------------------|-----------|
+| `pact jobs list` | `pact_jobs_list` | AI agents investigating node issues need job context |
+| `pact queue` | `pact_queue_status` | Queue depth informs auto-scaling decisions |
+| `pact cluster` | `pact_cluster_health` | Cluster health is essential for diagnostics |
+| `pact health` | `pact_system_health` | Combined health check for triage workflows |
+| `pact accounting` | `pact_accounting` | Resource usage for capacity planning agents |
+
+Write commands (`pact jobs cancel`) should remain human-only unless explicitly
+authorized via policy. `pact audit` is useful but may expose sensitive data and
+should be scoped carefully.
