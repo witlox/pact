@@ -130,12 +130,16 @@ pact-service-ai           Machine identity for AI agents (MCP).
 - **Language**: Rust (consistent with lattice)
 - **Raft**: raft-hpc-core (wraps openraft with HPC state machine abstractions)
 - **Transport**: gRPC via tonic + protobuf via prost
-- **eBPF**: aya crate
+- **eBPF**: aya crate (feature-gated: `ebpf`)
 - **Linux**: nix crate (netlink, inotify, cgroups, mount, fork/exec)
-- **Policy**: OPA/Rego co-located on journal/policy nodes (see ADR-003)
+- **Policy**: OPA/Rego via localhost REST (feature-gated: `opa`, see ADR-003)
+- **Identity**: SPIRE (feature-gated: `spire`), self-signed CA fallback
+- **GPU**: NVIDIA/AMD backends (feature-gated: `nvidia`, `amd`)
 - **CLI**: clap
 - **Config format**: TOML
 - **Telemetry**: Prometheus (server-side), Loki (event streaming), Grafana
+
+See `ARCHITECTURE.md` § Feature Flags for the full feature matrix.
 
 ## Repository structure
 
