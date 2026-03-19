@@ -81,13 +81,18 @@ jobs:
           PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
         run: |
           sudo dpkg --add-architecture arm64
-          # Pin existing repos to amd64 only (skip non-deb822 files that may break)
+          # Pin ALL existing apt sources to amd64 (sources.list, .list files, .sources files)
+          [ -f /etc/apt/sources.list ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' /etc/apt/sources.list || true
           for f in /etc/apt/sources.list.d/*.list; do
             [ -f "$f" ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' "$f" || true
+          done
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] && grep -q '^Architectures:' "$f" || sudo sed -i '/^Types:/a Architectures: amd64' "$f" || true
           done
           # Add arm64 ports
           echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe' | sudo tee /etc/apt/sources.list.d/arm64.list
           echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-security main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 pkg-config
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
@@ -215,13 +220,18 @@ jobs:
           PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
         run: |
           sudo dpkg --add-architecture arm64
-          # Pin existing repos to amd64 only (skip non-deb822 files that may break)
+          # Pin ALL existing apt sources to amd64 (sources.list, .list files, .sources files)
+          [ -f /etc/apt/sources.list ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' /etc/apt/sources.list || true
           for f in /etc/apt/sources.list.d/*.list; do
             [ -f "$f" ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' "$f" || true
+          done
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] && grep -q '^Architectures:' "$f" || sudo sed -i '/^Types:/a Architectures: amd64' "$f" || true
           done
           # Add arm64 ports
           echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe' | sudo tee /etc/apt/sources.list.d/arm64.list
           echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-security main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 pkg-config
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
