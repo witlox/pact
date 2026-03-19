@@ -37,45 +37,23 @@ jobs:
       - run: cargo nextest run --workspace --run-ignored all
       - run: cargo deny check
 
-  build:
-    name: Build ${{ matrix.name }}
+  # ---------------------------------------------------------------------------
+  # Platform binaries: journal, CLI, MCP — no hardware features, one per arch
+  # ---------------------------------------------------------------------------
+  platform:
+    name: Platform (${{ matrix.arch }})
     needs: preflight
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # --- x86_64 (diskless HPC nodes, PactSupervisor) ---
-          - name: x86_64-nvidia
+          - arch: x86_64
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: ebpf,spire,nvidia
-            journal_features: opa
             cross: false
-
-          - name: x86_64-amd
-            target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: ebpf,spire,amd
-            journal_features: opa
-            cross: false
-
-          # --- aarch64 (diskless HPC nodes, PactSupervisor) ---
-          - name: aarch64-nvidia
+          - arch: aarch64
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: ebpf,spire,nvidia
-            journal_features: opa
             cross: true
-
-          # --- systemd fallback (conservative deployments) ---
-          - name: x86_64-systemd
-            target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            agent_features: ebpf,spire,nvidia,systemd
-            journal_features: opa
-            cross: false
-
     steps:
       - uses: actions/checkout@v6
         with:
@@ -86,7 +64,7 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}
+          key: platform-${{ matrix.arch }}
 
       - name: Install cross-compilation toolchain
         if: matrix.cross
@@ -101,49 +79,144 @@ jobs:
           chmod +x scripts/set-version.sh
           scripts/set-version.sh
 
-      # Build each binary with its features
-      - name: Build pact-agent
-        run: >
-          cargo build --release --target ${{ matrix.target }}
-          -p pact-agent --features ${{ matrix.agent_features }}
-
       - name: Build pact-journal
-        run: >
-          cargo build --release --target ${{ matrix.target }}
-          -p pact-journal --features ${{ matrix.journal_features }}
+        run: cargo build --release --target ${{ matrix.target }} -p pact-journal --features opa
 
       - name: Build pact (CLI)
-        run: >
-          cargo build --release --target ${{ matrix.target }}
-          -p pact-cli
+        run: cargo build --release --target ${{ matrix.target }} -p pact-cli
 
       - name: Build pact-mcp
-        run: >
-          cargo build --release --target ${{ matrix.target }}
-          -p pact-mcp
+        run: cargo build --release --target ${{ matrix.target }} -p pact-mcp
 
-      # Package binaries
       - name: Package
         run: |
           mkdir -p dist
-          for bin in pact pact-agent pact-journal pact-mcp; do
-            cp "target/${{ matrix.target }}/release/$bin" "dist/$bin" 2>/dev/null || true
+          for bin in pact pact-journal pact-mcp; do
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$bin"
           done
           cd dist
-          tar czf "../pact-${{ matrix.name }}.tar.gz" *
+          tar czf "../pact-platform-${{ matrix.arch }}.tar.gz" *
           cd ..
-          sha256sum "pact-${{ matrix.name }}.tar.gz" > "pact-${{ matrix.name }}.tar.gz.sha256"
+          sha256sum "pact-platform-${{ matrix.arch }}.tar.gz" > "pact-platform-${{ matrix.arch }}.tar.gz.sha256"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: pact-${{ matrix.name }}
+          name: pact-platform-${{ matrix.arch }}
           path: |
-            pact-${{ matrix.name }}.tar.gz
-            pact-${{ matrix.name }}.tar.gz.sha256
+            pact-platform-${{ matrix.arch }}.tar.gz
+            pact-platform-${{ matrix.arch }}.tar.gz.sha256
 
+  # ---------------------------------------------------------------------------
+  # Agent binaries: arch × GPU × supervisor matrix
+  # ---------------------------------------------------------------------------
+  agent:
+    name: Agent (${{ matrix.name }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- x86_64 × PactSupervisor ---
+          - name: x86_64-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire
+            cross: false
+          - name: x86_64-nvidia-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,nvidia
+            cross: false
+          - name: x86_64-amd-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,amd
+            cross: false
+
+          # --- x86_64 × systemd ---
+          - name: x86_64-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,systemd
+            cross: false
+          - name: x86_64-nvidia-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,nvidia,systemd
+            cross: false
+          - name: x86_64-amd-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,amd,systemd
+            cross: false
+
+          # --- aarch64 × PactSupervisor ---
+          - name: aarch64-pact
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire
+            cross: true
+          - name: aarch64-nvidia-pact
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,nvidia
+            cross: true
+
+          # --- aarch64 × systemd ---
+          - name: aarch64-systemd
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,systemd
+            cross: true
+          - name: aarch64-nvidia-systemd
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,nvidia,systemd
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: agent-${{ matrix.name }}
+
+      - name: Install cross-compilation toolchain
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Set version
+        run: |
+          chmod +x scripts/set-version.sh
+          scripts/set-version.sh
+
+      - name: Build pact-agent
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-agent --features ${{ matrix.features }}
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/pact-agent" dist/
+          cd dist
+          tar czf "../pact-agent-${{ matrix.name }}.tar.gz" *
+          cd ..
+          sha256sum "pact-agent-${{ matrix.name }}.tar.gz" > "pact-agent-${{ matrix.name }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pact-agent-${{ matrix.name }}
+          path: |
+            pact-agent-${{ matrix.name }}.tar.gz
+            pact-agent-${{ matrix.name }}.tar.gz.sha256
+
+  # ---------------------------------------------------------------------------
+  # Publish: collect all artifacts into a GitHub release
+  # ---------------------------------------------------------------------------
   publish:
     name: Publish release
-    needs: [preflight, build]
+    needs: [preflight, platform, agent]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,18 +231,29 @@ jobs:
           name: pact v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
           body: |
-            ## Build variants
+            ## Platform binaries (journal, CLI, MCP)
 
-            | Archive | Target | Supervisor | Agent features |
-            |---------|--------|------------|----------------|
-            | `pact-x86_64-nvidia` | x86_64 | PactSupervisor | ebpf, spire, nvidia |
-            | `pact-x86_64-amd` | x86_64 | PactSupervisor | ebpf, spire, amd |
-            | `pact-aarch64-nvidia` | aarch64 | PactSupervisor | ebpf, spire, nvidia |
-            | `pact-x86_64-systemd` | x86_64 | systemd fallback | ebpf, spire, nvidia, systemd |
+            | Archive | Arch | Contents |
+            |---------|------|----------|
+            | `pact-platform-x86_64` | x86_64 | pact, pact-journal (opa), pact-mcp |
+            | `pact-platform-aarch64` | aarch64 | pact, pact-journal (opa), pact-mcp |
 
-            All journal builds include OPA policy evaluation.
+            ## Agent binaries
 
-            Each tarball contains: `pact` (CLI), `pact-agent`, `pact-journal`, `pact-mcp`.
+            | Archive | Arch | GPU | Supervisor | Features |
+            |---------|------|-----|------------|----------|
+            | `pact-agent-x86_64-pact` | x86_64 | — | PactSupervisor | ebpf, spire |
+            | `pact-agent-x86_64-nvidia-pact` | x86_64 | NVIDIA | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-agent-x86_64-amd-pact` | x86_64 | AMD | PactSupervisor | ebpf, spire, amd |
+            | `pact-agent-x86_64-systemd` | x86_64 | — | systemd | ebpf, spire, systemd |
+            | `pact-agent-x86_64-nvidia-systemd` | x86_64 | NVIDIA | systemd | ebpf, spire, nvidia, systemd |
+            | `pact-agent-x86_64-amd-systemd` | x86_64 | AMD | systemd | ebpf, spire, amd, systemd |
+            | `pact-agent-aarch64-pact` | aarch64 | — | PactSupervisor | ebpf, spire |
+            | `pact-agent-aarch64-nvidia-pact` | aarch64 | NVIDIA | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-agent-aarch64-systemd` | aarch64 | — | systemd | ebpf, spire, systemd |
+            | `pact-agent-aarch64-nvidia-systemd` | aarch64 | NVIDIA | systemd | ebpf, spire, nvidia, systemd |
           files: |
-            pact-*/pact-*.tar.gz
-            pact-*/pact-*.tar.gz.sha256
+            pact-platform-*/pact-platform-*.tar.gz
+            pact-platform-*/pact-platform-*.tar.gz.sha256
+            pact-agent-*/pact-agent-*.tar.gz
+            pact-agent-*/pact-agent-*.tar.gz.sha256
