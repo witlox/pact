@@ -15,9 +15,9 @@ use tracing::warn;
 #[cfg(target_os = "linux")]
 use pact_common::proto::shell::shell_output;
 use pact_common::proto::shell::{
-    exec_output, shell_input, shell_service_server::ShellService, CommandEntry, ExecOutput,
-    ExecRequest, ExtendWindowRequest, ExtendWindowResponse, ListCommandsRequest,
-    ListCommandsResponse, ShellInput, ShellOutput,
+    exec_output, shell_input, shell_service_server::ShellService, CommandEntry, DiagChunk,
+    DiagRequest, ExecOutput, ExecRequest, ExtendWindowRequest, ExtendWindowResponse,
+    ListCommandsRequest, ListCommandsResponse, ShellInput, ShellOutput,
 };
 
 use crate::commit::CommitWindowManager;
@@ -49,6 +49,7 @@ fn extract_auth<T>(request: &Request<T>) -> Result<String, Status> {
 
 #[tonic::async_trait]
 impl ShellService for ShellServiceImpl {
+    type CollectDiagStream = ReceiverStream<Result<DiagChunk, Status>>;
     type ExecStream = ReceiverStream<Result<ExecOutput, Status>>;
 
     /// Execute a single command — auth, whitelist, fork/exec, stream output.
@@ -371,6 +372,53 @@ impl ShellService for ShellServiceImpl {
             new_deadline_seconds: deadline_secs,
             error: None,
         }))
+    }
+
+    /// Collect diagnostic logs from the node.
+    ///
+    /// Auth: pact-ops-{vcluster} or pact-platform-admin (LOG1).
+    /// Server-side grep filtering (LOG2), line limit enforcement (LOG3).
+    /// Input validation: grep pattern (LOG4), service name (LOG5).
+    async fn collect_diag(
+        &self,
+        request: Request<DiagRequest>,
+    ) -> Result<Response<Self::CollectDiagStream>, Status> {
+        // 1. Auth (same as exec)
+        let auth_header = extract_auth(&request)?;
+        let identity = self
+            .server
+            .authenticate(&auth_header)
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
+        // 2. Ops role check (LOG1)
+        let vcluster_id = self.server.vcluster_id().to_string();
+        if !has_ops_role(&identity, &vcluster_id) {
+            return Err(Status::permission_denied(
+                "diag requires pact-ops or pact-platform-admin role",
+            ));
+        }
+
+        let req = request.into_inner();
+
+        // 3. Validate inputs (LOG4, LOG5)
+        super::diag::validate_grep_pattern(&req.grep_pattern)?;
+        super::diag::validate_service_name(&req.service_name, self.server.declared_services())?;
+
+        // 4. Collect and stream
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let backend = self.server.supervisor_backend();
+        let services = self.server.declared_services().to_vec();
+
+        tokio::spawn(async move {
+            let chunks = super::diag::collect_diag(&req, backend, &services).await;
+            for chunk in chunks {
+                if tx.send(Ok(chunk)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

@@ -16,6 +16,11 @@ service ShellService {
 
   // Extend the commit window on this agent.
   rpc ExtendCommitWindow(ExtendWindowRequest) returns (ExtendWindowResponse);
+
+  // Collect diagnostic logs from the node. Server-side filtering.
+  // Auth: pact-ops-{vcluster} or pact-platform-admin (LOG1).
+  // Sources: dmesg, syslog, supervised service logs.
+  rpc CollectDiag(DiagRequest) returns (stream DiagChunk);
 }
 
 message ExecRequest {
@@ -84,4 +89,19 @@ message ExtendWindowResponse {
   bool success = 1;
   uint32 new_deadline_seconds = 2;  // seconds until new deadline
   optional string error = 3;
+}
+
+// --- Diagnostic log retrieval (LOG1-LOG3) ---
+
+message DiagRequest {
+  string source_filter = 1;     // "system", "service", "all" (default: "all")
+  string service_name = 2;      // specific service (empty = all services)
+  string grep_pattern = 3;      // server-side grep (empty = no filter)
+  uint32 line_limit = 4;        // max lines per source (0 = default 100, max 10000)
+}
+
+message DiagChunk {
+  string source = 1;            // "dmesg", "syslog", "service:nvidia-persistenced", etc.
+  repeated string lines = 2;    // batch of log lines
+  bool truncated = 3;           // true if hit line_limit for this source
 }

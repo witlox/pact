@@ -7,7 +7,15 @@
 
 // Cucumber step definitions often have parameters extracted by macros that aren't
 // always used in stub implementations. Accept that in this test crate.
-#![allow(unused_variables, unused_imports, dead_code, unused_mut)]
+#![allow(
+    unused_variables,
+    unused_imports,
+    dead_code,
+    unused_mut,
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    clippy::uninlined_format_args
+)]
 
 use std::collections::HashMap;
 use std::fmt;

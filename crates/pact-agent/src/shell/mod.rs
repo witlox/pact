@@ -15,6 +15,7 @@
 //! - macOS: stubs compile, MockShellSession for development
 
 pub mod auth;
+pub mod diag;
 pub mod exec;
 pub mod grpc_service;
 pub mod session;
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
-use pact_common::types::Identity;
+use pact_common::types::{Identity, SupervisorBackend};
 
 use crate::commit::CommitWindowManager;
 use crate::journal_client::JournalClient;
@@ -55,6 +56,10 @@ pub struct ShellServer {
     journal_client: Option<JournalClient>,
     /// Optional commit window manager for state-changing execs.
     commit_window: Option<Arc<RwLock<CommitWindowManager>>>,
+    /// Supervisor backend (pact or systemd) — used for diag log collection.
+    supervisor_backend: SupervisorBackend,
+    /// Declared service names — used for diag service name validation (LOG5).
+    declared_services: Vec<String>,
 }
 
 impl ShellServer {
@@ -75,6 +80,8 @@ impl ShellServer {
             vcluster_id,
             journal_client: None,
             commit_window: None,
+            supervisor_backend: SupervisorBackend::Pact,
+            declared_services: Vec::new(),
         }
     }
 
@@ -87,6 +94,18 @@ impl ShellServer {
     /// Set the commit window manager for state-changing exec operations.
     pub fn with_commit_window(mut self, cw: Arc<RwLock<CommitWindowManager>>) -> Self {
         self.commit_window = Some(cw);
+        self
+    }
+
+    /// Set the supervisor backend for diag log collection.
+    pub fn with_supervisor_backend(mut self, backend: SupervisorBackend) -> Self {
+        self.supervisor_backend = backend;
+        self
+    }
+
+    /// Set the declared services list for diag service name validation.
+    pub fn with_declared_services(mut self, services: Vec<String>) -> Self {
+        self.declared_services = services;
         self
     }
 
@@ -244,6 +263,16 @@ impl ShellServer {
     /// Get the vCluster this node belongs to.
     pub fn vcluster_id(&self) -> &str {
         &self.vcluster_id
+    }
+
+    /// Get the supervisor backend.
+    pub fn supervisor_backend(&self) -> SupervisorBackend {
+        self.supervisor_backend.clone()
+    }
+
+    /// Get the declared services list.
+    pub fn declared_services(&self) -> &[String] {
+        &self.declared_services
     }
 
     /// List available commands.

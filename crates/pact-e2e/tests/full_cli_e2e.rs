@@ -1188,6 +1188,114 @@ supervisor_backend = "pact"
     }
 
     // =========================================================================
+    // 35. diag — diagnostic log retrieval from agent
+    // =========================================================================
+    {
+        let result = pact_cli::commands::diag::diag_node(
+            agent_channel.clone(),
+            &token,
+            "all",
+            None,
+            None,
+            100,
+        )
+        .await;
+        match result {
+            Ok(ref output) => {
+                // On test environments /dev/kmsg and syslog won't exist,
+                // so empty results are expected. The RPC should succeed.
+                results.push(TestResult::pass(
+                    "diag",
+                    format!(
+                        "diag returned: {}",
+                        if output.contains("No log entries") {
+                            "empty (expected in test)"
+                        } else {
+                            "log data"
+                        }
+                    ),
+                ));
+            }
+            Err(e) => {
+                results.push(TestResult::fail("diag", format!("error: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 36. diag with invalid grep — should fail with INVALID_ARGUMENT
+    // =========================================================================
+    {
+        let result = pact_cli::commands::diag::diag_node(
+            agent_channel.clone(),
+            &token,
+            "system",
+            None,
+            Some("[invalid"),
+            50,
+        )
+        .await;
+        match result {
+            Err(ref e)
+                if e.to_string().contains("invalid grep pattern")
+                    || e.to_string().contains("InvalidArgument") =>
+            {
+                results.push(TestResult::pass(
+                    "diag (invalid grep)",
+                    "correctly rejected invalid regex",
+                ));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "diag (invalid grep)",
+                    format!("expected error, got: {output}"),
+                ));
+            }
+            Err(e) => {
+                // Any error is acceptable — the important thing is it didn't succeed
+                results
+                    .push(TestResult::pass("diag (invalid grep)", format!("rejected with: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 37. diag with path traversal service name — should fail
+    // =========================================================================
+    {
+        let result = pact_cli::commands::diag::diag_node(
+            agent_channel.clone(),
+            &token,
+            "service",
+            Some("../../etc/passwd"),
+            None,
+            50,
+        )
+        .await;
+        match result {
+            Err(ref e)
+                if e.to_string().contains("invalid service name")
+                    || e.to_string().contains("InvalidArgument") =>
+            {
+                results.push(TestResult::pass(
+                    "diag (path traversal)",
+                    "correctly rejected path traversal",
+                ));
+            }
+            Ok(ref output) => {
+                results.push(TestResult::fail(
+                    "diag (path traversal)",
+                    format!("expected error, got: {output}"),
+                ));
+            }
+            Err(e) => {
+                results
+                    .push(TestResult::pass("diag (path traversal)", format!("rejected with: {e}")));
+            }
+        }
+    }
+
+    // =========================================================================
     // SKIPPED: login/logout (needs real OIDC provider)
     // =========================================================================
     println!("\n[SKIP] login — requires real OIDC provider");

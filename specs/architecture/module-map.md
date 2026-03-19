@@ -107,7 +107,8 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
   - `memory.rs` — `MemoryBackend` trait + `LinuxMemoryBackend` (#[cfg(target_os = "linux")]) + `MockMemoryBackend` (always compiled). Parses /proc/meminfo, /sys/devices/system/node/node*/meminfo (NUMA topology), optional dmidecode for memory type. **NEW**
   - `network.rs` — `NetworkBackend` trait + `LinuxNetworkBackend` (#[cfg(target_os = "linux")]) + `MockNetworkBackend` (always compiled). Enumerates /sys/class/net/*, reads speed/operstate/address/driver per interface. **NEW**
   - `storage.rs` — `StorageBackend` trait + `LinuxStorageBackend` (#[cfg(target_os = "linux")]) + `MockStorageBackend` (always compiled). Parses /sys/block/, /proc/mounts, calls statvfs() for real capacity. **NEW**
-- `shell/` — ShellService gRPC, exec handler, interactive shell, whitelist
+- `shell/` — ShellService gRPC, exec handler, interactive shell, whitelist, diag
+  - `diag.rs` — diagnostic log collection: reads local sources (dmesg via /dev/kmsg, syslog, /run/pact/logs/{service}.log), applies server-side grep + line limit (LOG2, LOG3). Systemd fallback via dmesg/journalctl subprocesses. Returns `DiagChunk` stream.
 - `emergency/` — EmergencySession lifecycle
 - `enrollment/` — HardwareIdentity detection, EnrollmentClient
 - `subscription/` — config update stream consumer
@@ -132,7 +133,8 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - Delegation stubs (lattice drain/cordon, OpenCHAMI reboot/reimage)
 
 **Submodules:**
-- `commands/` — one module per command group (status, diff, commit, exec, shell, jobs, queue, cluster, audit, accounting, health, etc.)
+- `commands/` — one module per command group (status, diff, commit, exec, shell, diag, jobs, queue, cluster, audit, accounting, health, etc.)
+  - `diag.rs` — CLI handler for `pact diag`. Single-node mode: connects to one agent, calls CollectDiag, displays chunks. Fleet mode (`--vcluster`): queries EnrollmentService for node list, fans out CollectDiag to all agents concurrently (max 50 parallel, 5s timeout per agent), prefixes output with `[node_id]`. Handles F42 (unreachable agents → partial results + warning) and F43 (missing sources → empty chunk).
 - `client/` — gRPC client wrappers (journal + lattice)
 - `auth/` — OIDC token flow
 - `output/` — formatting

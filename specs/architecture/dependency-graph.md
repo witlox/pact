@@ -83,6 +83,22 @@ Mock backends have zero dependencies beyond `std` and `async-trait`.
 
 No changes to the compile-time or runtime dependency graph structure.
 
+## Diagnostic Log Retrieval Dependencies
+
+The `pact diag` feature (CollectDiag RPC + CLI handler) introduces **no new external
+crate dependencies**. Agent-side `diag.rs` uses:
+
+- `std::fs` — reading `/dev/kmsg`, `/var/log/syslog`, `/var/log/messages`,
+  `/run/pact/logs/{service}.log`
+- `tokio::process::Command` — spawning `dmesg`/`journalctl` in systemd compat mode
+  (same pattern as existing subprocess spawning)
+- `regex::Regex` — server-side grep filtering (regex crate already a workspace dependency)
+
+CLI-side `diag.rs` uses existing gRPC client infrastructure (tonic) and
+`tokio::task::JoinSet` for concurrent fan-out (tokio already a workspace dependency).
+
+No changes to the compile-time or runtime dependency graph structure.
+
 ---
 
 ## Cycle Analysis

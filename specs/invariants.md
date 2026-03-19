@@ -441,3 +441,9 @@ Grep filtering MUST execute on the agent, not the CLI. Only matching lines are t
 
 ### LOG3: Agent-side line limit enforcement
 Line limit MUST be enforced on the agent per source. Default: 100 lines. Maximum: 10000 lines. Agent MUST reject requests with line_limit > 10000.
+
+### LOG4: Grep pattern validation
+grep_pattern MUST be validated before use. Max 255 chars. Invalid regex returns INVALID_ARGUMENT. Agent MUST pre-compile the pattern and reject syntactically invalid regexes.
+
+### LOG5: Service name validation
+service_name MUST NOT contain path separators ("/" or ".."). Agent MUST validate against the list of supervised services. Unknown service returns empty DiagChunk (F43 behavior).

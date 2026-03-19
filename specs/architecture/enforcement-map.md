@@ -255,15 +255,25 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Diagnostic Log Retrieval Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| LOG1 | Diagnostic log retrieval authorization | `ShellServiceImpl::collect_diag()` | Same auth check as exec: extract OIDC token from gRPC metadata (`extract_auth`), validate via `has_ops_role(identity, vcluster)`. `pact-platform-admin` bypasses via P6. Viewers rejected. | `tonic::Status::PERMISSION_DENIED` |
+| LOG2 | Server-side grep filtering | `diag.rs::collect_from_source()` | Grep pattern applied per-line on agent before adding to `DiagChunk.lines`. Only matching lines transmitted. Empty pattern = no filtering. | Structural — grep runs before response construction |
+| LOG3 | Agent-side line limit enforcement | `diag.rs::collect_from_source()` | Line count checked per source. Default 100, max 10000. Requests with `line_limit > 10000` rejected with `INVALID_ARGUMENT`. `DiagChunk.truncated = true` when limit reached. | `tonic::Status::INVALID_ARGUMENT` for over-limit requests. Truncation flag for capped output. |
+
+---
+
 ## Enforcement Categories
 
 Summary of how invariants are enforced:
 
 | Category | Count | Invariants | Description |
 |----------|-------|------------|-------------|
-| **Structural** | 28 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8, RI4, RI5, RI6, IM2, IM5, IM6, NM1, PB4, WI1, WI2(assert), WI4, PB1, CAP5 | Impossible to violate by design (no API exists to break them) |
-| **Validation** | 14 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7, IM1, IM3 | Checked at input boundary, rejected with error |
-| **Runtime logic** | 39 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4-E6, E9-E10, PS1-PS3, RI1-RI3, IM4, IM7, NM2, WI3, WI5, WI6, CAP1-CAP4 | Active enforcement in business logic |
+| **Structural** | 29 | J2, J6, J7, J8, J9, D2, O1, O3, F1, S6, CR1, CR6, ND3, E3, E8, RI4, RI5, RI6, IM2, IM5, IM6, NM1, PB4, WI1, WI2(assert), WI4, PB1, CAP5, LOG2 | Impossible to violate by design (no API exists to break them) |
+| **Validation** | 15 | J3, J4, J5, A3, D3, P5, O2, ND1, ND2, E1, E2, E7, IM1, IM3, LOG3 | Checked at input boundary, rejected with error |
+| **Runtime logic** | 40 | A1-A2, A4-A6, A9-A10, D1, D4-D5, P1-P4, P6-P8, S1-S5, CR2, CR4, CR5, E4-E6, E9-E10, PS1-PS3, RI1-RI3, IM4, IM7, NM2, WI3, WI5, WI6, CAP1-CAP4, LOG1 | Active enforcement in business logic |
 | **Operational** | 5 | A7, A8, R1-R3 | Monitored/configured, not enforced in code |
 | **Protocol** | 2 | J1, J9 | Guaranteed by Raft consensus protocol |
 | **Degraded fallback** | 7 | P7, F2, F3, A9, CR3, PB5, PB2 | Special behavior when components unavailable |

@@ -1061,6 +1061,51 @@ Catalog of failure scenarios, expected degradation behavior, and recovery paths.
 
 ---
 
+## F44: /dev/kmsg unreadable (CAP_SYSLOG required)
+
+**Trigger:** Agent lacks CAP_SYSLOG capability or /dev/kmsg is not present (minimal container, restricted node).
+
+**Impact:**
+- Cannot read kernel ring buffer via /dev/kmsg
+
+**Degradation:**
+- Fall back to `dmesg` subprocess (5s timeout)
+- If both /dev/kmsg and dmesg fail, skip dmesg source entirely
+- DiagChunk for dmesg: `{ source: "dmesg", lines: [], truncated: false }`
+
+**Recovery:**
+- None needed — informational only
+- Grant CAP_SYSLOG if dmesg is required
+
+**Detection:**
+- Agent logs: "dmesg via /dev/kmsg failed, trying dmesg command"
+- If both fail: "dmesg unavailable, skipping source"
+
+---
+
+## F45: journalctl subprocess hangs or times out
+
+**Trigger:** journalctl process hangs (journal corruption, D-Bus deadlock, or systemd-journald stuck).
+
+**Impact:**
+- Service log collection for the affected service stalls
+- Potential stall of entire diag request if not timeout-protected
+
+**Degradation:**
+- 5-second timeout on journalctl subprocess
+- On timeout: kill the process, return empty chunk with `truncated = true`
+- Other sources (dmesg, syslog) are unaffected
+
+**Recovery:**
+- Automatic: next diag request retries
+- If persistent: admin investigates journald state on the node
+
+**Detection:**
+- Agent logs: "journalctl timed out for service {name} after 5s"
+- DiagChunk with empty lines and truncated=true indicates timeout
+
+---
+
 ## Unacceptable Failure Behaviors
 
 The following must NEVER happen, regardless of failure scenario:
@@ -1127,3 +1172,5 @@ The following must NEVER happen, regardless of failure scenario:
 | F41: statvfs fails on NFS mount | Low | Yes (next detection cycle) | If mount stale |
 | F42: Agent unreachable (fleet diag) | Low | Yes (retry per node) | No |
 | F43: Log source missing on node | Low | Yes (skip + report) | No |
+| F44: /dev/kmsg unreadable | Low | Yes (dmesg fallback) | No |
+| F45: journalctl timeout | Low | Yes (timeout + empty chunk) | No |

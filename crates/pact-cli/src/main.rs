@@ -179,6 +179,27 @@ enum Commands {
         action: GroupSubcommand,
     },
 
+    /// Retrieve diagnostic logs from nodes.
+    Diag {
+        /// Node ID (omit for fleet-wide with --vcluster).
+        node: Option<String>,
+        /// Number of lines per source (default: 100).
+        #[arg(long, default_value = "100")]
+        lines: u32,
+        /// Source filter: system, service, or all (default: all).
+        #[arg(long, default_value = "all")]
+        source: String,
+        /// Specific service name.
+        #[arg(long)]
+        service: Option<String>,
+        /// Server-side grep pattern.
+        #[arg(long)]
+        grep: Option<String>,
+        /// vCluster for fleet-wide query.
+        #[arg(long)]
+        vcluster: Option<String>,
+    },
+
     /// Manage drift detection blacklist.
     Blacklist {
         #[command(subcommand)]
@@ -464,6 +485,7 @@ async fn main() {
             | Commands::Promote { .. }
             | Commands::Group { .. }
             | Commands::Blacklist { .. }
+            | Commands::Diag { .. }
             | Commands::Drain { .. }
             | Commands::Cordon { .. }
             | Commands::Uncordon { .. }
@@ -832,6 +854,53 @@ async fn main() {
                 GroupSubcommand::SetPolicy { name, policy } => {
                     execute::group_set_policy(channel, &name, &policy, &principal, &role).await
                 }
+            }
+        }
+        Commands::Diag { node, lines, source, service, grep, vcluster } => {
+            if let Some(node_id) = node {
+                // Single-node diag
+                let agent_addr = match execute::resolve_agent_address(
+                    &node_id,
+                    journal_channel.as_ref().unwrap(),
+                )
+                .await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                match execute::connect_agent(&agent_addr).await {
+                    Ok(channel) => {
+                        pact_cli::commands::diag::diag_node(
+                            channel,
+                            &token,
+                            &source,
+                            service.as_deref(),
+                            grep.as_deref(),
+                            lines,
+                        )
+                        .await
+                    }
+                    Err(e) => Err(e),
+                }
+            } else if let Some(vc) = vcluster.as_deref().or(config.default_vcluster.as_deref()) {
+                // Fleet-wide diag
+                pact_cli::commands::diag::diag_fleet(
+                    journal_channel.as_ref().unwrap(),
+                    &token,
+                    vc,
+                    &source,
+                    service.as_deref(),
+                    grep.as_deref(),
+                    lines,
+                )
+                .await
+            } else {
+                Err(anyhow::anyhow!(
+                    "specify --node <id> for single-node or --vcluster <name> for fleet-wide diag"
+                ))
             }
         }
         Commands::Blacklist { action } => match action {

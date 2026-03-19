@@ -137,3 +137,29 @@ Feature: Diagnostic Log Retrieval
     When user "admin@example.com" with role "pact-ops-ml-training" runs "pact diag node-001 --source system"
     Then the dmesg output should contain exactly 100 lines
     And the output should indicate truncation for the dmesg source
+
+  # --- Adversary review scenarios (LOG4, LOG5, F44, F45) ---
+
+  Scenario: Invalid regex pattern returns error
+    When user "admin@example.com" with role "pact-ops-ml-training" runs "pact diag node-001 --grep '[invalid'"
+    Then the command should be rejected with "invalid grep pattern"
+    And exit code should be 3
+
+  Scenario: Path traversal in service_name is rejected
+    When user "admin@example.com" with role "pact-ops-ml-training" runs "pact diag node-001 --service '../../etc/passwd'"
+    Then the command should be rejected with "invalid service name"
+    And exit code should be 3
+
+  Scenario: /dev/kmsg fallback to dmesg command
+    Given node "node-001" has /dev/kmsg unreadable
+    When user "admin@example.com" with role "pact-ops-ml-training" runs "pact diag node-001 --source system"
+    Then the agent should fall back to the dmesg command
+    And the output should include dmesg lines
+    And exit code should be 0
+
+  Scenario: journalctl timeout returns empty result
+    Given the agent on "node-001" is running in systemd compat mode
+    And journalctl hangs on node "node-001"
+    When user "admin@example.com" with role "pact-ops-ml-training" runs "pact diag node-001 --source service"
+    Then the service log output should be empty with truncated indicator
+    And exit code should be 0

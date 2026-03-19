@@ -10,6 +10,7 @@ pub mod blacklist;
 pub mod commit;
 pub mod config;
 pub mod delegate;
+pub mod diag;
 pub mod diff;
 pub mod emergency;
 pub mod exec;

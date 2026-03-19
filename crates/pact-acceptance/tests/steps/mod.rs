@@ -13,6 +13,7 @@ mod boot; // Boot sequence + boot config streaming
 mod capability; // CapabilityReporter + MockGpuBackend
 mod cli; // CLI formatting + exit codes + delegation
 mod commit_window; // CommitWindowManager
+mod diag; // Diagnostic log retrieval + validation
 mod drift; // DriftEvaluator
 mod emergency; // EmergencyManager
 mod enrollment; // Node enrollment, domain membership, certificate lifecycle
