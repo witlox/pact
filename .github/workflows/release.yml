@@ -36,7 +36,7 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e --run-ignored all
       - run: cargo test -p pact-acceptance
-      - run: cargo deny check
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
   # ---------------------------------------------------------------------------
   # Platform binaries: journal, CLI, MCP — no hardware features, one per arch
