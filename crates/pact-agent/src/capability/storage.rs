@@ -194,8 +194,10 @@ fn statvfs_sync(path: &str) -> anyhow::Result<(u64, u64)> {
 
     // SAFETY: statvfs succeeded, so the struct is initialized
     let stat = unsafe { stat.assume_init() };
-    let total = stat.f_blocks as u64 * stat.f_frsize as u64;
-    let available = stat.f_bavail as u64 * stat.f_frsize as u64;
+    #[allow(clippy::unnecessary_cast)]
+    let total = (stat.f_blocks as u64) * (stat.f_frsize as u64);
+    #[allow(clippy::unnecessary_cast)]
+    let available = (stat.f_bavail as u64) * (stat.f_frsize as u64);
     Ok((total, available))
 }
 
