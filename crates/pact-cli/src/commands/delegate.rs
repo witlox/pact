@@ -210,8 +210,7 @@ pub async fn uncordon_node(
     role: &str,
     delegation_config: &DelegationConfig,
 ) -> DelegationResult {
-    let audit_seq =
-        audit_delegation(client, "uncordon", node_id, "lattice", principal, role).await;
+    let audit_seq = audit_delegation(client, "uncordon", node_id, "lattice", principal, role).await;
     let audit_msg = match &audit_seq {
         Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
@@ -273,8 +272,7 @@ pub async fn reboot_node(
     role: &str,
     delegation_config: &DelegationConfig,
 ) -> DelegationResult {
-    let audit_seq =
-        audit_delegation(client, "reboot", node_id, "OpenCHAMI", principal, role).await;
+    let audit_seq = audit_delegation(client, "reboot", node_id, "OpenCHAMI", principal, role).await;
     let audit_msg = match &audit_seq {
         Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),

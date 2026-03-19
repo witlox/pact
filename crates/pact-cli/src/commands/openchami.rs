@@ -53,23 +53,16 @@ impl OpenChamiClient {
 
     /// Power cycle (reboot) a node via Redfish.
     pub async fn reboot(&self, node_id: &str) -> Result<String, String> {
-        let url = format!(
-            "{}/hsm/v2/State/Components/{}/Actions/PowerCycle",
-            self.smd_base_url, node_id
-        );
-        let body = PowerAction {
-            reset_type: "ForceRestart".to_string(),
-        };
+        let url =
+            format!("{}/hsm/v2/State/Components/{}/Actions/PowerCycle", self.smd_base_url, node_id);
+        let body = PowerAction { reset_type: "ForceRestart".to_string() };
 
         let mut req = self.client.post(&url).json(&body);
         if let Some(ref auth) = self.auth_header() {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| format!("reboot request failed: {e}"))?;
+        let resp = req.send().await.map_err(|e| format!("reboot request failed: {e}"))?;
         if resp.status().is_success() {
             Ok(format!("reboot initiated for {node_id}"))
         } else {
@@ -83,9 +76,9 @@ impl OpenChamiClient {
     /// not by pact. Pact just triggers the reboot — BSS serves the new image
     /// on next boot.
     pub async fn reimage(&self, node_id: &str) -> Result<String, String> {
-        self.reboot(node_id).await.map(|_| {
-            format!("reimage initiated for {node_id} (power cycle + BSS re-provision)")
-        })
+        self.reboot(node_id)
+            .await
+            .map(|_| format!("reimage initiated for {node_id} (power cycle + BSS re-provision)"))
     }
 }
 

@@ -123,17 +123,15 @@ async fn full_cli_e2e_all_commands() {
         ExecConfig::default(),
         "test-node-001".into(),
         "ml-training".into(),
-        true,  // learning mode
-        10,    // max sessions
+        true, // learning mode
+        10,   // max sessions
     ));
-    let commit_window = Arc::new(RwLock::new(CommitWindowManager::new(
-        CommitWindowConfig::default(),
-    )));
+    let commit_window =
+        Arc::new(RwLock::new(CommitWindowManager::new(CommitWindowConfig::default())));
     let shell_svc = ShellServiceImpl::new(shell_server, commit_window.clone());
 
-    let agent_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind agent listener");
+    let agent_listener =
+        tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind agent listener");
     let agent_addr = agent_listener.local_addr().unwrap().to_string();
     tokio::spawn(async move {
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(agent_listener);
@@ -204,12 +202,15 @@ async fn full_cli_e2e_all_commands() {
         let result = execute::log(&mut config_client, 10, None).await;
         match result {
             Ok(ref output)
-                if output.contains("#0") && output.contains("COMMIT") && output.contains("admin@example.com") =>
+                if output.contains("#0")
+                    && output.contains("COMMIT")
+                    && output.contains("admin@example.com") =>
             {
                 results.push(TestResult::pass("log", "entry #0 visible"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail("log", format!("missing expected content: {output}")));
+                results
+                    .push(TestResult::fail("log", format!("missing expected content: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("log", format!("error: {e}")));
@@ -265,10 +266,7 @@ async fn full_cli_e2e_all_commands() {
                 results.push(TestResult::pass("rollback", "rolled back to seq:0"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "rollback",
-                    format!("unexpected output: {output}"),
-                ));
+                results.push(TestResult::fail("rollback", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("rollback", format!("error: {e}")));
@@ -404,24 +402,22 @@ state = "running"
 
         // Set up regulated policy
         let setup_result = policy_client
-            .update_policy(tonic::Request::new(
-                pact_common::proto::policy::UpdatePolicyRequest {
+            .update_policy(tonic::Request::new(pact_common::proto::policy::UpdatePolicyRequest {
+                vcluster_id: "sensitive-compute".into(),
+                policy: Some(pact_common::proto::policy::VClusterPolicy {
                     vcluster_id: "sensitive-compute".into(),
-                    policy: Some(pact_common::proto::policy::VClusterPolicy {
-                        vcluster_id: "sensitive-compute".into(),
-                        policy_id: "pol-regulated".into(),
-                        regulated: true,
-                        two_person_approval: true,
-                        ..Default::default()
-                    }),
-                    author: Some(pact_common::proto::config::Identity {
-                        principal: "admin@example.com".into(),
-                        principal_type: "admin".into(),
-                        role: "pact-platform-admin".into(),
-                    }),
-                    message: "set up regulated policy".into(),
-                },
-            ))
+                    policy_id: "pol-regulated".into(),
+                    regulated: true,
+                    two_person_approval: true,
+                    ..Default::default()
+                }),
+                author: Some(pact_common::proto::config::Identity {
+                    principal: "admin@example.com".into(),
+                    principal_type: "admin".into(),
+                    role: "pact-platform-admin".into(),
+                }),
+                message: "set up regulated policy".into(),
+            }))
             .await;
 
         if setup_result.is_err() {
@@ -432,25 +428,21 @@ state = "running"
         } else {
             // Evaluate a regulated action to get pending approval
             let eval_result = policy_client
-                .evaluate(tonic::Request::new(
-                    pact_common::proto::policy::PolicyEvalRequest {
-                        author: Some(pact_common::proto::config::Identity {
-                            principal: "regulated-admin@example.com".into(),
-                            principal_type: "admin".into(),
-                            role: "pact-regulated-sensitive-compute".into(),
-                        }),
-                        scope: Some(pact_common::proto::config::Scope {
-                            scope: Some(
-                                pact_common::proto::config::scope::Scope::VclusterId(
-                                    "sensitive-compute".into(),
-                                ),
-                            ),
-                        }),
-                        action: "commit".into(),
-                        proposed_change: None,
-                        command: None,
-                    },
-                ))
+                .evaluate(tonic::Request::new(pact_common::proto::policy::PolicyEvalRequest {
+                    author: Some(pact_common::proto::config::Identity {
+                        principal: "regulated-admin@example.com".into(),
+                        principal_type: "admin".into(),
+                        role: "pact-regulated-sensitive-compute".into(),
+                    }),
+                    scope: Some(pact_common::proto::config::Scope {
+                        scope: Some(pact_common::proto::config::scope::Scope::VclusterId(
+                            "sensitive-compute".into(),
+                        )),
+                    }),
+                    action: "commit".into(),
+                    proposed_change: None,
+                    command: None,
+                }))
                 .await;
 
             match eval_result {
@@ -460,8 +452,7 @@ state = "running"
                         let approval_id = eval.approval.unwrap().pending_approval_id;
 
                         // List pending approvals
-                        let list_result =
-                            execute::approve_list(&channel, None).await;
+                        let list_result = execute::approve_list(&channel, None).await;
                         match list_result {
                             Ok(ref output) if output.contains(&approval_id[..10]) => {
                                 results.push(TestResult::pass(
@@ -476,10 +467,8 @@ state = "running"
                                 ));
                             }
                             Err(e) => {
-                                results.push(TestResult::fail(
-                                    "approve list",
-                                    format!("error: {e}"),
-                                ));
+                                results
+                                    .push(TestResult::fail("approve list", format!("error: {e}")));
                             }
                         }
 
@@ -495,10 +484,8 @@ state = "running"
                         .await;
                         match decide_result {
                             Ok(ref output) if output.contains("approved") => {
-                                results.push(TestResult::pass(
-                                    "approve decide",
-                                    "approval accepted",
-                                ));
+                                results
+                                    .push(TestResult::pass("approve decide", "approval accepted"));
                             }
                             Ok(ref output) => {
                                 results.push(TestResult::fail(
@@ -521,10 +508,8 @@ state = "running"
                     }
                 }
                 Err(e) => {
-                    results.push(TestResult::fail(
-                        "approve (eval)",
-                        format!("evaluate failed: {e}"),
-                    ));
+                    results
+                        .push(TestResult::fail("approve (eval)", format!("evaluate failed: {e}")));
                 }
             }
         }
@@ -556,20 +541,15 @@ state = "running"
         // promote_node queries entries scoped to a node. Since our entries are
         // scoped to vcluster, promote won't find node-scoped deltas — this is
         // expected. We verify the "no deltas" case works correctly.
-        let result =
-            execute::promote_node(&mut config_client, "test-node-001", false).await;
+        let result = execute::promote_node(&mut config_client, "test-node-001", false).await;
         match result {
-            Ok(ref output) if output.contains("No committed deltas") || output.contains("Exported") => {
-                results.push(TestResult::pass(
-                    "promote",
-                    "promote returned valid output",
-                ));
+            Ok(ref output)
+                if output.contains("No committed deltas") || output.contains("Exported") =>
+            {
+                results.push(TestResult::pass("promote", "promote returned valid output"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "promote",
-                    format!("unexpected output: {output}"),
-                ));
+                results.push(TestResult::fail("promote", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("promote", format!("error: {e}")));
@@ -583,16 +563,12 @@ state = "running"
     {
         let result = execute::group_list(&channel).await;
         match result {
-            Ok(ref output)
-                if output.contains("ml-training") || output.contains("VCLUSTER") =>
-            {
+            Ok(ref output) if output.contains("ml-training") || output.contains("VCLUSTER") => {
                 results.push(TestResult::pass("group list", "vClusters listed"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "group list",
-                    format!("unexpected output: {output}"),
-                ));
+                results
+                    .push(TestResult::fail("group list", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("group list", format!("error: {e}")));
@@ -607,16 +583,11 @@ state = "running"
         let result = execute::group_show(&channel, "sensitive-compute").await;
         match result {
             Ok(ref output) if output.contains("sensitive-compute") => {
-                results.push(TestResult::pass(
-                    "group show",
-                    "policy details shown",
-                ));
+                results.push(TestResult::pass("group show", "policy details shown"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "group show",
-                    format!("unexpected output: {output}"),
-                ));
+                results
+                    .push(TestResult::fail("group show", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("group show", format!("error: {e}")));
@@ -667,10 +638,7 @@ supervisor_backend = "pact"
                 ));
             }
             Err(e) => {
-                results.push(TestResult::fail(
-                    "group set-policy",
-                    format!("error: {e}"),
-                ));
+                results.push(TestResult::fail("group set-policy", format!("error: {e}")));
             }
         }
     }
@@ -682,21 +650,13 @@ supervisor_backend = "pact"
         use pact_cli::commands::blacklist::{
             default_blacklist, format_blacklist_result, BlacklistOp, BlacklistResult,
         };
-        let bl = BlacklistResult {
-            operation: BlacklistOp::List,
-            paths: default_blacklist(),
-        };
+        let bl = BlacklistResult { operation: BlacklistOp::List, paths: default_blacklist() };
         let output = format_blacklist_result(&bl);
         if output.contains("/tmp/**") && output.contains("/proc/**") {
-            results.push(TestResult::pass(
-                "blacklist list",
-                "default entries present",
-            ));
+            results.push(TestResult::pass("blacklist list", "default entries present"));
         } else {
-            results.push(TestResult::fail(
-                "blacklist list",
-                format!("unexpected output: {output}"),
-            ));
+            results
+                .push(TestResult::fail("blacklist list", format!("unexpected output: {output}")));
         }
     }
 
@@ -751,10 +711,7 @@ supervisor_backend = "pact"
                 ));
             }
             Err(e) => {
-                results.push(TestResult::fail(
-                    "blacklist remove",
-                    format!("error: {e}"),
-                ));
+                results.push(TestResult::fail("blacklist remove", format!("error: {e}")));
             }
         }
     }
@@ -764,17 +721,13 @@ supervisor_backend = "pact"
     // =========================================================================
     {
         let result =
-            execute::exec_remote(agent_channel.clone(), &token, "echo", &["hello".into()])
-                .await;
+            execute::exec_remote(agent_channel.clone(), &token, "echo", &["hello".into()]).await;
         match result {
             Ok(ref output) if output.contains("hello") => {
                 results.push(TestResult::pass("exec", "echo hello returned"));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "exec",
-                    format!("unexpected output: {output}"),
-                ));
+                results.push(TestResult::fail("exec", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("exec", format!("error: {e}")));
@@ -801,8 +754,9 @@ supervisor_backend = "pact"
                     format!("unexpected output: {output}"),
                 ));
             }
-            Err(ref e) if e.to_string().contains("unauthenticated")
-                || e.to_string().contains("authorization") =>
+            Err(ref e)
+                if e.to_string().contains("unauthenticated")
+                    || e.to_string().contains("authorization") =>
             {
                 // list_agent_commands doesn't inject auth — expected to fail
                 // This is a known limitation: the execute::list_agent_commands
@@ -813,10 +767,7 @@ supervisor_backend = "pact"
                 ));
             }
             Err(e) => {
-                results.push(TestResult::fail(
-                    "cap (list_commands)",
-                    format!("error: {e}"),
-                ));
+                results.push(TestResult::fail("cap (list_commands)", format!("error: {e}")));
             }
         }
     }
@@ -830,8 +781,9 @@ supervisor_backend = "pact"
             Ok(ref output) if output.contains("extended") => {
                 results.push(TestResult::pass("extend", "commit window extended"));
             }
-            Err(ref e) if e.to_string().contains("unauthenticated")
-                || e.to_string().contains("authorization") =>
+            Err(ref e)
+                if e.to_string().contains("unauthenticated")
+                    || e.to_string().contains("authorization") =>
             {
                 // extend doesn't inject auth — expected to fail with auth error
                 results.push(TestResult::pass(
@@ -840,10 +792,7 @@ supervisor_backend = "pact"
                 ));
             }
             Ok(ref output) => {
-                results.push(TestResult::fail(
-                    "extend",
-                    format!("unexpected output: {output}"),
-                ));
+                results.push(TestResult::fail("extend", format!("unexpected output: {output}")));
             }
             Err(e) => {
                 results.push(TestResult::fail("extend", format!("error: {e}")));
@@ -890,10 +839,8 @@ supervisor_backend = "pact"
         if result.message.contains("audit seq:") {
             results.push(TestResult::pass("cordon", "audit entry logged"));
         } else {
-            results.push(TestResult::fail(
-                "cordon",
-                format!("missing audit seq: {}", result.message),
-            ));
+            results
+                .push(TestResult::fail("cordon", format!("missing audit seq: {}", result.message)));
         }
     }
 
@@ -936,10 +883,8 @@ supervisor_backend = "pact"
         if result.message.contains("audit seq:") {
             results.push(TestResult::pass("reboot", "audit entry logged"));
         } else {
-            results.push(TestResult::fail(
-                "reboot",
-                format!("missing audit seq: {}", result.message),
-            ));
+            results
+                .push(TestResult::fail("reboot", format!("missing audit seq: {}", result.message)));
         }
     }
 
@@ -1001,12 +946,9 @@ supervisor_backend = "pact"
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         let mut request = tonic::Request::new(stream);
-        request.metadata_mut().insert(
-            "authorization",
-            format!("Bearer {token}")
-                .parse()
-                .expect("valid header"),
-        );
+        request
+            .metadata_mut()
+            .insert("authorization", format!("Bearer {token}").parse().expect("valid header"));
 
         match shell_client.shell(request).await {
             Ok(resp) => {
@@ -1036,10 +978,7 @@ supervisor_backend = "pact"
                         },
                     ));
                 } else {
-                    results.push(TestResult::fail(
-                        "shell",
-                        "no session_id received",
-                    ));
+                    results.push(TestResult::fail("shell", "no session_id received"));
                 }
             }
             Err(e) => {
@@ -1077,10 +1016,7 @@ supervisor_backend = "pact"
         let result = execute::status(&mut config_client, "test-node-001").await;
         match result {
             Ok(ref output) if output.contains("test-node-001") => {
-                results.push(TestResult::pass(
-                    "status (after commit)",
-                    "node state returned",
-                ));
+                results.push(TestResult::pass("status (after commit)", "node state returned"));
             }
             Err(_) => {
                 // Node state not found is acceptable — pact doesn't auto-create

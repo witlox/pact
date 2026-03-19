@@ -61,21 +61,21 @@ Rationale:
 Per-domain topology:
 ```
 ┌─ pact domain ─────────────────────────────────────────────┐
-│                                                            │
-│  pact-journal quorum (3-5 nodes)                           │
-│    ├── each generates ephemeral CA key at startup           │
-│    ├── CA cert distributed via enrollment responses         │
-│    ├── revocation registry replicated via Raft              │
-│    └── signs agent CSRs locally (CPU-only, no network)      │
-│                                                            │
-│  pact-agents (1000s)                                       │
-│    ├── generate own keypair at boot (in RAM)                │
-│    └── submit CSR to journal, receive signed cert           │
-│                                                            │
-│  OpenCHAMI/Manta (boot infra)                              │
-│    └── boots nodes, no cert responsibility                  │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+│                                                           │
+│  pact-journal quorum (3-5 nodes)                          │
+│    ├── each generates ephemeral CA key at startup         │
+│    ├── CA cert distributed via enrollment responses       │
+│    ├── revocation registry replicated via Raft            │
+│    └── signs agent CSRs locally (CPU-only, no network)    │
+│                                                           │
+│  pact-agents (1000s)                                      │
+│    ├── generate own keypair at boot (in RAM)              │
+│    └── submit CSR to journal, receive signed cert         │
+│                                                           │
+│  OpenCHAMI/Manta (boot infra)                             │
+│    └── boots nodes, no cert responsibility                │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ### CSR model: agent generates keypair, journal signs

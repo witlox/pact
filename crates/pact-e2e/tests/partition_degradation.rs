@@ -45,11 +45,7 @@ fn make_commit_entry(vcluster: &str, message: &str) -> ProtoConfigEntry {
 }
 
 /// Build a commit entry with a specific TTL (in seconds).
-fn make_commit_entry_with_ttl(
-    vcluster: &str,
-    message: &str,
-    ttl_seconds: i64,
-) -> ProtoConfigEntry {
+fn make_commit_entry_with_ttl(vcluster: &str, message: &str, ttl_seconds: i64) -> ProtoConfigEntry {
     let mut entry = make_commit_entry(vcluster, message);
     entry.ttl = Some(prost_types::Duration { seconds: ttl_seconds, nanos: 0 });
     entry
@@ -131,14 +127,12 @@ async fn follower_serves_reads() {
 
     // List entries through the follower — reads should be served from local state
     let resp = follower_client
-        .list_entries(tonic::Request::new(
-            pact_common::proto::journal::ListEntriesRequest {
-                scope: None,
-                from_sequence: None,
-                to_sequence: None,
-                limit: Some(10),
-            },
-        ))
+        .list_entries(tonic::Request::new(pact_common::proto::journal::ListEntriesRequest {
+            scope: None,
+            from_sequence: None,
+            to_sequence: None,
+            limit: Some(10),
+        }))
         .await
         .unwrap();
 
@@ -276,9 +270,9 @@ async fn policy_set_and_retrieve() {
 
     // Read it back
     let resp = policy_client
-        .get_effective_policy(tonic::Request::new(
-            pact_common::proto::policy::GetPolicyRequest { vcluster_id: "test-vc".into() },
-        ))
+        .get_effective_policy(tonic::Request::new(pact_common::proto::policy::GetPolicyRequest {
+            vcluster_id: "test-vc".into(),
+        }))
         .await
         .expect("get policy should succeed");
 
@@ -411,9 +405,8 @@ async fn ttl_validation_rejects_invalid() {
 
     // TTL too low (100s < 900s minimum)
     let entry = make_commit_entry_with_ttl("ml-training", "low-ttl", 100);
-    let result = client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await;
+    let result =
+        client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await;
     assert!(result.is_err(), "TTL=100 should be rejected");
     let err_msg = result.unwrap_err().message().to_string();
     assert!(
@@ -423,9 +416,8 @@ async fn ttl_validation_rejects_invalid() {
 
     // TTL too high (1000000s > 864000s maximum)
     let entry = make_commit_entry_with_ttl("ml-training", "high-ttl", 1_000_000);
-    let result = client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await;
+    let result =
+        client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await;
     assert!(result.is_err(), "TTL=1000000 should be rejected");
     let err_msg = result.unwrap_err().message().to_string();
     assert!(
@@ -435,9 +427,8 @@ async fn ttl_validation_rejects_invalid() {
 
     // TTL within bounds (3600s = 1 hour)
     let entry = make_commit_entry_with_ttl("ml-training", "valid-ttl", 3600);
-    let result = client
-        .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
-        .await;
+    let result =
+        client.append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) })).await;
     assert!(result.is_ok(), "TTL=3600 should be accepted: {:?}", result.err());
     assert_eq!(result.unwrap().into_inner().sequence, 0, "first valid entry should be seq 0");
 }

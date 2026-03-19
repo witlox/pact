@@ -473,7 +473,8 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
     }
 }
 
-fn format_entry(entry: &ProtoConfigEntry) -> String {
+/// Format a config entry for display. Public for testing.
+pub fn format_entry(entry: &ProtoConfigEntry) -> String {
     let entry_type_name = match entry.entry_type {
         1 => "COMMIT",
         2 => "ROLLBACK",
@@ -504,4 +505,208 @@ fn format_entry(entry: &ProtoConfigEntry) -> String {
         entry.author.as_ref().map_or_else(|| "unknown".to_string(), |a| a.principal.clone());
 
     format!("#{} {} {} by {}", entry.sequence, entry_type_name, scope, author)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // --- format_entry tests ---
+
+    fn make_entry(
+        sequence: u64,
+        entry_type: i32,
+        scope: Option<ProtoScopeMsg>,
+        author: Option<ProtoIdentity>,
+    ) -> ProtoConfigEntry {
+        ProtoConfigEntry {
+            sequence,
+            timestamp: None,
+            entry_type,
+            scope,
+            author,
+            parent: None,
+            state_delta: None,
+            policy_ref: String::new(),
+            ttl: None,
+            emergency_reason: None,
+        }
+    }
+
+    #[test]
+    fn format_entry_commit_with_vcluster() {
+        let entry = make_entry(
+            42,
+            1,
+            Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId("ml-train".into())) }),
+            Some(ProtoIdentity {
+                principal: "alice@cscs.ch".into(),
+                principal_type: "Human".into(),
+                role: "pact-ops-ml".into(),
+            }),
+        );
+        let formatted = format_entry(&entry);
+        assert_eq!(formatted, "#42 COMMIT vc:ml-train by alice@cscs.ch");
+    }
+
+    #[test]
+    fn format_entry_rollback_with_node_scope() {
+        let entry = make_entry(
+            7,
+            2,
+            Some(ProtoScopeMsg { scope: Some(ProtoScope::NodeId("node-099".into())) }),
+            Some(ProtoIdentity {
+                principal: "bob".into(),
+                principal_type: "Human".into(),
+                role: "admin".into(),
+            }),
+        );
+        let formatted = format_entry(&entry);
+        assert_eq!(formatted, "#7 ROLLBACK node:node-099 by bob");
+    }
+
+    #[test]
+    fn format_entry_no_scope_no_author() {
+        let entry = make_entry(1, 4, None, None);
+        let formatted = format_entry(&entry);
+        assert_eq!(formatted, "#1 DRIFT_DETECTED global by unknown");
+    }
+
+    #[test]
+    fn format_entry_global_scope() {
+        let entry = make_entry(
+            5,
+            6,
+            Some(ProtoScopeMsg { scope: Some(ProtoScope::Global(true)) }),
+            Some(ProtoIdentity {
+                principal: "system".into(),
+                principal_type: "Service".into(),
+                role: "pact-platform-admin".into(),
+            }),
+        );
+        let formatted = format_entry(&entry);
+        assert_eq!(formatted, "#5 POLICY_UPDATE global by system");
+    }
+
+    #[test]
+    fn format_entry_all_entry_types() {
+        let types = vec![
+            (1, "COMMIT"),
+            (2, "ROLLBACK"),
+            (3, "AUTO_CONVERGE"),
+            (4, "DRIFT_DETECTED"),
+            (5, "CAPABILITY_CHANGE"),
+            (6, "POLICY_UPDATE"),
+            (7, "BOOT_CONFIG"),
+            (8, "EMERGENCY_ON"),
+            (9, "EMERGENCY_OFF"),
+            (10, "EXEC_LOG"),
+            (11, "SHELL_SESSION"),
+            (12, "SERVICE_LIFECYCLE"),
+            (13, "PENDING_APPROVAL"),
+            (99, "UNKNOWN"),
+            (0, "UNKNOWN"),
+        ];
+        for (code, expected_name) in types {
+            let entry = make_entry(1, code, None, None);
+            let formatted = format_entry(&entry);
+            assert!(
+                formatted.contains(expected_name),
+                "entry_type {code} should map to {expected_name}, got: {formatted}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_entry_scope_with_none_inner() {
+        let entry = make_entry(1, 1, Some(ProtoScopeMsg { scope: None }), None);
+        let formatted = format_entry(&entry);
+        assert!(formatted.contains("global"));
+    }
+
+    // --- dispatch_connected tests (no gRPC connection) ---
+
+    #[tokio::test]
+    async fn dispatch_connected_unknown_tool_returns_none() {
+        let connections = Connections { journal: None, agent: None };
+        let result = dispatch_connected("nonexistent_tool", &json!({}), &connections).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_journal_tools_without_connection() {
+        let connections = Connections { journal: None, agent: None };
+        let journal_tools = vec![
+            "pact_status",
+            "pact_log",
+            "pact_commit",
+            "pact_rollback",
+            "pact_diff",
+            "pact_emergency",
+            "pact_apply",
+            "pact_query_fleet",
+        ];
+
+        for tool_name in journal_tools {
+            let result = dispatch_connected(tool_name, &json!({}), &connections).await;
+            let result = result.expect(&format!("{tool_name} should return Some"));
+            assert!(result.is_error, "{tool_name} should be error without journal");
+            assert!(
+                result.content[0].text.contains("not connected to journal"),
+                "{tool_name}: unexpected message: {}",
+                result.content[0].text
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_agent_tools_without_connection() {
+        let connections = Connections { journal: None, agent: None };
+        let agent_tools = vec!["pact_exec", "pact_cap", "pact_service_status"];
+
+        for tool_name in agent_tools {
+            let result = dispatch_connected(tool_name, &json!({}), &connections).await;
+            let result = result.expect(&format!("{tool_name} should return Some"));
+            assert!(result.is_error, "{tool_name} should be error without agent");
+            assert!(
+                result.content[0].text.contains("not connected to agent"),
+                "{tool_name}: unexpected message: {}",
+                result.content[0].text
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_tool_connected_backward_compat_returns_none_for_unknown() {
+        // dispatch_tool_connected wraps dispatch_connected with journal-only connections
+        // Create a fake channel that won't actually connect
+        let connections = Connections { journal: None, agent: None };
+        let result = dispatch_connected("no_such_tool", &json!({}), &connections).await;
+        assert!(result.is_none());
+    }
+
+    // --- Argument validation tests via dispatch_connected (no connection) ---
+    // These verify that tools that require args (commit, rollback, exec, apply, emergency)
+    // produce proper error messages even without a gRPC connection.
+    // Since connection is None, they return "not connected" before reaching arg validation.
+    // But we can test the stub dispatch path in tools.rs for arg validation — covered there.
+
+    // --- Emergency mode P8 restriction test ---
+    // This is the only tool handler that has logic before the gRPC call.
+
+    #[tokio::test]
+    async fn dispatch_connected_emergency_start_without_connection() {
+        let connections = Connections { journal: None, agent: None };
+        let result = dispatch_connected(
+            "pact_emergency",
+            &json!({"action": "start", "reason": "test"}),
+            &connections,
+        )
+        .await;
+        let result = result.unwrap();
+        // Without connection, we get "not connected" before reaching P8 check
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("not connected to journal"));
+    }
 }

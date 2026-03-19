@@ -575,9 +575,7 @@ pub async fn promote_node(
         ))
     } else {
         let toml = promote::export_deltas_as_toml(&deltas);
-        Ok(format!(
-            "Exported {count} delta(s) from node {node_id}\n\n{toml}"
-        ))
+        Ok(format!("Exported {count} delta(s) from node {node_id}\n\n{toml}"))
     }
 }
 
@@ -931,10 +929,10 @@ pub async fn blacklist_remove(
 
 /// Execute `pact group list` — discover vClusters via journal entries and query their policies.
 pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
+    use super::group::{format_group_list, GroupSummary};
     use pact_common::proto::policy::{
         policy_service_client::PolicyServiceClient, GetPolicyRequest,
     };
-    use super::group::{format_group_list, GroupSummary};
     use std::collections::BTreeSet;
 
     // List all journal entries (no scope filter) and collect unique vCluster IDs.
@@ -1010,11 +1008,11 @@ pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
 
 /// Execute `pact group show` — show details for a specific vCluster.
 pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String> {
+    use super::group::{format_group_detail, GroupDetail};
     use pact_common::proto::policy::{
         policy_service_client::PolicyServiceClient, GetPolicyRequest,
     };
     use pact_common::types::VClusterPolicy;
-    use super::group::{format_group_detail, GroupDetail};
 
     let mut client = PolicyServiceClient::new(channel.clone());
     let resp = client
@@ -1029,9 +1027,10 @@ pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String>
     let policy = VClusterPolicy {
         vcluster_id: proto_policy.vcluster_id.clone(),
         policy_id: proto_policy.policy_id.clone(),
-        updated_at: proto_policy.updated_at.as_ref().and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
-        }),
+        updated_at: proto_policy
+            .updated_at
+            .as_ref()
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)),
         drift_sensitivity: proto_policy.drift_sensitivity,
         base_commit_window_seconds: proto_policy.base_commit_window_seconds,
         emergency_window_seconds: proto_policy.emergency_window_seconds,
@@ -1083,8 +1082,8 @@ pub async fn group_set_policy(
     role: &str,
 ) -> anyhow::Result<String> {
     use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, UpdatePolicyRequest,
-        VClusterPolicy as ProtoVClusterPolicy, RoleBinding as ProtoRoleBinding,
+        policy_service_client::PolicyServiceClient, RoleBinding as ProtoRoleBinding,
+        UpdatePolicyRequest, VClusterPolicy as ProtoVClusterPolicy,
     };
     use pact_common::types::VClusterPolicy;
 
@@ -1140,10 +1139,7 @@ pub async fn group_set_policy(
 
     let result = resp.into_inner();
     if result.success {
-        Ok(format!(
-            "Policy updated for vCluster '{name}' (ref: {})",
-            result.policy_ref
-        ))
+        Ok(format!("Policy updated for vCluster '{name}' (ref: {})", result.policy_ref))
     } else {
         Err(anyhow::anyhow!(
             "policy update failed: {}",

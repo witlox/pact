@@ -44,13 +44,13 @@ gRPC metadata → extract Bearer token → validate JWT → extract Identity
 ```
 Identity → whitelist check → platform admin bypass? → role check → classify
               │                      │                    │            │
-              ├─ allowed?            ├─ S2: admin can    ├─ ops?     ├─ state-changing?
-              │   no → learning      │   exec anything   │   yes     │   yes → commit window
-              │         mode record  │                   ├─ viewer?  │   no → read-only
-              └─ yes                 │                   │   read-   │
-                                     │                   │   only    │
-                                     │                   │   cmds    │
-                                     │                   └─ deny     │
+              ├─ allowed?            ├─ S2: admin can     ├─ ops?      ├─ state-changing?
+              │   no → learning      │   exec anything    │   yes      │   yes → commit window
+              │         mode record  │                    ├─ viewer?   │   no → read-only
+              └─ yes                 │                    │   read-    │
+                                     │                    │   only     │
+                                     │                    │   cmds     │
+                                     │                    └─ deny      │
 ```
 
 ## Default Whitelist (37 commands)
