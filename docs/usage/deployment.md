@@ -12,6 +12,18 @@ that need to be deployed:
 The journal is pact's distributed immutable log, backed by a Raft consensus group.
 Deploy it on dedicated management nodes or co-located with lattice (see ADR-001).
 
+### Install the binary
+
+Download the platform binaries for your architecture from the
+[latest release](https://github.com/witlox/pact/releases/latest):
+
+```bash
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-platform-x86_64.tar.gz
+tar xzf pact-platform-x86_64.tar.gz -C /usr/local/bin/
+```
+
+This installs `pact-journal`, `pact` (CLI), and `pact-mcp`.
+
 ### 3-Node Quorum (Standard)
 
 A 3-node quorum tolerates 1 node failure. Suitable for most deployments.
@@ -119,12 +131,18 @@ directories. pact is the incumbent: journal quorum starts before lattice.
 
 ### Install the binary
 
-Copy `pact-agent` to each compute node. For diskless nodes, include it in the
-base SquashFS image provisioned by OpenCHAMI.
+Download the agent variant matching your hardware from the
+[latest release](https://github.com/witlox/pact/releases/latest):
 
 ```bash
-cp target/release/pact-agent /usr/local/bin/pact-agent
+# Example: x86_64 NVIDIA node with PactSupervisor (diskless HPC)
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-nvidia-pact.tar.gz
+tar xzf pact-agent-x86_64-nvidia-pact.tar.gz -C /usr/local/bin/
 ```
+
+For diskless nodes, include the `pact-agent` binary in the base SquashFS image
+provisioned by OpenCHAMI. See [getting-started.md](getting-started.md) for the
+full list of agent variants.
 
 ### Create the config
 

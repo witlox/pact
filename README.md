@@ -39,6 +39,30 @@ Integrates with [Lattice](https://github.com/witlox/lattice),
 Shares types and traits with lattice via the [hpc-core](https://github.com/witlox/hpc-core)
 crates (hpc-node, hpc-audit, hpc-identity).
 
+## Installation
+
+Download pre-built binaries from the [latest release](https://github.com/witlox/pact/releases/latest):
+
+```bash
+# Platform binaries (journal, CLI, MCP) — pick your arch
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-platform-x86_64.tar.gz
+tar xzf pact-platform-x86_64.tar.gz -C /usr/local/bin/
+
+# Agent binary — pick your arch + GPU + supervisor variant
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-nvidia-pact.tar.gz
+tar xzf pact-agent-x86_64-nvidia-pact.tar.gz -C /usr/local/bin/
+```
+
+| Platform binaries | Agent variants |
+|-------------------|----------------|
+| `pact-platform-x86_64` | `pact-agent-x86_64-{pact,systemd}` |
+| `pact-platform-aarch64` | `pact-agent-x86_64-nvidia-{pact,systemd}` |
+| | `pact-agent-x86_64-amd-{pact,systemd}` |
+| | `pact-agent-aarch64-{pact,systemd}` |
+| | `pact-agent-aarch64-nvidia-{pact,systemd}` |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#feature-flags) for what each variant includes.
+
 ## CLI Overview
 
 ```bash
