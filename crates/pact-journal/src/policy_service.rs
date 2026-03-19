@@ -63,6 +63,68 @@ impl PolicyServiceImpl {
             _ => Scope::Global,
         }
     }
+
+    fn make_response(
+        authorized: bool,
+        policy_ref: String,
+        denial_reason: Option<String>,
+    ) -> PolicyEvalResponse {
+        PolicyEvalResponse { authorized, policy_ref, denial_reason, approval: None }
+    }
+
+    fn policy_ref(
+        policy: Option<&pact_common::types::VClusterPolicy>,
+        prefix: &str,
+        action: &str,
+    ) -> String {
+        policy.map_or_else(
+            || format!("{prefix}:default:{action}"),
+            |p| format!("{prefix}:{}:{action}", p.policy_id),
+        )
+    }
+
+    /// Evaluate via OPA when RBAC defers and no two-person approval needed (ADR-003).
+    async fn evaluate_opa(
+        &self,
+        identity: &Identity,
+        scope: &Scope,
+        action: &str,
+        command: Option<&str>,
+        policy: Option<&pact_common::types::VClusterPolicy>,
+    ) -> PolicyEvalResponse {
+        if let Some(ref opa_client) = self.opa_client {
+            let opa_input = opa::OpaInput {
+                identity: opa::OpaIdentity {
+                    principal: identity.principal.clone(),
+                    role: identity.role.clone(),
+                    principal_type: format!("{:?}", identity.principal_type),
+                },
+                action: action.to_string(),
+                scope: opa::OpaScope {
+                    vcluster: match scope {
+                        Scope::VCluster(vc) | Scope::Node(vc) => vc.clone(),
+                        Scope::Global => String::new(),
+                    },
+                },
+                command: command.map(String::from),
+            };
+            match opa_client.evaluate(&opa_input).await {
+                Ok(opa::OpaDecision::Allow) => {
+                    Self::make_response(true, Self::policy_ref(policy, "opa", action), None)
+                }
+                Ok(opa::OpaDecision::Deny { reason }) => {
+                    Self::make_response(false, format!("opa:denied:{action}"), Some(reason))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "OPA evaluation failed, degraded mode allow");
+                    Self::make_response(true, Self::policy_ref(policy, "degraded", action), None)
+                }
+            }
+        } else {
+            // No OPA configured — allow (RBAC deferred, no complex rules)
+            Self::make_response(true, Self::policy_ref(policy, "rbac", action), None)
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -109,23 +171,14 @@ impl PolicyService for PolicyServiceImpl {
 
         match rbac_decision {
             RbacDecision::Allow => {
-                let policy_ref = vcluster_policy.as_ref().map_or_else(
-                    || format!("rbac:default:{}", req.action),
-                    |p| format!("rbac:{}:{}", p.policy_id, req.action),
-                );
-                Ok(Response::new(PolicyEvalResponse {
-                    authorized: true,
-                    policy_ref,
-                    denial_reason: None,
-                    approval: None,
-                }))
+                let policy_ref = Self::policy_ref(vcluster_policy.as_ref(), "rbac", &req.action);
+                Ok(Response::new(Self::make_response(true, policy_ref, None)))
             }
-            RbacDecision::Deny { reason } => Ok(Response::new(PolicyEvalResponse {
-                authorized: false,
-                policy_ref: format!("rbac:denied:{}", req.action),
-                denial_reason: Some(reason),
-                approval: None,
-            })),
+            RbacDecision::Deny { reason } => Ok(Response::new(Self::make_response(
+                false,
+                format!("rbac:denied:{}", req.action),
+                Some(reason),
+            ))),
             RbacDecision::Defer => {
                 if policy.two_person_approval {
                     // Two-person approval needed — persist through Raft
@@ -142,89 +195,30 @@ impl PolicyService for PolicyServiceImpl {
                         created_at: now,
                         expires_at: now + chrono::Duration::hours(24),
                     };
-                    let cmd = JournalCommand::CreateApproval(approval);
                     self.raft
-                        .client_write(cmd)
+                        .client_write(JournalCommand::CreateApproval(approval))
                         .await
                         .map_err(|e| Status::internal(format!("Raft write failed: {e}")))?;
 
-                    Ok(Response::new(PolicyEvalResponse {
-                        authorized: false,
-                        policy_ref: format!("rbac:deferred:{}", req.action),
-                        denial_reason: None,
-                        approval: Some(ProtoApprovalRequired {
-                            approval_type: "two_person".into(),
-                            pending_approval_id: approval_id,
-                        }),
-                    }))
-                } else if let Some(ref opa_client) = self.opa_client {
-                    // OPA evaluation for complex rules (ADR-003)
-                    let opa_input = opa::OpaInput {
-                        identity: opa::OpaIdentity {
-                            principal: identity.principal.clone(),
-                            role: identity.role.clone(),
-                            principal_type: format!("{:?}", identity.principal_type),
-                        },
-                        action: req.action.clone(),
-                        scope: opa::OpaScope {
-                            vcluster: match &scope {
-                                Scope::VCluster(vc) | Scope::Node(vc) => vc.clone(),
-                                Scope::Global => String::new(),
-                            },
-                        },
-                        command: req.command.clone(),
-                    };
-                    match opa_client.evaluate(&opa_input).await {
-                        Ok(opa::OpaDecision::Allow) => {
-                            let policy_ref = vcluster_policy.as_ref().map_or_else(
-                                || format!("opa:default:{}", req.action),
-                                |p| format!("opa:{}:{}", p.policy_id, req.action),
-                            );
-                            Ok(Response::new(PolicyEvalResponse {
-                                authorized: true,
-                                policy_ref,
-                                denial_reason: None,
-                                approval: None,
-                            }))
-                        }
-                        Ok(opa::OpaDecision::Deny { reason }) => {
-                            Ok(Response::new(PolicyEvalResponse {
-                                authorized: false,
-                                policy_ref: format!("opa:denied:{}", req.action),
-                                denial_reason: Some(reason),
-                                approval: None,
-                            }))
-                        }
-                        Err(e) => {
-                            // ADR-011: degraded mode — warn and allow
-                            tracing::warn!(
-                                error = %e,
-                                "OPA evaluation failed, degraded mode allow"
-                            );
-                            let policy_ref = vcluster_policy.as_ref().map_or_else(
-                                || format!("degraded:default:{}", req.action),
-                                |p| format!("degraded:{}:{}", p.policy_id, req.action),
-                            );
-                            Ok(Response::new(PolicyEvalResponse {
-                                authorized: true,
-                                policy_ref,
-                                denial_reason: None,
-                                approval: None,
-                            }))
-                        }
-                    }
+                    let mut resp =
+                        Self::make_response(false, format!("rbac:deferred:{}", req.action), None);
+                    resp.approval = Some(ProtoApprovalRequired {
+                        approval_type: "two_person".into(),
+                        pending_approval_id: approval_id,
+                    });
+                    Ok(Response::new(resp))
                 } else {
-                    // No two-person approval, no OPA — allow
-                    let policy_ref = vcluster_policy.as_ref().map_or_else(
-                        || format!("rbac:default:{}", req.action),
-                        |p| format!("rbac:{}:{}", p.policy_id, req.action),
-                    );
-                    Ok(Response::new(PolicyEvalResponse {
-                        authorized: true,
-                        policy_ref,
-                        denial_reason: None,
-                        approval: None,
-                    }))
+                    // Defer to OPA (or allow if no OPA configured)
+                    let resp = self
+                        .evaluate_opa(
+                            &identity,
+                            &scope,
+                            &req.action,
+                            req.command.as_deref(),
+                            vcluster_policy.as_ref(),
+                        )
+                        .await;
+                    Ok(Response::new(resp))
                 }
             }
         }
