@@ -3,6 +3,7 @@
 //! Each module provides a testcontainers [`Image`] implementation for a
 //! specific service used by pact infrastructure.
 
+pub mod keycloak;
 pub mod loki;
 pub mod opa;
 pub mod prometheus;

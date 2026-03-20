@@ -2933,8 +2933,10 @@ version = "2026.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "hpc-audit",
+ "hpc-auth",
  "hpc-identity",
  "hpc-node",
  "jsonwebtoken",

@@ -88,7 +88,7 @@ jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 prometheus = "0.13"
 
 # HTTP (for REST endpoints, OPA, Sovra integration)
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
 axum = "0.8"
 tower = { version = "0.5", features = ["util"] }
 
