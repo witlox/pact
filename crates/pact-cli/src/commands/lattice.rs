@@ -125,6 +125,29 @@ pub async fn inspect_job(config: &DelegationConfig, job_id: &str) -> anyhow::Res
                 res.min_nodes, res.max_nodes, res.gpu_type
             ));
         }
+        if let Some(ref probe) = spec.liveness_probe {
+            let probe_desc = if probe.probe_type == "http" {
+                format!(
+                    "HTTP GET :{}{} every {}s (threshold={}, timeout={}s, delay={}s)",
+                    probe.port,
+                    probe.path,
+                    probe.period_secs,
+                    probe.failure_threshold,
+                    probe.timeout_secs,
+                    probe.initial_delay_secs
+                )
+            } else {
+                format!(
+                    "TCP :{} every {}s (threshold={}, timeout={}s, delay={}s)",
+                    probe.port,
+                    probe.period_secs,
+                    probe.failure_threshold,
+                    probe.timeout_secs,
+                    probe.initial_delay_secs
+                )
+            };
+            out.push_str(&format!("Probe:      {probe_desc}\n"));
+        }
     }
 
     if let Some(ref ts) = status.created_at {
@@ -308,6 +331,7 @@ pub async fn health_check(
 
     // --- Lattice health ---
     out.push_str("\n=== Lattice Scheduler ===\n");
+    let mut lc_for_services: Option<lattice_client::LatticeClient> = None;
     match connect_lattice(config).await {
         Err(msg) => {
             out.push_str(&format!("  Status: UNAVAILABLE ({msg})\n"));
@@ -322,6 +346,7 @@ pub async fn health_check(
                 out.push_str(&format!("  Status:  {}\n", resp.status.to_uppercase()));
                 out.push_str(&format!("  Version: {}\n", resp.version));
                 out.push_str(&format!("  Uptime:  {}s\n", resp.uptime_secs));
+                lc_for_services = Some(lc);
             }
             Err(e) => {
                 out.push_str(&format!("  Status: UNHEALTHY ({e})\n"));
@@ -330,7 +355,93 @@ pub async fn health_check(
         },
     }
 
+    // --- Service registry health (Feature 3) ---
+    out.push_str("\n=== Lattice Services ===\n");
+    match lc_for_services {
+        None => out.push_str("  (unavailable — see above)\n"),
+        Some(ref mut lc) => match lc.list_services().await {
+            Ok(resp) => {
+                if resp.names.is_empty() {
+                    out.push_str("  Registered: 0 services\n");
+                } else {
+                    let mut total_endpoints = 0u32;
+                    let mut service_lines = Vec::new();
+                    for name in &resp.names {
+                        match lc.lookup_service(name).await {
+                            Ok(svc) => {
+                                let count = svc.endpoints.len() as u32;
+                                total_endpoints += count;
+                                service_lines.push(format!("    {name}: {count} endpoints"));
+                            }
+                            Err(_) => {
+                                service_lines.push(format!("    {name}: (lookup failed)"));
+                            }
+                        }
+                    }
+                    out.push_str(&format!(
+                        "  Registered: {} services, {} endpoints\n",
+                        resp.names.len(),
+                        total_endpoints
+                    ));
+                    for line in &service_lines {
+                        out.push_str(&format!("{line}\n"));
+                    }
+                }
+            }
+            Err(e) => out.push_str(&format!("  Service registry error: {e}\n")),
+        },
+    }
+
     out.push_str(&format!("\nOverall: {}", if all_healthy { "PASS" } else { "FAIL" }));
+
+    Ok(out)
+}
+
+// ─── Services ─────────────────────────────────────────────
+
+/// List registered services from the lattice service registry.
+pub async fn list_services(config: &DelegationConfig) -> anyhow::Result<String> {
+    let mut lc = connect_lattice(config).await?;
+
+    let resp = lc.list_services().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let mut out = String::new();
+    if resp.names.is_empty() {
+        out.push_str("No services registered.\n");
+    } else {
+        out.push_str(&format!("{} registered services:\n", resp.names.len()));
+        for name in &resp.names {
+            out.push_str(&format!("  {name}\n"));
+        }
+    }
+
+    Ok(out)
+}
+
+/// Look up endpoints for a named service.
+pub async fn lookup_service(config: &DelegationConfig, name: &str) -> anyhow::Result<String> {
+    let mut lc = connect_lattice(config).await?;
+
+    let resp = lc.lookup_service(name).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let mut out = String::new();
+    out.push_str(&format!("Service: {}\n", resp.name));
+
+    if resp.endpoints.is_empty() {
+        out.push_str("  No endpoints registered.\n");
+    } else {
+        out.push_str(&format!("  {} endpoints:\n", resp.endpoints.len()));
+        for ep in &resp.endpoints {
+            out.push_str(&format!(
+                "    alloc={} tenant={} port={} proto={} nodes=[{}]\n",
+                ep.allocation_id,
+                ep.tenant,
+                ep.port,
+                if ep.protocol.is_empty() { "tcp" } else { &ep.protocol },
+                ep.nodes.join(", ")
+            ));
+        }
+    }
 
     Ok(out)
 }
@@ -375,6 +486,22 @@ mod tests {
     async fn accounting_no_endpoint() {
         let config = DelegationConfig::default();
         let result = accounting(&config, None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn list_services_no_endpoint() {
+        let config = DelegationConfig::default();
+        let result = list_services(&config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn lookup_service_no_endpoint() {
+        let config = DelegationConfig::default();
+        let result = lookup_service(&config, "inference-api").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not configured"));
     }

@@ -29,6 +29,8 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         pact_cluster_health(),
         pact_system_health(),
         pact_accounting(),
+        pact_services_list(),
+        pact_services_lookup(),
     ]
 }
 
@@ -357,6 +359,35 @@ fn pact_accounting() -> ToolDefinition {
     }
 }
 
+fn pact_services_list() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_services_list".into(),
+        description: "List registered services from the lattice service registry.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn pact_services_lookup() -> ToolDefinition {
+    ToolDefinition {
+        name: "pact_services_lookup".into(),
+        description: "Look up endpoints for a named service in the lattice service registry."
+            .into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Service name to look up."
+                }
+            },
+            "required": ["name"]
+        }),
+    }
+}
+
 /// Dispatch a tool call to the appropriate handler.
 pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResult {
     match name {
@@ -376,6 +407,8 @@ pub fn dispatch_tool(name: &str, arguments: &serde_json::Value) -> ToolCallResul
         "pact_cluster_health" => handle_cluster_health(arguments),
         "pact_system_health" => handle_system_health(arguments),
         "pact_accounting" => handle_accounting(arguments),
+        "pact_services_list" => handle_services_list(arguments),
+        "pact_services_lookup" => handle_services_lookup(arguments),
         _ => tool_result(format!("Unknown tool: {name}"), true),
     }
 }
@@ -508,6 +541,15 @@ fn handle_accounting(args: &serde_json::Value) -> ToolCallResult {
     tool_result(format!("Accounting: vcluster={vc} (lattice client required)"), false)
 }
 
+fn handle_services_list(_args: &serde_json::Value) -> ToolCallResult {
+    tool_result("Services list (lattice client required)".to_string(), false)
+}
+
+fn handle_services_lookup(args: &serde_json::Value) -> ToolCallResult {
+    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+    tool_result(format!("Service lookup: {name} (lattice client required)"), false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,7 +557,7 @@ mod tests {
     #[test]
     fn all_tools_count() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 18);
     }
 
     #[test]

@@ -2245,9 +2245,9 @@ dependencies = [
 
 [[package]]
 name = "lattice-client"
-version = "2026.1.110"
+version = "2026.1.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07f63598bd1ee6c2fe513b34d525f5ba29352fc802fb12833d6cb5c7e2cab21c"
+checksum = "0ad214c519a84ab3a22abda4d7157aafc47395a669ecf39a4ee6f25ace3aee65"
 dependencies = [
  "lattice-common",
  "prost",
@@ -2261,9 +2261,9 @@ dependencies = [
 
 [[package]]
 name = "lattice-common"
-version = "2026.1.110"
+version = "2026.1.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0453fa1f58fcabb17db8982e02d3d1285bb3952b508b94b62e4da82894383e6a"
+checksum = "aca0fe9248011d74b46d401cab386f8463c243b959f826d034f77b329966aa23"
 dependencies = [
  "async-trait",
  "chrono",

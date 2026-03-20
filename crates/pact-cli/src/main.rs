@@ -243,6 +243,12 @@ enum Commands {
     /// Combined system health check (pact + lattice).
     Health,
 
+    /// Service registry operations (lattice).
+    Services {
+        #[command(subcommand)]
+        action: ServicesSubcommand,
+    },
+
     /// Extend commit window.
     Extend {
         /// Additional minutes (default: 15).
@@ -430,6 +436,17 @@ enum JobsSubcommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum ServicesSubcommand {
+    /// List registered services.
+    List,
+    /// Look up endpoints for a service.
+    Lookup {
+        /// Service name.
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum BlacklistSubcommand {
     /// List current blacklist entries.
     List,
@@ -500,6 +517,7 @@ async fn main() {
             | Commands::ClusterStatus
             | Commands::Audit { .. }
             | Commands::Health
+            | Commands::Services { .. }
     );
 
     let journal_channel = if needs_journal {
@@ -1001,6 +1019,14 @@ async fn main() {
             )
             .await
         }
+        Commands::Services { action } => match action {
+            ServicesSubcommand::List => {
+                pact_cli::commands::lattice::list_services(&delegation_config).await
+            }
+            ServicesSubcommand::Lookup { name } => {
+                pact_cli::commands::lattice::lookup_service(&delegation_config, &name).await
+            }
+        },
         Commands::Login { server, device_code, service_account } => {
             let server_url = server.unwrap_or_else(|| config.endpoint.clone());
             let flow_override = if device_code {

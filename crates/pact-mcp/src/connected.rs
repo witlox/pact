@@ -96,6 +96,12 @@ pub async fn dispatch_connected(
             None => no_journal(),
         }),
         "pact_accounting" => Some(handle_accounting(arguments, &connections.delegation).await),
+        "pact_services_list" => {
+            Some(handle_services_list(arguments, &connections.delegation).await)
+        }
+        "pact_services_lookup" => {
+            Some(handle_services_lookup(arguments, &connections.delegation).await)
+        }
         _ => None,
     }
 }
@@ -545,6 +551,28 @@ async fn handle_accounting(args: &serde_json::Value, config: &DelegationConfig) 
     match pact_cli::commands::lattice::accounting(config, vcluster).await {
         Ok(output) => tool_result(output, false),
         Err(e) => tool_result(format!("Accounting query failed: {e}"), true),
+    }
+}
+
+async fn handle_services_list(
+    _args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    match pact_cli::commands::lattice::list_services(config).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Service list failed: {e}"), true),
+    }
+}
+
+async fn handle_services_lookup(
+    args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+    match pact_cli::commands::lattice::lookup_service(config, name).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Service lookup failed: {e}"), true),
     }
 }
 
