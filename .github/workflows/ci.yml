@@ -20,7 +20,16 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
 
+# Stage 1: fast gates (fmt, clippy, deny)
+# Stage 2: feature flag compilation checks
+# Stage 3: test suites (unit, bdd, e2e, linux-privileged)
+# Stage 4: coverage
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — fast checks, gate everything
+  # ---------------------------------------------------------------------------
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -43,74 +52,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: Test
+  deny:
+    name: Cargo Deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: >
-          cargo llvm-cov --workspace
-          --exclude pact-test-harness
-          --exclude pact-acceptance
-          --exclude pact-e2e
-          --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  acceptance:
-    name: BDD Acceptance
-    runs-on: ubuntu-latest
-    needs: clippy
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-      - uses: Swatinem/rust-cache@v2
-      - name: Run acceptance tests (cucumber, custom harness)
-        run: cargo test -p pact-acceptance
-
-  e2e:
-    name: E2E Integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p pact-e2e -- --test-threads=1
-
-  linux-privileged:
-    name: Linux Privileged Tests (cgroup, OOM)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-      - uses: Swatinem/rust-cache@v2
-      # Run ignored tests that require root/CAP_SYS_ADMIN
-      - run: sudo apt-get install -y squashfs-tools
-      - run: sudo env "PATH=$PATH" cargo test -p pact-e2e --test linux_cgroup --test linux_namespace -- --ignored --test-threads=1
+  # ---------------------------------------------------------------------------
+  # Stage 2 — feature flag compilation (needs stage 1)
+  # ---------------------------------------------------------------------------
 
   feature-check:
     name: Feature Check (${{ matrix.name }})
     runs-on: ubuntu-latest
+    needs: [fmt, clippy, deny]
     strategy:
       fail-fast: false
       matrix:
@@ -138,9 +94,77 @@ jobs:
           key: features-${{ matrix.name }}
       - run: ${{ matrix.cmd }}
 
-  deny:
-    name: Cargo Deny
+  # ---------------------------------------------------------------------------
+  # Stage 3 — test suites (needs stage 2)
+  # ---------------------------------------------------------------------------
+
+  test:
+    name: Test
     runs-on: ubuntu-latest
+    needs: [feature-check]
     steps:
       - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e
+
+  acceptance:
+    name: BDD Acceptance
+    runs-on: ubuntu-latest
+    needs: [feature-check]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p pact-acceptance
+
+  e2e:
+    name: E2E Integration
+    runs-on: ubuntu-latest
+    needs: [feature-check]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p pact-e2e -- --test-threads=1
+
+  linux-privileged:
+    name: Linux Privileged Tests (cgroup, OOM)
+    runs-on: ubuntu-latest
+    needs: [feature-check]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get install -y squashfs-tools
+      - run: sudo env "PATH=$PATH" cargo test -p pact-e2e --test linux_cgroup --test linux_namespace -- --ignored --test-threads=1
+
+  # ---------------------------------------------------------------------------
+  # Stage 4 — coverage (needs stage 3)
+  # ---------------------------------------------------------------------------
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: [test, acceptance, e2e, linux-privileged]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: >
+          cargo llvm-cov --workspace
+          --exclude pact-test-harness
+          --exclude pact-acceptance
+          --exclude pact-e2e
+          --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
