@@ -394,11 +394,11 @@ manifest):
 sudo mkdir -p /tmp/pact-image/rootfs/etc/lattice
 sudo tee /tmp/pact-image/rootfs/etc/lattice/node-agent.toml << 'EOF'
 [node_agent]
-# lattice scheduler quorum endpoints
+# lattice scheduler quorum endpoints (on HSN, not management network — ADR-017)
 scheduler_endpoints = [
-    "lattice-1.mgmt:50051",
-    "lattice-2.mgmt:50051",
-    "lattice-3.mgmt:50051",
+    "lattice-1.hsn:50051",
+    "lattice-2.hsn:50051",
+    "lattice-3.hsn:50051",
 ]
 
 # pact capability manifest (lattice-node-agent reads this)
@@ -478,25 +478,34 @@ pact health                              # pact + lattice health
 pact drain compute-001                   # lattice drain + pact audit
 ```
 
-Configure the lattice endpoint for supercharged commands:
+Configure the lattice endpoint for supercharged commands. Note: the pact CLI
+connects to lattice's HSN-facing gRPC port from the admin workstation (which
+must have HSN access or a management-to-HSN gateway):
 
 ```bash
-export PACT_LATTICE_ENDPOINT=http://lattice-1.mgmt:50051
+export PACT_LATTICE_ENDPOINT=http://lattice-1.hsn:50051
 export PACT_LATTICE_TOKEN=<lattice-auth-token>
 ```
 
 ### Network separation
 
-pact and lattice use separate networks (ADR-017):
+pact and lattice run on separate networks (ADR-017). pact uses the management
+network exclusively. Lattice runs entirely on the HSN — including agent↔scheduler
+communication, Raft consensus, and workload data.
 
 | Traffic | Network | Port |
 |---------|---------|------|
 | pact agent ↔ journal | Management | 9443, 9444 |
 | pact shell/exec/diag | Management | 9445 |
-| lattice agent ↔ scheduler | Management | 50051 |
-| Workload data (MPI, NCCL) | HSN (Slingshot) | Application-defined |
+| pact journal metrics | Management | 9091 |
+| lattice agent ↔ scheduler | **HSN** | 50051 |
+| lattice Raft consensus | **HSN** | 9000 |
+| Workload data (MPI, NCCL) | **HSN** | Application-defined |
 
-pact never touches the HSN. lattice never touches pact's Raft ports.
+pact never touches the HSN. Lattice never touches pact's management ports.
+If the HSN goes down, pact continues operating (admin access, config management)
+while lattice pauses scheduling. If the management network goes down, pact
+agents use cached config while lattice is unaffected.
 
 ## Troubleshooting
 
