@@ -3,7 +3,6 @@
 //! Starts Keycloak in development mode with a pre-configured realm
 //! containing pact-specific clients, roles, and test users.
 
-use testcontainers::core::wait::HttpWaitStrategy;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::Image;
 
@@ -39,8 +38,8 @@ impl Image for Keycloak {
     }
 
     fn ready_conditions(&self) -> Vec<WaitFor> {
-        // Keycloak dev mode serves on 8080 — wait for the health endpoint
-        vec![HttpWaitStrategy::new("/health/ready").with_expected_status_code(200u16).into()]
+        // Wait for Keycloak to log that it's listening (reliable across versions/platforms)
+        vec![WaitFor::message_on_stdout("Listening on:")]
     }
 
     fn expose_ports(&self) -> &[ContainerPort] {

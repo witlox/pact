@@ -232,7 +232,9 @@ async fn boot_config_stream_from_cluster() {
         match &chunk.chunk {
             Some(pact_common::proto::stream::config_chunk::Chunk::BaseOverlay(ov)) => {
                 assert_eq!(ov.version, 1);
-                assert_eq!(ov.data.len(), 100);
+                // Data is zstd compressed — verify decompression recovers original
+                let decompressed = zstd::decode_all(ov.data.as_slice()).unwrap();
+                assert_eq!(decompressed.len(), 100);
                 has_overlay = true;
             }
             Some(pact_common::proto::stream::config_chunk::Chunk::Complete(c)) => {
