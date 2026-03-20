@@ -21,7 +21,7 @@ use super::promote;
 /// Decodes the JWT payload without signature verification (the journal validates it).
 /// Falls back to defaults if decoding fails.
 pub fn resolve_identity_from_token(token: &str) -> (String, String) {
-    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+    use jsonwebtoken::dangerous::insecure_decode;
 
     #[derive(serde::Deserialize)]
     struct Claims {
@@ -29,13 +29,7 @@ pub fn resolve_identity_from_token(token: &str) -> (String, String) {
         pact_role: Option<String>,
     }
 
-    // Try to decode without verification — we just need the claims
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_exp = false;
-    validation.validate_aud = false;
-
-    match decode::<Claims>(token, &DecodingKey::from_secret(b""), &validation) {
+    match insecure_decode::<Claims>(token) {
         Ok(data) => {
             let principal = data.claims.sub.unwrap_or_else(|| "cli-user".to_string());
             let role = data.claims.pact_role.unwrap_or_else(|| "pact-platform-admin".to_string());
