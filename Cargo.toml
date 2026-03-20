@@ -89,7 +89,7 @@ prometheus = "0.13"
 
 # HTTP (for REST endpoints, OPA, Sovra integration)
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-axum = "0.7"
+axum = "0.8"
 tower = { version = "0.5", features = ["util"] }
 
 # Compression
