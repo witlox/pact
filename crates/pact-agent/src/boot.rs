@@ -346,6 +346,13 @@ async fn stream_boot_config(
         }
     }
 
+    // Decompress zstd-compressed overlay data (journal compresses at stream time)
+    let overlay_data = if overlay_data.len() >= 4 {
+        zstd::decode_all(overlay_data.as_slice()).unwrap_or(overlay_data)
+    } else {
+        overlay_data
+    };
+
     Ok(BootConfigData { overlay_data, node_delta_data, base_version })
 }
 

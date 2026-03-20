@@ -284,7 +284,10 @@ async fn boot_config_stream_after_overlay_set() {
         match &chunk.chunk {
             Some(pact_common::proto::stream::config_chunk::Chunk::BaseOverlay(ov)) => {
                 assert_eq!(ov.version, 1);
-                assert_eq!(ov.data.len(), 50);
+                // Data is zstd compressed — verify non-empty and decompresses to original size
+                assert!(!ov.data.is_empty(), "compressed overlay should not be empty");
+                let decompressed = zstd::decode_all(ov.data.as_slice()).unwrap();
+                assert_eq!(decompressed.len(), 50);
                 has_overlay = true;
             }
             Some(pact_common::proto::stream::config_chunk::Chunk::Complete(c)) => {

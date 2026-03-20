@@ -44,6 +44,7 @@ jsonwebtoken = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 prometheus = { workspace = true }
+zstd = { workspace = true }
 rcgen = { workspace = true }
 
 # Optional: eBPF observers
