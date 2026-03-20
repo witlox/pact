@@ -17,8 +17,8 @@ Feature: Cross-Context Integration
     Then node "node-001" receives overlay version 1
     And node "node-001" receives its node delta
     And services start in dependency order: "chronyd" then "lattice-node-agent"
-    And a CapabilityReport is written to tmpfs
-    And node "node-001" subscribes to config updates
+    And a CapabilityReport should be written to tmpfs
+    And the agent should subscribe to config updates
 
   Scenario: Config update triggers service restart
     Given node "node-001" has booted and is subscribed to config updates
@@ -38,7 +38,7 @@ Feature: Cross-Context Integration
 
   Scenario: Commit window expiry triggers rollback and journal entry
     Given node "node-001" is in state "Drifted" with an active commit window
-    When the commit window expires
+    When the window expires
     Then auto-rollback is attempted
     And a Rollback entry is recorded in the journal
     And node "node-001" state changes to "Committed"
@@ -57,7 +57,7 @@ Feature: Cross-Context Integration
   Scenario: Non-whitelisted exec denied without policy call
     Given user "admin@example.com" has role "pact-ops-ml-training"
     And "rm" is NOT in the exec whitelist for vCluster "ml-training"
-    When admin executes "rm /tmp/test" on node "node-001"
+    When admin executes "rm" on node "node-001"
     Then the request is rejected with exit code 6
     And PolicyService.Evaluate is NOT called
     And the denial is logged in the journal
@@ -82,7 +82,7 @@ Feature: Cross-Context Integration
     When the emergency window expires without ending
     Then a Loki alert event is sent
     And lattice is called to cordon node "node-001"
-    When admin "ops-lead@example.com" force-ends the emergency
+    When admin "opslead@example.com" force-ends the emergency
     Then an EmergencyEnd entry is recorded in the journal
     And node "node-001" state returns to "Committed" or "Drifted"
 
@@ -114,7 +114,7 @@ Feature: Cross-Context Integration
     When a drift event occurs on node "node-001"
     Then drift is logged locally on node "node-001"
     And cached policy is used for authorization
-    When the network partition heals
+    When connectivity to the journal is restored
     Then node "node-001" reconnects to the journal
     And locally logged events are replayed to the journal
     And config subscription resumes from last known sequence
@@ -124,11 +124,11 @@ Feature: Cross-Context Integration
     And the journal is unreachable from node "node-001"
     When an admin changes "net.core.somaxconn" to "2048" on node "node-001" via pact shell
     And meanwhile "net.core.somaxconn" is committed as "4096" in the journal for vCluster "ml-training"
-    And the network partition heals
+    And connectivity to the journal is restored
     Then node "node-001" reports its local change to the journal first
     And a merge conflict is detected on "net.core.somaxconn"
     And node "node-001" pauses convergence for "net.core.somaxconn"
-    When admin "ops@example.com" resolves by accepting journal value
+    When admin "ops@example.com" resolves the conflict by accepting journal
     Then node "node-001" applies "net.core.somaxconn" as "4096"
     And the overwritten local value "2048" is logged for audit
     And config subscription resumes normally
@@ -223,7 +223,7 @@ Feature: Cross-Context Integration
     Then pact detects empty cgroup and cleans up alloc-01's namespaces
     And MountRef refcount decreases to 1
     When alloc-02 completes (cgroup empties)
-    Then pact cleans up alloc-02's namespaces
+    Then pact detects empty cgroup and cleans up alloc-02's namespaces
     And MountRef refcount reaches 0
     And cache hold timer starts for "pytorch-2.5.sqfs"
 
@@ -232,7 +232,7 @@ Feature: Cross-Context Integration
   Scenario: Emergency mode allows cross-slice intervention with full audit
     Given node "node-001" has active workloads in workload.slice
     And user "admin@example.com" has role "pact-ops-ml-training"
-    When admin enters emergency mode with reason "runaway process consuming all memory"
+    When admin enters emergency mode on node "node-001" with reason "runaway process consuming all memory"
     Then an EmergencyStart AuditEvent is recorded
     When admin requests freeze of workload.slice with "--force"
     Then pact freezes all processes in workload.slice
@@ -272,7 +272,7 @@ Feature: Cross-Context Integration
 
   Scenario: Federated user gets UID, uses NFS, org departs
     Given org "partner-a" joined with org_index 1 (precursor 20000, stride 10000)
-    And "researcher@partner-a.org" authenticates via OIDC
+    When "researcher@partner-a.org" authenticates via OIDC
     Then "researcher@partner-a.org" is assigned UID 20000 in the journal
     And all agents receive the UidMap update
     And NFS files created by this user are owned by UID 20000

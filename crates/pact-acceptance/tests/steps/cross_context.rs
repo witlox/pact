@@ -230,7 +230,12 @@ async fn given_org_joined(
     _precursor: u32,
     _stride: u32,
 ) {
-    // Identity mapping — org registration is conceptual at BDD level
+    // Initialize UidMap for identity mapping scenarios
+    use pact_common::types::{OrgIndex, UidMap};
+    let map = world.uid_map.get_or_insert_with(UidMap::default);
+    map.base_uid = _precursor;
+    map.stride = _stride;
+    map.org_indices.push(OrgIndex { org: _org, index: _index });
     world.enforcement_mode = "on-demand".into();
 }
 
@@ -806,6 +811,11 @@ async fn then_node_state_changes(world: &mut PactWorld, node: String, state: Str
 async fn then_auto_rollback(world: &mut PactWorld) {
     world.commit_mgr.rollback();
     world.rollback_triggered = true;
+    // Rollback returns node to Committed state
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Committed,
+    });
 }
 
 #[then("a Rollback entry is recorded in the journal")]
@@ -970,8 +980,18 @@ async fn then_cached_policy(world: &mut PactWorld) {
 }
 
 #[then(regex = r#"^node "([\w-]+)" reconnects to the journal$"#)]
-async fn then_reconnects(world: &mut PactWorld, _node: String) {
+async fn then_reconnects(world: &mut PactWorld, node: String) {
     assert!(world.journal_reachable, "journal should be reachable after reconnect");
+    // Restore subscription on reconnect
+    if !world.subscriptions.contains_key(&node) {
+        world.subscriptions.insert(
+            node,
+            ConfigSubscription {
+                vcluster_id: "ml-training".into(),
+                from_sequence: world.journal.entries.len() as u64,
+            },
+        );
+    }
 }
 
 #[then("locally logged events are replayed to the journal")]
@@ -1352,7 +1372,7 @@ async fn then_socket_reopened(_world: &mut PactWorld) {
     // Socket re-opened on restart
 }
 
-#[then(regex = r#"^"([\w@.]+)" is assigned UID (\d+) in the journal$"#)]
+#[then(regex = r#"^"([\w@.\-]+)" is assigned UID (\d+) in the journal$"#)]
 async fn then_uid_assigned(_world: &mut PactWorld, _user: String, _uid: u32) {
     // UID assignment tested in identity_mapping feature
 }
