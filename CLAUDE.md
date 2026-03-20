@@ -40,7 +40,7 @@ Five components:
    OPA policy evaluation, Sovra federation sync
 4. **pact CLI** (admin workstation) — remote: commit, rollback, diff, status, exec,
    shell, diag, plus supercharged commands (jobs, queue, cluster, audit, accounting,
-   health) that combine pact + lattice data. local (on-node): same commands in
+   health, services) that combine pact + lattice data. local (on-node): same commands in
    pact shell mode
 5. **pact MCP server** (optional) — AI agent tool-use interface
 

@@ -765,7 +765,9 @@ Requires `pact-ops-{vcluster}` or `pact-platform-admin` role.
 
 ### `pact jobs inspect`
 
-Show detailed information about a job allocation.
+Show detailed information about a job allocation, including resource requests,
+node placement, and liveness probe configuration (displayed after the Resources
+section when probes are configured).
 
 ```bash
 pact jobs inspect alloc-7f3a
@@ -837,7 +839,36 @@ pact health
 ```
 
 Reports health status for: pact-journal Raft quorum, pact-agent connectivity,
-lattice scheduler, lattice node-agents, OPA policy engine, and telemetry pipeline.
+lattice scheduler, lattice node-agents, OPA policy engine, telemetry pipeline,
+and Lattice Services (service/endpoint counts from the service registry).
+
+### `pact services list`
+
+List services registered in the lattice service registry.
+
+```bash
+pact services list                          # All services
+pact services list --vcluster ml-training   # Filter by vCluster
+```
+
+| Option | Description |
+|--------|-------------|
+| `--vcluster <NAME>` | Filter by vCluster |
+
+### `pact services lookup`
+
+Look up a specific service by name in the lattice service registry.
+
+```bash
+pact services lookup my-inference-api
+```
+
+| Option | Description |
+|--------|-------------|
+| `<name>` | Service name to look up (required) |
+
+Returns service details including registered endpoints, health status, and
+vCluster association.
 
 ---
 

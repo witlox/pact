@@ -61,7 +61,7 @@ The init system for diskless compute nodes. First process to start after kernel 
 
 Separate Raft group from lattice scheduler. Immutable append-only log.
 
-- Streaming boot config (two-phase: vCluster overlay + node delta)
+- Streaming boot config (two-phase: vCluster overlay + node delta, zstd compressed)
 - Event stream to Loki for Grafana dashboards
 - Read replicas for 100k+ boot storms
 
@@ -87,7 +87,7 @@ Admin workstation tool. Also runs locally as pact shell on nodes.
 T+0.0s  PXE → kernel + initramfs → mount SquashFS root (OpenCHAMI)
 T+0.1s  pact-agent starts (PID 1 or early init target)
 T+0.2s  mTLS auth to pact-journal
-T+0.3s  Phase 1: stream vCluster base overlay (~100-200 KB compressed)
+T+0.3s  Phase 1: stream vCluster base overlay (~100-200 KB, zstd compressed)
 T+0.5s  Apply: sysctl, kernel modules, NFS/Lustre mounts, base uenv
 T+0.6s  Phase 2: node-specific delta (<1 KB)
 T+0.7s  Start declared services in dependency order:

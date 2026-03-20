@@ -53,6 +53,8 @@ scheduler via `DelegationConfig`:
 | `pact_cluster_health` | `pact cluster` | Combined pact journal + lattice Raft health |
 | `pact_system_health` | `pact health` | Combined health check across pact and lattice |
 | `pact_accounting` | `pact accounting` | Resource usage (CPU/GPU hours, storage) per tenant |
+| `pact_services_list` | `pact services list` | List services from lattice service registry |
+| `pact_services_lookup` | `pact services lookup` | Look up a specific service by name in lattice registry |
 
 These tools require `PACT_LATTICE_ENDPOINT` (and optionally `PACT_LATTICE_TOKEN`)
 to be set. Without a lattice connection, they return descriptive error messages.

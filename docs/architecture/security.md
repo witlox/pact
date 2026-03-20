@@ -655,6 +655,30 @@ no authentication (TB4). A compromised process can push arbitrary policies.
 | E-3: Emergency mode abuse | EoP | Medium | Low-Medium | Peer approval for regulated |
 | E-4: OPA policy injection | EoP | Critical | High | Signed bundles, invariant floor |
 
+## Implemented Security Controls
+
+### JWT Validation in Enrollment Service (F9/F10)
+The enrollment service validates JWT tokens on authenticated endpoints, rejecting
+expired, malformed, or unsigned tokens before processing enrollment requests.
+
+### Per-IP Rate Limiting (F12)
+Rate limiting on the enrollment endpoint is enforced per source IP address, preventing
+a single attacker from exhausting the global rate budget.
+
+### Self-Approval Prevention at Raft Layer (F24)
+Two-person approval enforcement is checked at the Raft state machine level, not just
+the API layer. A user cannot approve their own pending request even by crafting direct
+Raft proposals.
+
+### Wildcard Bindings Excluded from Emergency Access (F20)
+Wildcard role bindings (e.g., `pact-ops-*`) do not grant emergency mode access.
+Emergency mode requires an explicit, non-wildcard role binding for the target vCluster.
+
+### AI Exec Scoping (F16)
+AI agent exec operations require the `ai_exec_allowed` policy field to be set to
+`true` on the target vCluster. This defaults to `false`, preventing AI agents from
+executing commands unless explicitly authorized by policy.
+
 ## Top 5 Hardening Priorities
 
 1. **Intermediate CA key protection** (I-1): Key is already ephemeral (memory-only).

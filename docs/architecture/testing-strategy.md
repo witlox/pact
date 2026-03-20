@@ -34,34 +34,46 @@ async fn config_entry_roundtrip() {
 }
 ```
 
-### Level 3: BDD Acceptance Tests
+### Level 3: BDD Acceptance Tests (`pact-acceptance`)
 
-End-to-end scenarios using `cucumber` crate. Located in a dedicated
-acceptance crate (when added). Scenarios cover: boot config streaming,
-drift detection → commit/rollback, shell session lifecycle, emergency mode.
+555 scenarios across 31 feature files using the `cucumber` crate. Covers all
+bounded contexts: boot config streaming, drift detection → commit/rollback,
+shell session lifecycle, emergency mode, enrollment, RBAC, policy evaluation,
+overlay management, partition resilience, identity mapping, workload integration,
+and 24 cross-context integration scenarios.
 
-**Runs in devcontainer** (Linux) — requires real cgroups, real process supervision,
-real filesystem observers. Not runnable on macOS.
+**Runs on all platforms** — uses real domain logic (JournalState, DriftEvaluator,
+CommitWindowManager, PactSupervisor) but stubs OS-level interactions.
 
-### Level 4: Chaos Tests
+### Level 4: E2E Container Tests (`pact-e2e`)
 
-Adversarial inputs and concurrent operations. Verify invariants:
-- No duplicate config entries after concurrent commits
-- Journal consistency after Raft leader failover
-- Drift detection accuracy under filesystem churn
+Integration tests using `testcontainers` with real services:
+- **Raft cluster**: 3-node in-process cluster (consensus, failover, replication)
+- **OPA**: Real Rego policy evaluation via OPA container
+- **Keycloak**: Real OAuth2/OIDC flows (discovery, credentials, password, refresh, JWKS)
+- **Loki**: Structured event forwarding
+- **Prometheus**: Metrics scraping
+- **SPIRE**: Identity cascade and SVID acquisition
+- **Linux privileged**: Real cgroup/namespace tests (requires root)
+- **Full CLI E2E**: All CLI commands against real journal + agent gRPC
 
-**Runs in devcontainer** (Linux) — requires real system interactions.
+### Level 5: Fidelity & Adversary Sweeps
+
+Automated quality assessment (not runtime tests):
+- **Fidelity sweep**: measures assertion depth per scenario (THOROUGH/MODERATE/SHALLOW/STUB)
+- **Adversary sweep**: systematic security review across attack surfaces
+- Results in `specs/fidelity/` and `specs/findings/`
 
 ## Cross-Platform Testing Strategy
 
 Three tiers matching the development model:
 
-1. **macOS (local dev)**: Unit tests + integration tests with mock implementations.
-   Feature-gated Linux-only code compiles as stubs. Mocks (`MockSupervisor`,
-   `MockObserver`, `MockGpuBackend`) simulate system interactions for testing.
+1. **macOS (local dev)**: Unit tests + BDD acceptance + e2e containers (Docker).
+   Feature-gated Linux-only code compiles as stubs. Mocks (`MockGpuBackend`,
+   `MockCpuBackend`, etc.) simulate hardware detection for testing.
 
-2. **CI (GitHub Actions)**: Same as macOS tier plus Linux-specific unit tests
-   that exercise real inotify, netlink, etc. Runs on Linux runners.
+2. **CI (GitHub Actions)**: 4-stage pipeline: fmt/clippy/deny → feature checks →
+   test/BDD/e2e/linux-privileged → coverage. Runs on Linux runners.
 
 3. **Devcontainer (Linux)**: Full integration + acceptance + chaos tests.
    Real PactSupervisor with cgroup v2, real eBPF probes, real PTY allocation.

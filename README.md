@@ -111,6 +111,8 @@ pact cluster                      # Combined Raft cluster health
 pact audit [--source all]         # Unified audit trail
 pact accounting [--vcluster X]    # Resource usage (GPU/CPU hours)
 pact health                       # Combined system health check
+pact services list                # List registered lattice services
+pact services lookup <name>       # Service endpoint details
 ```
 
 ## Boot Sequence (pact as init)

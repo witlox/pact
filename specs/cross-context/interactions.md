@@ -374,6 +374,19 @@ new fields, using only the fields they understand.
 
 ---
 
+### I21: CLI → Lattice (Service Registry)
+
+**Direction:** CLI queries lattice service registry for registered services.
+**Protocol:** Lattice Rust client library (gRPC)
+**Data flow:**
+- `pact services list` → lattice `list_services` API → returns service list with endpoints and health
+- `pact services lookup <name>` → lattice `lookup_service` API → returns service details, endpoints, vCluster
+- Also exposed as MCP tools: `pact_services_list`, `pact_services_lookup`
+**Failure mode:** Lattice unreachable — returns error with context (requires `PACT_LATTICE_ENDPOINT`)
+**Invariant:** A-Int1 (lattice Rust client exists)
+
+---
+
 ## Interaction Summary Matrix
 
 | Source | Target | Protocol | Direction | Failure Handling |
@@ -407,3 +420,4 @@ new fields, using only the fields they understand.
 | Workload Int. | Isolation | Internal | Delegate | Namespace creation or fallback |
 | Workload Int. | Isolation | Internal | Mount mgmt | Refcount reconstruction (WI6) |
 | CLI | Agent (diag) | gRPC stream | Request | Partial results + warning (F42) |
+| CLI | Lattice (service registry) | gRPC | Request | Error with context |

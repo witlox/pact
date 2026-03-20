@@ -77,6 +77,11 @@ oidc_audience = "pact"
 type = "opa"
 opa_endpoint = "http://localhost:8181/v1/data/pact"
 
+# Per-vCluster policy field controlling AI agent exec access.
+# Set on the vCluster policy to allow AI agents (pact-service-ai) to execute
+# commands on nodes in that vCluster. Default is false (denied).
+# ai_exec_allowed = false
+
 [policy.federation]
 sovra_endpoint = "https://sovra.mgmt:8443"
 sync_interval_seconds = 300

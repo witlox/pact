@@ -61,6 +61,14 @@ Identity → whitelist check → platform admin bypass? → role check → class
 **System**: journalctl, sysctl, dmesg, uname, hostname, uptime, free, df, mount, echo
 **State-changing**: systemctl, modprobe, umount, sysctl (write mode)
 
+## Command Argument Validation
+
+Before executing any command via `pact exec`, the shell server runs `validate_args()`
+on the provided arguments. This blocks access to sensitive paths including
+`/etc/shadow`, `/.ssh/`, `/root/`, and CA key material. Path arguments are
+normalized (resolving `..`, symlinks, and percent-encoding) to prevent traversal
+attacks before the check is applied.
+
 ## Session Security
 
 | Control | Mechanism |
