@@ -183,6 +183,12 @@ impl ShellServer {
         let state_changing =
             self.authorize_exec(&identity, command).await.map_err(ShellError::Auth)?;
 
+        // 2b. Validate arguments for sensitive path access (F5 fix)
+        WhitelistManager::validate_args(command, args).map_err(|reason| {
+            warn!(command, ?args, %reason, "Argument validation blocked");
+            ShellError::Auth(auth::AuthError::InsufficientPrivileges(reason))
+        })?;
+
         info!(
             user = %identity.principal,
             node = %self.node_id,

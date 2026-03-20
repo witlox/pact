@@ -74,13 +74,13 @@ impl WhitelistManager {
             ("uptime", false, "System uptime"),
             ("free", false, "Memory usage"),
             ("df", false, "Disk usage"),
-            ("mount", false, "Show mount points (read-only usage)"),
+            ("mount", true, "Mount operations (can mount filesystems)"),
             // Process and resource monitoring
             ("ps", false, "Process listing"),
             ("top", false, "Process monitor"),
             ("htop", false, "Interactive process monitor"),
-            // Network diagnostics
-            ("ip", false, "Network configuration"),
+            // Network diagnostics (ip can modify state with subcommands like 'link set')
+            ("ip", true, "Network configuration"),
             ("ss", false, "Socket statistics"),
             ("ping", false, "Network connectivity test"),
             ("traceroute", false, "Network path tracing"),
@@ -99,13 +99,12 @@ impl WhitelistManager {
             ("grep", false, "Search file contents"),
             // Logs
             ("journalctl", false, "Systemd journal viewer"),
-            // Kernel tuning (read-only)
-            ("sysctl", false, "Kernel parameter query"),
+            // Kernel tuning (sysctl -w can modify kernel parameters)
+            ("sysctl", true, "Kernel parameter query/set"),
             // State-changing commands
             ("systemctl", true, "Service management"),
             ("modprobe", true, "Load kernel module"),
             ("umount", true, "Unmount filesystem"),
-            ("sysctl-w", true, "Set kernel parameter"),
         ];
 
         for (cmd, state_changing, desc) in defaults {
@@ -262,6 +261,82 @@ impl WhitelistManager {
             })
             .collect()
     }
+
+    /// Validate command arguments for sensitive path access (F5 fix).
+    ///
+    /// Blocks arguments that reference sensitive system paths. This is a
+    /// defense-in-depth measure — even whitelisted read-only commands like
+    /// `cat` or `grep` should not read private keys or password files.
+    pub fn validate_args(command: &str, args: &[String]) -> Result<(), String> {
+        /// Paths that must never be accessed via pact exec/shell.
+        const BLOCKED_PATHS: &[&str] = &[
+            "/etc/shadow",
+            "/etc/gshadow",
+            "/etc/master.passwd",
+            "/root/",
+            "/.ssh/",
+            "/etc/ssl/private/",
+            "/etc/pact/ca/",
+            "/run/pact/ca/",
+        ];
+
+        /// Path prefixes that require caution — blocked for read commands.
+        const SENSITIVE_PREFIXES: &[&str] = &[
+            "/etc/shadow",
+            "/etc/gshadow",
+            "/root",
+        ];
+
+        for arg in args {
+            // Skip non-path arguments (flags like -c, --help, numbers)
+            if !arg.starts_with('/') && !arg.contains("..") {
+                continue;
+            }
+
+            // Normalize path traversal: resolve .. components
+            let normalized = {
+                let mut components: Vec<&str> = Vec::new();
+                for part in arg.split('/') {
+                    match part {
+                        ".." => { components.pop(); }
+                        "." | "" => {}
+                        other => components.push(other),
+                    }
+                }
+                format!("/{}", components.join("/"))
+            };
+
+            // Check blocked paths (exact match, prefix match, or contains for patterns like /.ssh/)
+            for blocked in BLOCKED_PATHS {
+                if normalized == *blocked
+                    || normalized.starts_with(blocked)
+                    || normalized.contains(blocked)
+                {
+                    return Err(format!(
+                        "access denied: {command} cannot access {arg} (sensitive path)"
+                    ));
+                }
+            }
+
+            // Check sensitive prefixes for file-reading commands
+            let is_file_reader = matches!(
+                command,
+                "cat" | "head" | "tail" | "grep" | "less" | "diff" | "wc" | "file"
+                    | "md5sum" | "sha256sum" | "stat"
+            );
+            if is_file_reader {
+                for prefix in SENSITIVE_PREFIXES {
+                    if normalized.starts_with(prefix) {
+                        return Err(format!(
+                            "access denied: {command} cannot read {arg} (sensitive path)"
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -301,10 +376,13 @@ mod tests {
         assert!(!mgr.is_state_changing("cat"));
         assert!(!mgr.is_state_changing("dmesg"));
 
-        // State-changing commands
+        // State-changing commands (F1-F3 fix: ip, mount, sysctl reclassified)
         assert!(mgr.is_state_changing("systemctl"));
         assert!(mgr.is_state_changing("modprobe"));
         assert!(mgr.is_state_changing("umount"));
+        assert!(mgr.is_state_changing("sysctl"));
+        assert!(mgr.is_state_changing("ip"));
+        assert!(mgr.is_state_changing("mount"));
     }
 
     #[test]
@@ -400,5 +478,54 @@ mod tests {
     fn audit_escape_vectors_safe_commands() {
         let risky = WhitelistManager::audit_escape_vectors(&["ps", "cat", "nvidia-smi", "dmesg"]);
         assert!(risky.is_empty());
+    }
+
+    // --- F5: Argument validation ---
+
+    #[test]
+    fn validate_args_blocks_shadow() {
+        let result = WhitelistManager::validate_args("cat", &["/etc/shadow".into()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("sensitive path"));
+    }
+
+    #[test]
+    fn validate_args_blocks_root_home() {
+        let result = WhitelistManager::validate_args("cat", &["/root/.bashrc".into()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_args_blocks_ssh_keys() {
+        let result = WhitelistManager::validate_args("cat", &["/home/user/.ssh/id_rsa".into()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_args_blocks_path_traversal() {
+        let result =
+            WhitelistManager::validate_args("cat", &["/var/log/../../etc/shadow".into()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_args_allows_safe_paths() {
+        assert!(WhitelistManager::validate_args("cat", &["/var/log/syslog".into()]).is_ok());
+        assert!(WhitelistManager::validate_args("cat", &["/proc/cpuinfo".into()]).is_ok());
+        assert!(WhitelistManager::validate_args("nvidia-smi", &[]).is_ok());
+        assert!(WhitelistManager::validate_args("ps", &["aux".into()]).is_ok());
+    }
+
+    #[test]
+    fn validate_args_non_reader_allows_sensitive_flag() {
+        // Non-file-reading commands can have args that look like paths
+        assert!(WhitelistManager::validate_args("ping", &["-c".into(), "1".into()]).is_ok());
+    }
+
+    #[test]
+    fn validate_args_blocks_ca_keys() {
+        let result =
+            WhitelistManager::validate_args("cat", &["/etc/pact/ca/key.pem".into()]);
+        assert!(result.is_err());
     }
 }

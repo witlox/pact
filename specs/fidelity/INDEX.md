@@ -1,7 +1,7 @@
 # Fidelity Index
 
-Last scan: 2026-03-20 (post-hardening rescan)
-Scanned by: auditor profile
+Last scan: 2026-03-20 (sweep complete — checkpoint)
+Scanned by: auditor sweep (9 chunks, SWEEP.md: COMPLETE)
 
 ## How to read this file
 
@@ -26,8 +26,8 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 | Metric | Count |
 |--------|-------|
-| Feature files scanned | **30 of 30** |
-| Total scenarios | **~526** |
+| Feature files scanned | **31 of 31** |
+| Total scenarios | **555** (546 pass, 9 skipped) |
 | THOROUGH scenarios | ~160 (30%) |
 | MODERATE scenarios | ~200 (38%) |
 | SHALLOW or worse | ~166 (32%) |
@@ -50,6 +50,12 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | [policy_evaluation](features/remaining-25-summary.md) | 16 | 9 | 3 | 4 | 0 | **HIGH** | — |
 | [workload_integration](features/remaining-25-summary.md) | 17 | 0 | 13 | 4 | 0 | **HIGH** | — |
 | [boot-config-streaming](features/boot-config-streaming.md) | 11 | 7 | 4 | 0 | 0 | **HIGH** | ↑ was MODERATE |
+
+### Integration: cross-context (1 feature)
+
+| Feature | Scenarios | Thorough | Moderate | Shallow | Skipped | Confidence | Notes |
+|---------|-----------|----------|----------|---------|---------|------------|-------|
+| [cross-context](features/cross-context.md) | 24 | 3 | 12 | 0 | 9 | **MODERATE** | 9 skipped = step wording mismatches |
 
 ### Tier 2: MODERATE confidence (14 features) — was 12
 
@@ -142,12 +148,16 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 - ~~Capability report flag-based~~ — now generates real CapabilityReport
 
 ### Remaining
-1. **TokenValidator still bypassed** — identity set directly in BDD, no JWT pipeline tested
-2. **Auth flow simulation** — auth_login/logout/refresh/cli_auth are mostly flag-based
-3. **Overlay compression** — zstd in deps but not used in code yet
-4. **Platform bootstrap resource budgets** — 3 stubs, need integration-level tests
-5. **Observability Loki/metrics** — events created manually, metrics hardcoded strings
-6. **Federation data isolation** — comment-only assertions, 3 stubs
+
+**Resolved via e2e containers (pact-e2e infrastructure exists):**
+1. **Auth flow (TokenValidator, login/logout/refresh)** → add Keycloak/Dex container to pact-e2e, test real OAuth2 flows. Container image: `quay.io/keycloak/keycloak` or `ghcr.io/dexidp/dex`.
+2. **Observability Loki/metrics** → `pact-e2e/tests/loki_events.rs` + `prometheus_metrics.rs` already exist (fail due to no Docker in CI). Fix CI or run locally.
+3. **Federation** → needs Sovra container (not yet available). Defer until Sovra exists.
+
+**Other remaining:**
+4. **Overlay compression** — zstd in deps but not used in code yet
+5. **Platform bootstrap resource budgets** — 3 stubs, need integration-level tests
+6. **Agentic API response validation** — tool response content not inspected
 
 ## Changelog
 
@@ -158,3 +168,4 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 | 2026-03-20 | Pass 4: remaining 25 features | 7 HIGH, 12 MODERATE, 11 LOW |
 | 2026-03-20 | Pass 3: implementer hardening | 14 files, ~50 edits, 3 traits wired |
 | 2026-03-20 | Rescan post-hardening | **8 HIGH (+1), 14 MODERATE (+2), 8 LOW (-3)**. ADR-012 enforced. ServiceManager wired. |
+| 2026-03-20 | Sweep checkpoint | 31 features, 555 scenarios, 12 traits, 17 ADRs, gaps.md populated. SWEEP.md: COMPLETE. |

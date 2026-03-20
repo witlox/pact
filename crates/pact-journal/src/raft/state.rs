@@ -251,6 +251,13 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                                 ),
                             };
                         }
+                        // P4: Self-approval prevention at Raft layer (F24 fix)
+                        if approval.requester.principal == approver.principal {
+                            return JournalResponse::ValidationError {
+                                reason: "SELF_APPROVAL: cannot approve your own request (P4)"
+                                    .into(),
+                            };
+                        }
                         approval.status = decision;
                         approval.approver = Some(approver);
                         JournalResponse::Ok

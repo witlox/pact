@@ -77,7 +77,7 @@ pub async fn execute_command(
         .stderr(Stdio::piped())
         // Clear environment for security — only pass safe vars
         .env_clear()
-        .env("PATH", "/usr/bin:/usr/sbin:/bin:/sbin")
+        .env("PATH", "/usr/bin:/bin")
         .env("HOME", "/tmp")
         .env("LANG", "C.UTF-8")
         .spawn()

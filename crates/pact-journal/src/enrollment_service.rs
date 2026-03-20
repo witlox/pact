@@ -36,6 +36,8 @@ pub struct EnrollmentServiceImpl {
     ca: Arc<CaKeyManager>,
     rate_limiter: Arc<RateLimiter>,
     domain_id: DomainId,
+    /// Token validator for authenticated endpoints (F9/F10 fix).
+    token_validator: Arc<pact_policy::iam::HmacTokenValidator>,
 }
 
 impl EnrollmentServiceImpl {
@@ -45,12 +47,14 @@ impl EnrollmentServiceImpl {
         ca: Arc<CaKeyManager>,
         rate_limiter: Arc<RateLimiter>,
         domain_id: DomainId,
+        token_validator: Arc<pact_policy::iam::HmacTokenValidator>,
     ) -> Self {
-        Self { raft, state, ca, rate_limiter, domain_id }
+        Self { raft, state, ca, rate_limiter, domain_id, token_validator }
     }
 
-    /// Validate Bearer token from request metadata. Returns error if missing/invalid.
-    fn require_auth<T>(req: &Request<T>) -> Result<(), Status> {
+    /// Extract and validate Bearer token from request metadata.
+    /// Returns the validated Identity or a gRPC error.
+    fn validate_token<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
         let metadata = req.metadata();
         let auth_header = metadata
             .get("authorization")
@@ -58,74 +62,47 @@ impl EnrollmentServiceImpl {
         let value = auth_header
             .to_str()
             .map_err(|_| Status::unauthenticated("invalid authorization header"))?;
-        if !value.starts_with("Bearer ") {
-            return Err(Status::unauthenticated("expected Bearer token"));
-        }
-        Ok(())
+        let token = value
+            .strip_prefix("Bearer ")
+            .ok_or_else(|| Status::unauthenticated("expected Bearer token"))?;
+
+        // Validate JWT signature, expiry, audience, and issuer
+        let claims = self.token_validator.validate_sync(token).map_err(|e| {
+            warn!(error = %e, "Token validation failed");
+            Status::unauthenticated(format!("invalid token: {e}"))
+        })?;
+
+        Ok(claims)
     }
 
     /// Validate Bearer token and require platform-admin role (E10).
-    fn require_platform_admin<T>(req: &Request<T>) -> Result<(), Status> {
-        Self::require_auth(req)?;
-        let role = Self::extract_role(req);
-        if role != "pact-platform-admin" {
+    fn require_platform_admin<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
+        let identity = self.validate_token(req)?;
+        if identity.role != "pact-platform-admin" {
             return Err(Status::permission_denied(
                 "PERMISSION_DENIED: requires pact-platform-admin role",
             ));
         }
-        Ok(())
+        Ok(identity)
     }
 
     /// Validate Bearer token and require ops role for the given vCluster, or platform-admin.
-    fn require_ops_or_admin<T>(req: &Request<T>, vcluster_id: &str) -> Result<(), Status> {
-        Self::require_auth(req)?;
-        let role = Self::extract_role(req);
-        if role == "pact-platform-admin" {
-            return Ok(());
+    fn require_ops_or_admin<T>(
+        &self,
+        req: &Request<T>,
+        vcluster_id: &str,
+    ) -> Result<Identity, Status> {
+        let identity = self.validate_token(req)?;
+        if identity.role == "pact-platform-admin" {
+            return Ok(identity);
         }
         let expected_ops = format!("pact-ops-{vcluster_id}");
-        if role == expected_ops {
-            return Ok(());
+        if identity.role == expected_ops {
+            return Ok(identity);
         }
         Err(Status::permission_denied(
             "PERMISSION_DENIED: requires platform-admin or ops role for this vCluster",
         ))
-    }
-
-    /// Extract the principal name from auth metadata (simplified).
-    fn extract_principal<T>(req: &Request<T>) -> String {
-        req.metadata()
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .map_or_else(|| "unknown".to_string(), |s| s.trim_start_matches("Bearer ").to_string())
-    }
-
-    /// Extract role from auth metadata.
-    ///
-    /// In production this decodes the JWT to get the role claim.
-    /// Simplified: looks for `x-pact-role` metadata header, falls back to token inspection.
-    fn extract_role<T>(req: &Request<T>) -> String {
-        // Check explicit role header (set by auth interceptor or gateway)
-        if let Some(role) = req.metadata().get("x-pact-role") {
-            if let Ok(role_str) = role.to_str() {
-                return role_str.to_string();
-            }
-        }
-        // Fallback: try to extract from token (in production, decode JWT claims)
-        req.metadata().get("authorization").and_then(|v| v.to_str().ok()).map_or_else(
-            || "unknown".to_string(),
-            |s| {
-                let token = s.trim_start_matches("Bearer ");
-                // Simple heuristic: if token contains a role pattern, use it
-                if token.contains("platform-admin") {
-                    "pact-platform-admin".to_string()
-                } else if token.contains("ops-") || token.contains("viewer-") {
-                    token.to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            },
-        )
     }
 }
 
@@ -280,8 +257,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<RegisterNodeRequest>,
     ) -> Result<Response<RegisterNodeResponse>, Status> {
-        Self::require_platform_admin(&request)?;
-        let principal = Self::extract_principal(&request);
+        let admin_identity = self.require_platform_admin(&request)?;
+        let principal = admin_identity.principal.clone();
         let req = request.into_inner();
         let hw = req
             .hardware_identity
@@ -329,8 +306,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<BatchRegisterNodesRequest>,
     ) -> Result<Response<BatchRegisterNodesResponse>, Status> {
-        Self::require_platform_admin(&request)?;
-        let principal = Self::extract_principal(&request);
+        let admin_identity = self.require_platform_admin(&request)?;
+        let principal = admin_identity.principal.clone();
         let req = request.into_inner();
         let mut results = Vec::with_capacity(req.nodes.len());
         let mut succeeded = 0u32;
@@ -417,7 +394,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<DecommissionNodeRequest>,
     ) -> Result<Response<DecommissionNodeResponse>, Status> {
-        Self::require_platform_admin(&request)?;
+        self.require_platform_admin(&request)?;
         let req = request.into_inner();
 
         // Check for active sessions
@@ -462,7 +439,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
     ) -> Result<Response<AssignNodeResponse>, Status> {
         // E10: platform-admin or ops for the target vCluster
         let vcluster_id = request.get_ref().vcluster_id.clone();
-        Self::require_ops_or_admin(&request, &vcluster_id)?;
+        self.require_ops_or_admin(&request, &vcluster_id)?;
         let req = request.into_inner();
 
         let cmd = JournalCommand::AssignNodeToVCluster {
@@ -489,7 +466,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<UnassignNodeRequest>,
     ) -> Result<Response<UnassignNodeResponse>, Status> {
-        Self::require_auth(&request)?;
+        self.validate_token(&request)?;
         let req = request.into_inner();
 
         let cmd = JournalCommand::UnassignNode { node_id: req.node_id.clone() };
@@ -510,7 +487,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<MoveNodeRequest>,
     ) -> Result<Response<MoveNodeResponse>, Status> {
-        Self::require_auth(&request)?;
+        self.validate_token(&request)?;
         let req = request.into_inner();
 
         // Get current vCluster assignment
@@ -549,7 +526,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         request: Request<RenewCertRequest>,
     ) -> Result<Response<RenewCertResponse>, Status> {
         // Authenticated — agent uses its existing mTLS cert
-        Self::require_auth(&request)?;
+        self.validate_token(&request)?;
         let req = request.into_inner();
 
         // Find node by current cert serial
@@ -592,8 +569,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<ListNodesRequest>,
     ) -> Result<Response<ListNodesResponse>, Status> {
-        Self::require_auth(&request)?;
-        let role = Self::extract_role(&request);
+        let caller = self.validate_token(&request)?;
+        let role = caller.role.clone();
         let req = request.into_inner();
         let state = self.state.read().await;
 
@@ -650,8 +627,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<InspectNodeRequest>,
     ) -> Result<Response<InspectNodeResponse>, Status> {
-        Self::require_auth(&request)?;
-        let role = Self::extract_role(&request);
+        let caller = self.validate_token(&request)?;
+        let role = caller.role.clone();
         let req = request.into_inner();
         let state = self.state.read().await;
 

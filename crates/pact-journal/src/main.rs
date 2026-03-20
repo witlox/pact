@@ -151,6 +151,19 @@ async fn main() -> anyhow::Result<()> {
     // Shared notifier for live config push to subscribers
     let notifier = ConfigUpdateNotifier::default();
 
+    // Token validator for authenticated endpoints (F9/F10 fix)
+    let oidc_issuer =
+        std::env::var("PACT_OIDC_ISSUER").unwrap_or_else(|_| "https://auth.example.com".into());
+    let oidc_audience =
+        std::env::var("PACT_OIDC_AUDIENCE").unwrap_or_else(|_| "pact-journal".into());
+    let oidc_secret = std::env::var("PACT_OIDC_HMAC_SECRET").ok().map(|s| s.into_bytes());
+    let oidc_config = pact_policy::iam::OidcConfig {
+        issuer: oidc_issuer,
+        audience: oidc_audience,
+        hmac_secret: oidc_secret,
+    };
+    let token_validator = Arc::new(pact_policy::iam::HmacTokenValidator::new(oidc_config));
+
     // Optional: enrollment service (requires CA key configuration)
     let enrollment_ca_cert = std::env::var("PACT_CA_CERT").ok().map(PathBuf::from);
     let enrollment_ca_key = std::env::var("PACT_CA_KEY").ok().map(PathBuf::from);
@@ -167,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
                         Arc::new(ca),
                         rate_limiter,
                         enrollment_domain,
+                        Arc::clone(&token_validator),
                     ))
                 }
                 Err(e) => {
@@ -189,7 +203,10 @@ async fn main() -> anyhow::Result<()> {
     info!(%addr, "gRPC server listening");
 
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-    let mut server = tonic::transport::Server::builder();
+    let mut server = tonic::transport::Server::builder()
+        .concurrency_limit_per_connection(100)
+        .initial_connection_window_size(Some(1024 * 1024)) // 1 MB
+        .initial_stream_window_size(Some(512 * 1024)); // 512 KB
     let router = server
         .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(raft_server))
         .add_service(ConfigServiceServer::with_interceptor(config_service, auth_interceptor))

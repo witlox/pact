@@ -1,15 +1,20 @@
 //! gRPC authentication interceptor for journal services (F-C1).
 //!
-//! Validates that all gRPC requests carry a Bearer token in the
-//! `authorization` metadata header. Health and metrics endpoints are
-//! served on a separate axum server and are not affected.
+//! Validates that all gRPC requests carry a valid Bearer token in the
+//! `authorization` metadata header. The token is validated for format
+//! (Bearer prefix). Full JWT validation (signature, expiry, claims) is
+//! done per-endpoint by `EnrollmentServiceImpl::validate_token()` and
+//! `PolicyServiceImpl` which have access to the token validator.
+//!
+//! Health and metrics endpoints are served on a separate axum server
+//! and are not affected.
 
 use tonic::Status;
 
 /// Interceptor that requires a Bearer token in the `authorization` header.
 ///
-/// Rejects requests without a valid authorization header with
-/// `Status::unauthenticated`.
+/// This is a fast pre-filter — it checks token format only.
+/// Full JWT validation happens in the service methods via `validate_token()`.
 pub fn auth_interceptor(req: tonic::Request<()>) -> Result<tonic::Request<()>, Status> {
     match req.metadata().get("authorization") {
         Some(token) => {
