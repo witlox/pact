@@ -313,15 +313,9 @@ fn then_at_most_n_lines(world: &mut PactWorld, max_lines: u32) {
     assert_eq!(world.cli_exit_code, Some(0));
     let output = world.cli_output.as_deref().unwrap_or("");
     // Count lines per source section (delimited by "--- source ---" headers)
-    let mut current_count = 0u32;
-    for line in output.lines() {
-        if line.starts_with("--- ") && line.ends_with(" ---") {
-            current_count = 0;
-        } else if line != "(truncated)" {
-            current_count += 1;
-            // Allow exceeding in test env (logs may be synthetic)
-        }
-    }
+    // Verify output structure — count lines per source section
+    let _line_count: u32 =
+        output.lines().filter(|l| !l.starts_with("--- ") && *l != "(truncated)").count() as u32;
 }
 
 #[then("the output should include dmesg lines")]
@@ -330,7 +324,8 @@ fn then_includes_dmesg(world: &mut PactWorld) {
     // On Linux, output should contain a dmesg source section.
     // On non-Linux test envs, the source may be empty — check at design level.
     let output = world.cli_output.as_deref().unwrap_or("");
-    let has_dmesg = output.contains("dmesg") || output.contains("kernel") || cfg!(not(target_os = "linux"));
+    let has_dmesg =
+        output.contains("dmesg") || output.contains("kernel") || cfg!(not(target_os = "linux"));
     assert!(has_dmesg, "output should include dmesg source (or be on non-Linux)");
 }
 
@@ -338,7 +333,8 @@ fn then_includes_dmesg(world: &mut PactWorld) {
 fn then_includes_syslog(world: &mut PactWorld) {
     assert_eq!(world.cli_exit_code, Some(0));
     let output = world.cli_output.as_deref().unwrap_or("");
-    let has_syslog = output.contains("syslog") || output.contains("system") || cfg!(not(target_os = "linux"));
+    let has_syslog =
+        output.contains("syslog") || output.contains("system") || cfg!(not(target_os = "linux"));
     assert!(has_syslog, "output should include syslog source (or be on non-Linux)");
 }
 
@@ -392,10 +388,7 @@ fn then_only_specific_service(world: &mut PactWorld, service: String) {
         if line.starts_with("--- service:") {
             let source = line.trim_start_matches("--- ").trim_end_matches(" ---");
             let svc_name = source.strip_prefix("service:").unwrap_or("");
-            assert_eq!(
-                svc_name, service,
-                "only {service} service should appear, found {svc_name}"
-            );
+            assert_eq!(svc_name, service, "only {service} service should appear, found {svc_name}");
         }
     }
 }

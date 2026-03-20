@@ -158,6 +158,8 @@ const TTL_MIN_SECONDS: u32 = 900;
 const TTL_MAX_SECONDS: u32 = 864_000;
 /// Maximum overlay data size: 10 MB (F32 fix).
 const OVERLAY_MAX_BYTES: usize = 10 * 1024 * 1024;
+/// Maximum audit log entries in Raft state (F22 fix).
+const AUDIT_LOG_MAX: usize = 100_000;
 
 impl StateMachineState<JournalTypeConfig> for JournalState {
     #[allow(clippy::too_many_lines)]
@@ -243,7 +245,6 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                 self.audit_log.push(op);
                 // F22 fix: cap audit log to prevent unbounded growth.
                 // Oldest entries are dropped. Production: archive to Loki first.
-                const AUDIT_LOG_MAX: usize = 100_000;
                 if self.audit_log.len() > AUDIT_LOG_MAX {
                     let drain_count = self.audit_log.len() - AUDIT_LOG_MAX;
                     self.audit_log.drain(..drain_count);

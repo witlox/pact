@@ -62,6 +62,7 @@ impl RbacEngine {
     /// Evaluate whether an identity is authorized for an action on a scope.
     ///
     /// This implements invariants P1-P8.
+    #[allow(clippy::too_many_lines)]
     pub fn evaluate(
         identity: &Identity,
         action: &str,
@@ -187,10 +188,7 @@ impl RbacEngine {
                 // F20 fix: wildcard bindings must not grant emergency access.
                 // Emergency actions require explicit listing, not wildcards.
                 if (action == actions::EMERGENCY_START || action == actions::EMERGENCY_END)
-                    && !binding
-                        .allowed_actions
-                        .iter()
-                        .any(|a| a == action)
+                    && !binding.allowed_actions.iter().any(|a| a == action)
                 {
                     return RbacDecision::Deny {
                         reason: "emergency actions require explicit binding, not wildcard".into(),

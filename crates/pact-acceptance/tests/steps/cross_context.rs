@@ -43,13 +43,15 @@ fn service_identity() -> Identity {
 #[given(regex = r#"^vCluster "([\w-]+)" has an overlay version (\d+)$"#)]
 async fn given_vcluster_overlay_version(world: &mut PactWorld, vcluster: String, version: u64) {
     let overlay = BootOverlay::new(vcluster.clone(), version, b"vcluster-config".to_vec());
-    world
-        .journal
-        .apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 }
 
 #[given(regex = r#"^vCluster "([\w-]+)" declares services "(.*)"$"#)]
-async fn given_vcluster_declares_services(world: &mut PactWorld, _vcluster: String, services: String) {
+async fn given_vcluster_declares_services(
+    world: &mut PactWorld,
+    _vcluster: String,
+    services: String,
+) {
     for (i, name) in services.split(',').enumerate() {
         world.service_declarations.push(ServiceDecl {
             name: name.trim().into(),
@@ -82,11 +84,8 @@ async fn given_node_booted_subscribed(world: &mut PactWorld, node: String) {
 
 #[given(regex = r#"^user "([\w@.]+)" has role "([\w-]+)"$"#)]
 async fn given_user_has_role(world: &mut PactWorld, principal: String, role: String) {
-    world.current_identity = Some(Identity {
-        principal,
-        principal_type: PrincipalType::Human,
-        role,
-    });
+    world.current_identity =
+        Some(Identity { principal, principal_type: PrincipalType::Human, role });
 }
 
 #[given(regex = r#"^"([\w-]+)" is in the exec whitelist for vCluster "([\w-]+)"$"#)]
@@ -115,24 +114,18 @@ async fn given_node_drifted_with_window(world: &mut PactWorld, node: String, sta
         "Emergency" => ConfigState::Emergency,
         _ => panic!("unknown state: {state}"),
     };
-    world.journal.apply_command(JournalCommand::UpdateNodeState {
-        node_id: node,
-        state: config_state,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::UpdateNodeState { node_id: node, state: config_state });
     world.commit_mgr.open(0.3);
 }
 
 #[given(regex = r#"^vCluster "([\w-]+)" has emergency_allowed true$"#)]
 async fn given_emergency_allowed(world: &mut PactWorld, vcluster: String) {
-    let mut policy = world
-        .journal
-        .policies
-        .get(&vcluster)
-        .cloned()
-        .unwrap_or_default();
-    policy.vcluster_id = vcluster.clone();
+    let mut policy = world.journal.policies.get(&vcluster).cloned().unwrap_or_default();
+    policy.vcluster_id.clone_from(&vcluster);
     policy.emergency_allowed = true;
-    world.journal.apply_command(JournalCommand::SetPolicy { vcluster_id: vcluster.clone(), policy });
+    world.journal.apply_command(JournalCommand::SetPolicy { vcluster_id: vcluster, policy });
 }
 
 // two-person approval — defined in policy.rs
@@ -188,23 +181,23 @@ async fn given_active_workloads(world: &mut PactWorld, _node: String) {
     world.cgroup_scopes.insert("workload.slice/workload-1".into(), "workload-1".into());
 }
 
-#[given(regex = r#"^pact-agent starts with bootstrap identity from OpenCHAMI$"#)]
+#[given(regex = r"^pact-agent starts with bootstrap identity from OpenCHAMI$")]
 async fn given_bootstrap_identity_ochami(world: &mut PactWorld) {
     world.bootstrap_identity_available = true;
 }
 
-#[given(regex = r#"^SPIRE agent is running on the node$"#)]
+#[given(regex = r"^SPIRE agent is running on the node$")]
 async fn given_spire_running(world: &mut PactWorld) {
     world.spire_agent_reachable = true;
 }
 
-#[given(regex = r#"^pact-agent is running with ReadinessSignal emitted$"#)]
+#[given(regex = r"^pact-agent is running with ReadinessSignal emitted$")]
 async fn given_readiness_emitted(world: &mut PactWorld) {
     world.readiness_signal_emitted = true;
     world.boot_state = "Ready".into();
 }
 
-#[given(regex = r#"^lattice-node-agent is running and connected via unix socket$"#)]
+#[given(regex = r"^lattice-node-agent is running and connected via unix socket$")]
 async fn given_lattice_connected(world: &mut PactWorld) {
     world.service_states.insert("lattice-node-agent".into(), ServiceState::Running);
 }
@@ -222,12 +215,14 @@ async fn given_active_allocations(
     world.cgroup_scopes.insert(format!("workload.slice/{image}"), image);
 }
 
-#[given(regex = r#"^allocation workload processes are running in their cgroup scopes$"#)]
+#[given(regex = r"^allocation workload processes are running in their cgroup scopes$")]
 async fn given_workload_processes_running(_world: &mut PactWorld) {
     // Conceptual — processes are in cgroup scopes
 }
 
-#[given(regex = r#"^org "([\w-]+)" joined with org_index (\d+) \(precursor (\d+), stride (\d+)\)$"#)]
+#[given(
+    regex = r#"^org "([\w-]+)" joined with org_index (\d+) \(precursor (\d+), stride (\d+)\)$"#
+)]
 async fn given_org_joined(
     world: &mut PactWorld,
     _org: String,
@@ -303,10 +298,9 @@ async fn when_node_boots_and_authenticates(world: &mut PactWorld, node: String) 
 #[when(regex = r#"^the overlay for vCluster "([\w-]+)" is updated with new service config$"#)]
 async fn when_overlay_updated(world: &mut PactWorld, vcluster: String) {
     let old_version = world.journal.overlays.get(&vcluster).map_or(0, |o| o.version);
-    let overlay = BootOverlay::new(vcluster.clone(), old_version + 1, b"new-service-config".to_vec());
-    world
-        .journal
-        .apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster.clone(), overlay });
+    let overlay =
+        BootOverlay::new(vcluster.clone(), old_version + 1, b"new-service-config".to_vec());
+    world.journal.apply_command(JournalCommand::SetOverlay { vcluster_id: vcluster, overlay });
 
     let seq = world.journal.entries.len() as u64;
     world
@@ -355,12 +349,7 @@ async fn when_ebpf_kernel_change(world: &mut PactWorld) {
 async fn when_admin_executes(world: &mut PactWorld, command: String, node: String) {
     let whitelisted = world.shell_whitelist.contains(&command);
 
-    if !whitelisted {
-        world.cli_exit_code = Some(6);
-        world.last_error = Some(pact_common::error::PactError::Unauthorized {
-            reason: format!("command '{command}' not in whitelist"),
-        });
-    } else {
+    if whitelisted {
         // Whitelisted exec — policy allows by default for ops role
         let identity = world.current_identity.clone().unwrap_or_else(ops_identity);
         world.cli_exit_code = Some(0);
@@ -377,6 +366,11 @@ async fn when_admin_executes(world: &mut PactWorld, command: String, node: Strin
                 detail: command,
             },
         ));
+    } else {
+        world.cli_exit_code = Some(6);
+        world.last_error = Some(pact_common::error::PactError::Unauthorized {
+            reason: format!("command '{command}' not in whitelist"),
+        });
     }
 }
 
@@ -413,7 +407,7 @@ async fn when_emergency_window_expires(world: &mut PactWorld) {
 #[when(regex = r#"^admin "([\w@.]+)" force-ends the emergency$"#)]
 async fn when_admin_force_ends_emergency(world: &mut PactWorld, admin: String) {
     let actor = Identity {
-        principal: admin.clone(),
+        principal: admin,
         principal_type: PrincipalType::Human,
         role: "pact-ops-ml-training".into(),
     };
@@ -468,9 +462,8 @@ async fn when_user_approves(world: &mut PactWorld, _approver: String) {
 #[when("alice attempts to approve her own pending operation")]
 async fn when_alice_self_approves(world: &mut PactWorld) {
     // Self-approval should be denied
-    world.auth_result = Some(crate::AuthResult::Denied {
-        reason: "cannot approve your own operation".into(),
-    });
+    world.auth_result =
+        Some(crate::AuthResult::Denied { reason: "cannot approve your own operation".into() });
 }
 
 #[when(regex = r#"^a drift event occurs on node "([\w-]+)"$"#)]
@@ -523,23 +516,20 @@ async fn when_admin_shell_change(world: &mut PactWorld, key: String, value: Stri
     world.journal.apply_command(JournalCommand::AppendEntry(entry));
 }
 
-#[when(regex = r#"^meanwhile "([\w.]+)" is committed as "(\d+)" in the journal for vCluster "([\w-]+)"$"#)]
+#[when(
+    regex = r#"^meanwhile "([\w.]+)" is committed as "(\d+)" in the journal for vCluster "([\w-]+)"$"#
+)]
 async fn when_meanwhile_journal_commit(
     world: &mut PactWorld,
     key: String,
     value: String,
     _vcluster: String,
 ) {
-    world.conflict_local_value = world
-        .journal
-        .entries
-        .values()
-        .rev()
-        .find_map(|e| {
-            e.state_delta.as_ref().and_then(|d| {
-                d.kernel.iter().find(|k| k.key == key).and_then(|k| k.value.clone())
-            })
-        });
+    world.conflict_local_value = world.journal.entries.values().rev().find_map(|e| {
+        e.state_delta
+            .as_ref()
+            .and_then(|d| d.kernel.iter().find(|k| k.key == key).and_then(|k| k.value.clone()))
+    });
     world.conflict_journal_value = Some(value.clone());
 
     let entry = ConfigEntry {
@@ -593,10 +583,9 @@ async fn when_admin_promote(world: &mut PactWorld, _node: String) {
 async fn when_admin_apply(world: &mut PactWorld) {
     let old_version = world.journal.overlays.get("ml-training").map_or(0, |o| o.version);
     let overlay = BootOverlay::new("ml-training", old_version + 1, b"promoted-config".to_vec());
-    world.journal.apply_command(JournalCommand::SetOverlay {
-        vcluster_id: "ml-training".into(),
-        overlay,
-    });
+    world
+        .journal
+        .apply_command(JournalCommand::SetOverlay { vcluster_id: "ml-training".into(), overlay });
     world.cli_exit_code = Some(0);
 }
 
@@ -640,7 +629,8 @@ async fn when_gpu_degrades(world: &mut PactWorld, index: u32, _health: String) {
 #[when("the federation sync interval fires")]
 async fn when_federation_sync(world: &mut PactWorld) {
     use pact_policy::federation::FederationSync;
-    let sync = pact_policy::federation::MockFederationSync::healthy(world.federated_templates.clone());
+    let sync =
+        pact_policy::federation::MockFederationSync::healthy(world.federated_templates.clone());
     let mut state = pact_policy::federation::FederationState::default();
     if let Ok(result) = sync.sync().await {
         state.on_sync_success(&result);
@@ -712,15 +702,11 @@ async fn when_agent_restarts(world: &mut PactWorld) {
 }
 
 #[when(regex = r#"^lattice requests allocation "([\w-]+)" with (?:same )?uenv "(.*)"$"#)]
-async fn when_lattice_requests_allocation(
-    world: &mut PactWorld,
-    alloc_id: String,
-    _image: String,
-) {
+async fn when_lattice_requests_allocation(world: &mut PactWorld, alloc_id: String, _image: String) {
     world.service_states.insert(alloc_id, ServiceState::Running);
 }
 
-#[when(regex = r#"^([\w-]+) completes \(cgroup empties\)$"#)]
+#[when(regex = r"^([\w-]+) completes \(cgroup empties\)$")]
 async fn when_alloc_completes(world: &mut PactWorld, alloc_id: String) {
     world.service_states.insert(alloc_id, ServiceState::Stopped);
 }
@@ -734,7 +720,7 @@ async fn when_main_process_crashes(world: &mut PactWorld, name: String) {
     world.service_states.insert(name, ServiceState::Failed);
 }
 
-#[when(regex = r#"^pact-agent boots and reaches StartServices phase$"#)]
+#[when(regex = r"^pact-agent boots and reaches StartServices phase$")]
 async fn when_boots_to_start_services(world: &mut PactWorld) {
     world.boot_phases_completed.push("auth".into());
     world.boot_phases_completed.push("overlay".into());
@@ -757,10 +743,7 @@ async fn then_receives_overlay(world: &mut PactWorld, _node: String, version: u6
 #[then(regex = r#"^node "([\w-]+)" receives its node delta$"#)]
 async fn then_receives_delta(world: &mut PactWorld, _node: String) {
     // Delta may or may not be present depending on committed entries
-    assert!(
-        !world.boot_stream_chunks.is_empty(),
-        "boot stream should have chunks"
-    );
+    assert!(!world.boot_stream_chunks.is_empty(), "boot stream should have chunks");
 }
 
 #[then(regex = r#"^services start in dependency order: "([\w-]+)" then "([\w-]+)"$"#)]
@@ -861,7 +844,11 @@ async fn then_stdout_streamed(world: &mut PactWorld) {
 #[then("an ExecLog entry is recorded in the journal with full command and output")]
 async fn then_exec_logged(world: &mut PactWorld) {
     assert!(
-        world.journal.audit_log.iter().any(|op| op.operation_type == pact_common::types::AdminOperationType::Exec),
+        world
+            .journal
+            .audit_log
+            .iter()
+            .any(|op| op.operation_type == pact_common::types::AdminOperationType::Exec),
         "ExecLog should be in journal audit log"
     );
 }
@@ -1007,23 +994,18 @@ async fn then_merge_conflict(world: &mut PactWorld, key: String) {
     // Register conflict in manager
     let local = world.conflict_local_value.clone().unwrap_or_default();
     let journal = world.conflict_journal_value.clone().unwrap_or_default();
-    world.conflict_mgr.register_conflicts(vec![
-        pact_agent::conflict::ConflictEntry {
-            key: key.clone(),
-            local_value: local.into_bytes(),
-            journal_value: journal.into_bytes(),
-            detected_at: chrono::Utc::now(),
-        },
-    ]);
+    world.conflict_mgr.register_conflicts(vec![pact_agent::conflict::ConflictEntry {
+        key: key.clone(),
+        local_value: local.into_bytes(),
+        journal_value: journal.into_bytes(),
+        detected_at: chrono::Utc::now(),
+    }]);
     assert!(world.conflict_mgr.is_paused(&key), "conflict should be registered");
 }
 
 #[then(regex = r#"^node "([\w-]+)" pauses convergence for "([\w.]+)"$"#)]
 async fn then_pauses_convergence(world: &mut PactWorld, _node: String, key: String) {
-    assert!(
-        world.conflict_mgr.is_paused(&key),
-        "convergence should be paused for {key}"
-    );
+    assert!(world.conflict_mgr.is_paused(&key), "convergence should be paused for {key}");
 }
 
 #[then(regex = r#"^node "([\w-]+)" applies "([\w.]+)" as "(\d+)"$"#)]
@@ -1071,7 +1053,8 @@ async fn then_agents_receive_update(world: &mut PactWorld) {
 
 #[then("the new node receives the updated overlay including the promoted changes")]
 async fn then_new_node_gets_promoted(world: &mut PactWorld) {
-    let has_overlay = world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
+    let has_overlay =
+        world.boot_stream_chunks.iter().any(|c| matches!(c, BootStreamChunk::BaseOverlay { .. }));
     assert!(has_overlay, "new node should receive overlay");
 }
 
@@ -1244,7 +1227,7 @@ async fn then_mount_refcount(_world: &mut PactWorld, _image: String, _refcount: 
     // Mount refcounting tested in workload_integration feature
 }
 
-#[then(regex = r#"^pact bind-mounts into ([\w-]+)'s mount namespace$"#)]
+#[then(regex = r"^pact bind-mounts into ([\w-]+)'s mount namespace$")]
 async fn then_bind_mount(_world: &mut PactWorld, _alloc: String) {
     // Bind mount into namespace
 }
@@ -1254,22 +1237,22 @@ async fn then_fd_passing(_world: &mut PactWorld) {
     // FD passing via unix socket
 }
 
-#[then(regex = r#"^no new SquashFS mount occurs \(MountRef refcount=(\d+)\)$"#)]
+#[then(regex = r"^no new SquashFS mount occurs \(MountRef refcount=(\d+)\)$")]
 async fn then_no_new_mount(_world: &mut PactWorld, _refcount: u32) {
     // Shared mount — refcount incremented, no new filesystem mount
 }
 
-#[then(regex = r#"^([\w-]+) gets its own namespaces and bind-mount$"#)]
+#[then(regex = r"^([\w-]+) gets its own namespaces and bind-mount$")]
 async fn then_own_namespaces(_world: &mut PactWorld, _alloc: String) {
     // Each allocation gets separate namespaces
 }
 
-#[then(regex = r#"^pact detects empty cgroup and cleans up ([\w-]+)'s namespaces$"#)]
+#[then(regex = r"^pact detects empty cgroup and cleans up ([\w-]+)'s namespaces$")]
 async fn then_cleanup_namespaces(_world: &mut PactWorld, _alloc: String) {
     // Cleanup on cgroup empty
 }
 
-#[then(regex = r#"^MountRef refcount (?:decreases to|reaches) (\d+)$"#)]
+#[then(regex = r"^MountRef refcount (?:decreases to|reaches) (\d+)$")]
 async fn then_refcount_value(_world: &mut PactWorld, _count: u32) {
     // Refcount tracking tested in workload_integration feature
 }
@@ -1379,7 +1362,7 @@ async fn then_agents_receive_uidmap(_world: &mut PactWorld) {
     // UidMap subscription delivery
 }
 
-#[then(regex = r#"^NFS files created by this user are owned by UID (\d+)$"#)]
+#[then(regex = r"^NFS files created by this user are owned by UID (\d+)$")]
 async fn then_nfs_owned(_world: &mut PactWorld, _uid: u32) {
     // NFS ownership verification
 }
@@ -1394,12 +1377,12 @@ async fn then_db_entries_removed(_world: &mut PactWorld, _org: String) {
     // DB file cleanup
 }
 
-#[then(regex = r#"^NFS files owned by UID (\d+) become orphaned \(numeric only\)$"#)]
+#[then(regex = r"^NFS files owned by UID (\d+) become orphaned \(numeric only\)$")]
 async fn then_nfs_orphaned(_world: &mut PactWorld, _uid: u32) {
     // NFS files become numeric-only after org departure
 }
 
-#[then(regex = r#"^org_index (\d+) becomes reclaimable$"#)]
+#[then(regex = r"^org_index (\d+) becomes reclaimable$")]
 async fn then_org_index_reclaimable(_world: &mut PactWorld, _index: u32) {
     // Org index freed for reuse
 }

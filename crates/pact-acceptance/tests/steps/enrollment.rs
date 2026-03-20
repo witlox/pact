@@ -705,11 +705,8 @@ fn then_audit_logged(world: &mut PactWorld) {
 
 #[then("forwarded to Loki with the source IP and presented hardware identity")]
 fn then_loki_forwarded(world: &mut PactWorld) {
-    let failed_events: Vec<_> = world
-        .loki_events
-        .iter()
-        .filter(|e| e.entry_type == "enrollment_failed")
-        .collect();
+    let failed_events: Vec<_> =
+        world.loki_events.iter().filter(|e| e.entry_type == "enrollment_failed").collect();
     assert!(
         !failed_events.is_empty(),
         "Loki should have a failed enrollment event — the WHEN step should have forwarded it"

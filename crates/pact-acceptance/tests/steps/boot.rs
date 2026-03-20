@@ -349,10 +349,7 @@ async fn then_auth_identity(world: &mut PactWorld) {
         e.author.principal_type == PrincipalType::Service
             && e.author.role.contains("pact-service-agent")
     }) || world.boot_phases_completed.contains(&"auth".to_string());
-    assert!(
-        has_service_author,
-        "boot authentication should use the pact-service-agent identity"
-    );
+    assert!(has_service_author, "boot authentication should use the pact-service-agent identity");
 }
 
 #[then("the agent should stream the vCluster overlay")]
@@ -419,10 +416,7 @@ async fn then_cap_report(world: &mut PactWorld) {
 
 #[then("the node should be ready for workloads")]
 async fn then_node_ready(world: &mut PactWorld) {
-    assert!(
-        world.capability_report.is_some(),
-        "node should have a capability report to be ready"
-    );
+    assert!(world.capability_report.is_some(), "node should have a capability report to be ready");
     assert!(world.socket_available, "node should be ready for workloads");
 }
 

@@ -390,9 +390,11 @@ async fn then_delta_cleaned_up(world: &mut PactWorld) {
     // After TTL expiry, the delta should no longer be considered active.
     // Verify that the entry exists but has a TTL set (cleanup is triggered
     // by the reconciliation loop checking ttl_seconds against elapsed time).
-    let has_expired_commit = world.journal.entries.values().any(|e| {
-        e.entry_type == EntryType::Commit && e.ttl_seconds.is_some()
-    });
+    let has_expired_commit = world
+        .journal
+        .entries
+        .values()
+        .any(|e| e.entry_type == EntryType::Commit && e.ttl_seconds.is_some());
     assert!(has_expired_commit, "expired commit entry should exist with TTL for cleanup");
 }
 
@@ -434,10 +436,7 @@ async fn then_error_says(world: &mut PactWorld, expected: String) {
 async fn then_no_journal_entry(world: &mut PactWorld) {
     // Verify the rejected TTL value was NOT stored — apply_command returned
     // ValidationError and should not have inserted the entry.
-    assert!(
-        world.cli_exit_code == Some(1),
-        "command should have failed (exit code 1)"
-    );
+    assert!(world.cli_exit_code == Some(1), "command should have failed (exit code 1)");
     // The journal should not contain a commit with the rejected TTL.
     // Check that any commit entries present have valid TTLs (within bounds).
     for entry in world.journal.entries.values() {

@@ -258,9 +258,12 @@ async fn given_corrupted_cache(world: &mut PactWorld) {
     let tmp = tempfile::TempDir::new().unwrap();
     let cache_path = tmp.path().join("tokens.json");
     std::fs::write(&cache_path, "NOT VALID JSON {{{").unwrap();
-    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    let cache = hpc_auth::cache::TokenCache::new(
+        tmp.path().to_path_buf(),
+        hpc_auth::PermissionMode::Strict,
+    );
     // Verify the real cache rejects it
-    let result = cache.read(&"https://test.example.com");
+    let result = cache.read("https://test.example.com");
     assert!(result.is_err(), "real TokenCache should reject corrupted file");
     world.auth_cache_dir = Some(tmp);
 }
@@ -282,7 +285,10 @@ async fn given_wrong_permissions(world: &mut PactWorld) {
 
     // Create a real cache file with wrong permissions via hpc-auth
     let tmp = tempfile::TempDir::new().unwrap();
-    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    let cache = hpc_auth::cache::TokenCache::new(
+        tmp.path().to_path_buf(),
+        hpc_auth::PermissionMode::Strict,
+    );
     let tokens = hpc_auth::TokenSet {
         access_token: "test-token".to_string(),
         refresh_token: Some("test-refresh".to_string()),
@@ -329,7 +335,10 @@ async fn given_logins_server_a_and_b(world: &mut PactWorld) {
 
     // Wire through real TokenCache — write tokens for both servers
     let tmp = tempfile::TempDir::new().unwrap();
-    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    let cache = hpc_auth::cache::TokenCache::new(
+        tmp.path().to_path_buf(),
+        hpc_auth::PermissionMode::Strict,
+    );
     let tokens = hpc_auth::TokenSet {
         access_token: "token-a".to_string(),
         refresh_token: Some("refresh-a".to_string()),

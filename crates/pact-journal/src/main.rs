@@ -156,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("PACT_OIDC_ISSUER").unwrap_or_else(|_| "https://auth.example.com".into());
     let oidc_audience =
         std::env::var("PACT_OIDC_AUDIENCE").unwrap_or_else(|_| "pact-journal".into());
-    let oidc_secret = std::env::var("PACT_OIDC_HMAC_SECRET").ok().map(|s| s.into_bytes());
+    let oidc_secret = std::env::var("PACT_OIDC_HMAC_SECRET").ok().map(String::into_bytes);
     let oidc_config = pact_policy::iam::OidcConfig {
         issuer: oidc_issuer,
         audience: oidc_audience,

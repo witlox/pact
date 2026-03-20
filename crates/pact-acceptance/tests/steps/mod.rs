@@ -10,10 +10,10 @@ pub mod helpers;
 
 mod auth;
 mod boot; // Boot sequence + boot config streaming
-mod cross_context; // Cross-context integration (spans all modules)
-pub(crate) mod capability; // CapabilityReporter + MockGpuBackend
+pub mod capability; // CapabilityReporter + MockGpuBackend
 mod cli; // CLI formatting + exit codes + delegation
 mod commit_window; // CommitWindowManager
+mod cross_context; // Cross-context integration (spans all modules)
 mod diag; // Diagnostic log retrieval + validation
 mod drift; // DriftEvaluator
 mod emergency; // EmergencyManager

@@ -281,11 +281,7 @@ impl WhitelistManager {
         ];
 
         /// Path prefixes that require caution — blocked for read commands.
-        const SENSITIVE_PREFIXES: &[&str] = &[
-            "/etc/shadow",
-            "/etc/gshadow",
-            "/root",
-        ];
+        const SENSITIVE_PREFIXES: &[&str] = &["/etc/shadow", "/etc/gshadow", "/root"];
 
         for arg in args {
             // Skip non-path arguments (flags like -c, --help, numbers)
@@ -298,7 +294,9 @@ impl WhitelistManager {
                 let mut components: Vec<&str> = Vec::new();
                 for part in arg.split('/') {
                     match part {
-                        ".." => { components.pop(); }
+                        ".." => {
+                            components.pop();
+                        }
                         "." | "" => {}
                         other => components.push(other),
                     }
@@ -321,8 +319,17 @@ impl WhitelistManager {
             // Check sensitive prefixes for file-reading commands
             let is_file_reader = matches!(
                 command,
-                "cat" | "head" | "tail" | "grep" | "less" | "diff" | "wc" | "file"
-                    | "md5sum" | "sha256sum" | "stat"
+                "cat"
+                    | "head"
+                    | "tail"
+                    | "grep"
+                    | "less"
+                    | "diff"
+                    | "wc"
+                    | "file"
+                    | "md5sum"
+                    | "sha256sum"
+                    | "stat"
             );
             if is_file_reader {
                 for prefix in SENSITIVE_PREFIXES {
@@ -503,8 +510,7 @@ mod tests {
 
     #[test]
     fn validate_args_blocks_path_traversal() {
-        let result =
-            WhitelistManager::validate_args("cat", &["/var/log/../../etc/shadow".into()]);
+        let result = WhitelistManager::validate_args("cat", &["/var/log/../../etc/shadow".into()]);
         assert!(result.is_err());
     }
 
@@ -524,8 +530,7 @@ mod tests {
 
     #[test]
     fn validate_args_blocks_ca_keys() {
-        let result =
-            WhitelistManager::validate_args("cat", &["/etc/pact/ca/key.pem".into()]);
+        let result = WhitelistManager::validate_args("cat", &["/etc/pact/ca/key.pem".into()]);
         assert!(result.is_err());
     }
 }

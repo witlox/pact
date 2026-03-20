@@ -673,10 +673,15 @@ async fn then_homogeneity_warning(world: &mut PactWorld, node: String) {
 async fn then_recommend_promote(world: &mut PactWorld) {
     // The heterogeneity warning should exist (from the previous Then step).
     // A non-empty output from the preceding step implies a warning was generated.
-    let has_heterogeneous_delta = world.journal.entries.values().any(|e| {
-        e.entry_type == EntryType::Commit && matches!(e.scope, Scope::Node(_))
-    });
-    assert!(has_heterogeneous_delta, "should have node-scoped delta triggering promote recommendation");
+    let has_heterogeneous_delta = world
+        .journal
+        .entries
+        .values()
+        .any(|e| e.entry_type == EntryType::Commit && matches!(e.scope, Scope::Node(_)));
+    assert!(
+        has_heterogeneous_delta,
+        "should have node-scoped delta triggering promote recommendation"
+    );
 }
 
 #[then(regex = r#"^the output should warn that node "([\w-]+)" has an expired delta$"#)]
@@ -693,8 +698,10 @@ async fn then_expired_warning(world: &mut PactWorld, node: String) {
 async fn then_recommend_cleanup(world: &mut PactWorld) {
     // An expired TTL delta exists (verified by preceding step).
     // Cleanup recommendation is triggered by the presence of expired deltas.
-    let has_expired_ttl = world.journal.entries.values().any(|e| {
-        e.entry_type == EntryType::Commit && e.ttl_seconds.is_some()
-    });
+    let has_expired_ttl = world
+        .journal
+        .entries
+        .values()
+        .any(|e| e.entry_type == EntryType::Commit && e.ttl_seconds.is_some());
     assert!(has_expired_ttl, "should have expired-TTL delta triggering cleanup recommendation");
 }

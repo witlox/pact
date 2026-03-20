@@ -396,7 +396,8 @@ async fn when_health_check(world: &mut PactWorld, name: String) {
         }
     } else {
         world.last_error = Some(pact_common::error::PactError::Internal(format!(
-            "service {name} is {:?}, not Running", state
+            "service {name} is {:?}, not Running",
+            state
         )));
     }
 }

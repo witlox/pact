@@ -195,14 +195,12 @@ async fn given_merge_conflict(world: &mut PactWorld, _node: String, key: String)
     // Register a real conflict in the ConflictManager
     let local_val = world.conflict_local_value.clone().unwrap_or_else(|| "local".into());
     let journal_val = world.conflict_journal_value.clone().unwrap_or_else(|| "journal".into());
-    world.conflict_mgr.register_conflicts(vec![
-        pact_agent::conflict::ConflictEntry {
-            key,
-            local_value: local_val.into_bytes(),
-            journal_value: journal_val.into_bytes(),
-            detected_at: chrono::Utc::now(),
-        },
-    ]);
+    world.conflict_mgr.register_conflicts(vec![pact_agent::conflict::ConflictEntry {
+        key,
+        local_value: local_val.into_bytes(),
+        journal_value: journal_val.into_bytes(),
+        detected_at: chrono::Utc::now(),
+    }]);
 }
 
 #[given(regex = r#"^the local value is "(\d+)" and the journal value is "(\d+)"$"#)]
@@ -287,7 +285,8 @@ async fn when_reconnected(world: &mut PactWorld) {
 async fn when_resolve_accept_local(world: &mut PactWorld, admin: String) {
     world.rollback_triggered = false;
     // Resolve via real ConflictManager
-    let key = world.conflict_mgr.paused_keys().first().cloned().unwrap_or_else(|| "kernel.shmmax".into());
+    let key =
+        world.conflict_mgr.paused_keys().first().cloned().unwrap_or_else(|| "kernel.shmmax".into());
     let _ = world.conflict_mgr.resolve(&key, pact_agent::conflict::Resolution::AcceptLocal);
     // Accept local value — record in journal with local value
     if let Some(ref local_val) = world.conflict_local_value.clone() {
@@ -323,7 +322,8 @@ async fn when_resolve_accept_local(world: &mut PactWorld, admin: String) {
 async fn when_resolve_accept_journal(world: &mut PactWorld, admin: String) {
     world.rollback_triggered = false;
     // Resolve via real ConflictManager
-    let key = world.conflict_mgr.paused_keys().first().cloned().unwrap_or_else(|| "kernel.shmmax".into());
+    let key =
+        world.conflict_mgr.paused_keys().first().cloned().unwrap_or_else(|| "kernel.shmmax".into());
     let _ = world.conflict_mgr.resolve(&key, pact_agent::conflict::Resolution::AcceptJournal);
     // Accept journal value — record with journal value
     if let Some(ref journal_val) = world.conflict_journal_value.clone() {
@@ -378,9 +378,8 @@ async fn when_grace_expires(world: &mut PactWorld) {
     // Collect conflict keys from current manager or from stored values
     let local_val = world.conflict_local_value.clone().unwrap_or_else(|| "local".into());
     let journal_val = world.conflict_journal_value.clone().unwrap_or_else(|| "journal".into());
-    let key = "kernel.shmmax".to_string();
     expired_mgr.register_conflicts(vec![pact_agent::conflict::ConflictEntry {
-        key: key.clone(),
+        key: "kernel.shmmax".to_string(),
         local_value: local_val.into_bytes(),
         journal_value: journal_val.into_bytes(),
         detected_at: chrono::Utc::now() - chrono::Duration::seconds(1),
@@ -582,14 +581,15 @@ async fn then_detect_conflict(world: &mut PactWorld, node: String, key: String) 
     let conflicts = world.journal.detect_conflicts(&node, &local_entries);
     // Register detected conflicts in the real ConflictManager
     if !conflicts.is_empty() {
-        let entries: Vec<_> = conflicts.iter().map(|c| {
-            pact_agent::conflict::ConflictEntry {
+        let entries: Vec<_> = conflicts
+            .iter()
+            .map(|c| pact_agent::conflict::ConflictEntry {
                 key: c.key.clone(),
                 local_value: c.local_value.clone().into_bytes(),
                 journal_value: c.journal_value.clone().into_bytes(),
                 detected_at: chrono::Utc::now(),
-            }
-        }).collect();
+            })
+            .collect();
         world.conflict_mgr.register_conflicts(entries);
     }
     // Verify the key is tracked (either via journal detection or prior GIVEN registration)
@@ -637,10 +637,7 @@ async fn then_journal_records(world: &mut PactWorld, key: String, value: String,
 async fn then_resume_convergence(world: &mut PactWorld) {
     // After conflict resolution, the journal should be reachable and the agent
     // should be able to accept new config entries.
-    assert!(
-        world.journal_reachable,
-        "journal should be reachable for convergence to resume"
-    );
+    assert!(world.journal_reachable, "journal should be reachable for convergence to resume");
 }
 
 #[then(regex = r#"^node "([\w-]+)" should apply "([\w.]+)" as "([\w]+)"$"#)]

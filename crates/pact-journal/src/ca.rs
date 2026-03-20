@@ -127,19 +127,14 @@ impl CaKeyManager {
             let node_key = KeyPair::generate()
                 .map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
             let signed = params
-                .signed_by(
-                    &node_key,
-                    &self.ca_certified_key.cert,
-                    &self.ca_certified_key.key_pair,
-                )
+                .signed_by(&node_key, &self.ca_certified_key.cert, &self.ca_certified_key.key_pair)
                 .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
             debug!(node_id, serial = %serial_hex, "Signed certificate (legacy: server-generated key)");
             signed.pem()
         } else {
             // Real path: parse CSR, extract agent's public key, sign with CA.
-            let csr_params =
-                rcgen::CertificateSigningRequestParams::from_der(&csr_der.into())
-                    .map_err(|e| anyhow::anyhow!("CSR parsing failed: {e}"))?;
+            let csr_params = rcgen::CertificateSigningRequestParams::from_der(&csr_der.into())
+                .map_err(|e| anyhow::anyhow!("CSR parsing failed: {e}"))?;
 
             // Override the DN to include pact identity regardless of what the CSR says
             let mut params = csr_params.params;
@@ -152,10 +147,7 @@ impl CaKeyManager {
                 params,
                 public_key: csr_params.public_key,
             }
-            .signed_by(
-                &self.ca_certified_key.cert,
-                &self.ca_certified_key.key_pair,
-            )
+            .signed_by(&self.ca_certified_key.cert, &self.ca_certified_key.key_pair)
             .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
 
             debug!(node_id, serial = %serial_hex, "Signed certificate from agent CSR");
@@ -208,9 +200,7 @@ mod tests {
         // Generate a real CSR from an agent-side keypair
         let agent_key = KeyPair::generate().unwrap();
         let mut csr_params = CertificateParams::default();
-        csr_params
-            .distinguished_name
-            .push(DnType::CommonName, "agent-test-node");
+        csr_params.distinguished_name.push(DnType::CommonName, "agent-test-node");
         let csr = csr_params.serialize_request(&agent_key).unwrap();
         let csr_der = csr.der().to_vec();
 
