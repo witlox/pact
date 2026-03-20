@@ -10,10 +10,13 @@
 //!
 //! Requires Docker.
 
+use std::time::Duration;
+
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use testcontainers::runners::AsyncRunner;
+use testcontainers::ImageExt;
 
 use pact_e2e::containers::keycloak::{Keycloak, KEYCLOAK_PORT};
 
@@ -60,7 +63,9 @@ async fn setup_pact_realm(client: &Client, base_url: &str, admin_tok: &str) {
         }))
         .send()
         .await
-        .unwrap();
+        .unwrap()
+        .error_for_status()
+        .expect("realm creation should succeed");
 
     // Create confidential client with pact_role mapper
     let role_mapper_config: std::collections::HashMap<String, String> = [
@@ -98,7 +103,9 @@ async fn setup_pact_realm(client: &Client, base_url: &str, admin_tok: &str) {
         .json(&client_rep)
         .send()
         .await
-        .unwrap();
+        .unwrap()
+        .error_for_status()
+        .expect("client creation should succeed");
 
     // Create test users
     for (username, email, role) in [
@@ -127,14 +134,20 @@ async fn setup_pact_realm(client: &Client, base_url: &str, admin_tok: &str) {
             .json(&user)
             .send()
             .await
-            .unwrap();
+            .unwrap()
+            .error_for_status()
+            .unwrap_or_else(|e| panic!("user creation failed for {username}: {e}"));
     }
 }
 
 /// Test: OIDC discovery endpoint returns valid configuration.
 #[tokio::test]
 async fn keycloak_discovery_endpoint() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
@@ -164,7 +177,11 @@ async fn keycloak_discovery_endpoint() {
 /// Test: client credentials flow produces valid JWT with pact_role claim.
 #[tokio::test]
 async fn keycloak_client_credentials_flow() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
@@ -200,7 +217,11 @@ async fn keycloak_client_credentials_flow() {
 /// Test: resource owner password flow with pact_role in token claims.
 #[tokio::test]
 async fn keycloak_password_flow_with_role_claim() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
@@ -242,7 +263,11 @@ async fn keycloak_password_flow_with_role_claim() {
 /// Test: token refresh produces new access token.
 #[tokio::test]
 async fn keycloak_token_refresh() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
@@ -294,7 +319,11 @@ async fn keycloak_token_refresh() {
 /// Test: hpc-auth TokenCache roundtrip with real tokens.
 #[tokio::test]
 async fn keycloak_token_cache_roundtrip() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
@@ -364,7 +393,11 @@ async fn keycloak_token_cache_roundtrip() {
 /// Test: JWKS endpoint returns valid RSA keys for token validation.
 #[tokio::test]
 async fn keycloak_jwks_endpoint() {
-    let container = Keycloak::default().start().await.expect("Keycloak container started");
+    let container = Keycloak::default()
+        .with_startup_timeout(Duration::from_secs(120))
+        .start()
+        .await
+        .expect("Keycloak container started");
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(KEYCLOAK_PORT).await.unwrap();
