@@ -66,9 +66,64 @@ fn given_many_dmesg_lines(_world: &mut PactWorld, _node_id: String, _lines: u32)
     // The test verifies truncation logic via read_last_n_lines.
 }
 
-#[given(regex = r#"node "(.+)" has no dmesg output"#)]
+#[given(regex = r#"node "(.+)" has no dmesg output.*"#)]
 fn given_no_dmesg(_world: &mut PactWorld, _node_id: String) {
     // Empty dmesg is the default in test environments.
+}
+
+#[given(regex = r#"the agent on "(.+)" is running in PactSupervisor mode"#)]
+fn given_agent_pact_supervisor(world: &mut PactWorld, _node_id: String) {
+    world.supervisor_backend = SupervisorBackend::Pact;
+}
+
+#[given(regex = r#"the agent on "(.+)" is running in systemd compat mode"#)]
+fn given_agent_systemd_compat(world: &mut PactWorld, _node_id: String) {
+    world.supervisor_backend = SupervisorBackend::Systemd;
+}
+
+#[given(regex = r#"the vCluster "(.+)" policy includes extra log path "(.+)""#)]
+fn given_vcluster_extra_log_path(_world: &mut PactWorld, _vcluster: String, _path: String) {
+    // No-op: custom log paths are a policy-level declaration.
+    // The diag module reads them from vCluster config at runtime.
+}
+
+#[given(regex = r#"vCluster "(.+)" has no enrolled nodes"#)]
+fn given_vcluster_no_nodes(_world: &mut PactWorld, _vcluster: String) {
+    // No-op: by default no nodes are enrolled in a fresh PactWorld.
+}
+
+#[given(regex = r#"nodes "(.+)" enrolled in vCluster "(.+)""#)]
+fn given_nodes_enrolled_in_vcluster(world: &mut PactWorld, nodes_str: String, _vcluster: String) {
+    // Parse comma-separated node list (e.g. "node-001", "node-002", "node-003")
+    let nodes: Vec<String> = nodes_str
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Seed service declarations for each node (if not already populated)
+    if world.service_declarations.is_empty() {
+        world.service_declarations.push(ServiceDecl {
+            name: "chronyd".to_string(),
+            binary: "/usr/sbin/chronyd".to_string(),
+            args: vec![],
+            restart: RestartPolicy::Always,
+            restart_delay_seconds: 5,
+            depends_on: vec![],
+            order: 1,
+            cgroup_memory_max: None,
+            cgroup_slice: None,
+            cgroup_cpu_weight: None,
+            health_check: None,
+        });
+    }
+
+    world.diag_fleet_nodes = nodes;
+}
+
+#[given(regex = r#"node "(.+)" is unreachable"#)]
+fn given_node_unreachable(world: &mut PactWorld, node_id: String) {
+    world.diag_unreachable_nodes.push(node_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +131,7 @@ fn given_no_dmesg(_world: &mut PactWorld, _node_id: String) {
 // ---------------------------------------------------------------------------
 
 #[when(regex = r#"user "(.+)" with role "(.+)" runs "pact diag (.+)""#)]
-fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: String) {
+async fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: String) {
     // Parse args to extract options
     let parts: Vec<&str> = args.split_whitespace().collect();
 
@@ -85,6 +140,7 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
     let mut grep = String::new();
     let mut lines: u32 = 100;
     let mut node_id = String::new();
+    let mut vcluster = String::new();
 
     let mut i = 0;
     while i < parts.len() {
@@ -94,13 +150,11 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
                 i += 2;
             }
             "--service" if i + 1 < parts.len() => {
-                // Handle quoted service names
                 let svc = parts[i + 1].trim_matches('\'').trim_matches('"');
                 service = svc.to_string();
                 i += 2;
             }
             "--grep" if i + 1 < parts.len() => {
-                // Handle quoted patterns
                 let pat = parts[i + 1].trim_matches('\'').trim_matches('"');
                 grep = pat.to_string();
                 i += 2;
@@ -110,7 +164,8 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
                 i += 2;
             }
             "--vcluster" if i + 1 < parts.len() => {
-                i += 2; // Skip vcluster for now (fleet-wide not tested here)
+                vcluster = parts[i + 1].to_string();
+                i += 2;
             }
             other if !other.starts_with('-') && node_id.is_empty() => {
                 node_id = other.to_string();
@@ -149,8 +204,48 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
         }
     }
 
-    // Run collection using tokio runtime
-    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    // Fleet-wide mode: fan out to enrolled nodes
+    if !vcluster.is_empty() {
+        let fleet_nodes = world.diag_fleet_nodes.clone();
+        let unreachable = world.diag_unreachable_nodes.clone();
+
+        if fleet_nodes.is_empty() {
+            world.cli_output = Some("no nodes found".to_string());
+            world.cli_exit_code = Some(0);
+            return;
+        }
+
+        let mut output = String::new();
+        for node in &fleet_nodes {
+            if unreachable.contains(node) {
+                output.push_str(&format!("[WARN] {node}: unreachable\n"));
+            } else {
+                // Simulate per-node output with prefix
+                let request = DiagRequest {
+                    source_filter: source.clone(),
+                    service_name: service.clone(),
+                    grep_pattern: grep.clone(),
+                    line_limit: lines,
+                };
+                let chunks =
+                    diag::collect_diag(&request, world.supervisor_backend.clone(), &declared).await;
+                for chunk in &chunks {
+                    for line in &chunk.lines {
+                        output.push_str(&format!("[{node}] {line}\n"));
+                    }
+                }
+                if chunks.iter().all(|c| c.lines.is_empty()) {
+                    output.push_str(&format!("[{node}] (no output)\n"));
+                }
+            }
+        }
+
+        world.cli_output = Some(output);
+        world.cli_exit_code = Some(0);
+        return;
+    }
+
+    // Single-node mode
     let request = DiagRequest {
         source_filter: source,
         service_name: service,
@@ -158,8 +253,7 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
         line_limit: lines,
     };
 
-    let chunks =
-        rt.block_on(diag::collect_diag(&request, world.supervisor_backend.clone(), &declared));
+    let chunks = diag::collect_diag(&request, world.supervisor_backend.clone(), &declared).await;
 
     // Format output
     let mut output = String::new();
@@ -179,11 +273,9 @@ fn when_user_runs_diag(world: &mut PactWorld, user: String, role: String, args: 
     }
 
     if output.is_empty() {
-        // Check for specific messages
         let has_missing_service =
             chunks.iter().any(|c| c.source.starts_with("service:") && c.lines.is_empty());
         if has_missing_service && !chunks.is_empty() {
-            // Find the specific missing service
             for c in &chunks {
                 if c.source.starts_with("service:") && c.lines.is_empty() {
                     let svc_name = c.source.strip_prefix("service:").unwrap_or("");
@@ -272,26 +364,8 @@ fn then_output_empty(world: &mut PactWorld) {
     );
 }
 
-#[then(regex = r"exit code should be (\d+)")]
-fn then_exit_code(world: &mut PactWorld, expected: i32) {
-    assert_eq!(
-        world.cli_exit_code,
-        Some(expected),
-        "expected exit code {expected}, got {:?}",
-        world.cli_exit_code
-    );
-}
-
-#[then(regex = r#"the command should be rejected with "(.+)""#)]
-fn then_rejected_with(world: &mut PactWorld, expected_msg: String) {
-    let output = world.cli_output.as_deref().unwrap_or("");
-    assert!(
-        output.to_lowercase().contains(&expected_msg.to_lowercase()),
-        "expected output to contain '{}', got: {}",
-        expected_msg,
-        output
-    );
-}
+// "exit code should be N" — handled by shell.rs (shared step).
+// "the command should be rejected with ..." — handled by shell.rs (shared step).
 
 #[then("the agent should fall back to the dmesg command")]
 fn then_dmesg_fallback(world: &mut PactWorld) {
@@ -353,10 +427,7 @@ fn then_results_from_specific(world: &mut PactWorld, _node1: String, _node2: Str
     assert_eq!(world.cli_exit_code, Some(0));
 }
 
-#[then(regex = r#"the output should contain "\[WARN\] (.+): unreachable""#)]
-fn then_warn_unreachable(world: &mut PactWorld, _node_id: String) {
-    assert_eq!(world.cli_exit_code, Some(0));
-}
+// "[WARN] node-002: unreachable" — handled by the generic `the output should contain` step above.
 
 #[then("the dmesg source should return an empty chunk")]
 fn then_dmesg_empty_chunk(world: &mut PactWorld) {

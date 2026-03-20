@@ -39,6 +39,7 @@ libc = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 jsonwebtoken = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }

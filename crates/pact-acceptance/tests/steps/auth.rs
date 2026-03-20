@@ -439,7 +439,7 @@ async fn given_node_belongs_to_vc(world: &mut PactWorld, _node: String, _vc: Str
     // Relationship established — used for authorization scoping.
 }
 
-#[given(regex = r#"^the user is authenticated as "([\w@.]+)"$"#)]
+#[given(regex = r#"^the user is authenticated as "([\w@.\-]+)"$"#)]
 async fn given_authenticated_as(world: &mut PactWorld, principal: String) {
     world.current_identity = Some(pact_common::types::Identity {
         principal,

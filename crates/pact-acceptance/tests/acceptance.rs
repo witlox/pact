@@ -106,6 +106,11 @@ pub struct PactWorld {
     // --- Capability ---
     pub capability_report: Option<CapabilityReport>,
     pub gpu_capabilities: Vec<GpuCapability>,
+    pub cpu_capability: Option<pact_common::types::CpuCapability>,
+    pub memory_capability: Option<pact_common::types::MemoryCapability>,
+    pub network_interfaces: Option<Vec<pact_common::types::NetworkInterface>>,
+    pub storage_capability: Option<pact_common::types::StorageCapability>,
+    pub software_capability: Option<pact_common::types::SoftwareCapability>,
     pub manifest_written: bool,
     pub socket_available: bool,
 
@@ -159,15 +164,173 @@ pub struct PactWorld {
 
     // --- Resource isolation ---
     pub cgroup_manager: Option<Box<dyn hpc_node::CgroupManager>>,
+    /// Tracks cgroup scopes created (scope_path -> service_name).
+    pub cgroup_scopes: HashMap<String, String>,
+    /// Tracks which services have simulated cgroup creation failure.
+    pub cgroup_fail_services: Vec<String>,
+    /// Tracks audit events emitted during resource isolation tests.
+    pub audit_events: Vec<AuditEventRecord>,
+    /// Whether an emergency session is active (for resource isolation tests).
+    pub emergency_session_active: bool,
+    /// Identity for the emergency session.
+    pub emergency_session_identity: Option<String>,
+    /// Tracks frozen slices.
+    pub frozen_slices: Vec<String>,
+    /// Tracks namespace sets per allocation.
+    pub namespace_sets: HashMap<String, Vec<String>>,
+    /// Tracks whether a systemd scope was created (for systemd backend tests).
+    pub systemd_scope_created: Option<String>,
+    /// Tracks whether direct cgroup entries were created (systemd backend).
+    pub direct_cgroup_entries_created: bool,
+    /// Simulated running processes per scope.
+    pub scope_processes: HashMap<String, u32>,
+    /// Tracks killed scopes (for cleanup verification).
+    pub killed_scopes: Vec<String>,
+    /// Operation denied flag.
+    pub operation_denied: bool,
+    /// Metric read result.
+    pub metric_read_value: Option<u64>,
+
+    // --- Workload integration (extended) ---
+    /// Handoff server for namespace creation/handoff.
+    pub handoff_server: Option<pact_agent::handoff::HandoffServer>,
+    /// Whether the handoff socket is available.
+    pub handoff_socket_available: bool,
+    /// Whether lattice is in standalone mode.
+    pub lattice_standalone: bool,
+    /// Whether readiness signal has been emitted.
+    pub readiness_signal_emitted: bool,
+    /// Queued requests (before readiness).
+    pub queued_requests: Vec<String>,
+    /// Tracks active allocations (allocation_id -> uenv image).
+    pub active_allocations: HashMap<String, Option<String>>,
+    /// Whether pact-agent has crashed and restarted.
+    pub agent_restarted: bool,
+    /// Allocations that ended while agent was down.
+    pub ended_allocations_during_crash: Vec<String>,
 
     // --- Identity mapping ---
     pub uid_map: Option<pact_common::types::UidMap>,
     pub identity_mode: pact_common::types::IdentityMode,
     pub last_auth_subject: Option<String>,
     pub last_assigned_uid: Option<u32>,
+    pub nfs_configured: bool,
+    pub passwd_db_created: bool,
+    pub group_db_created: bool,
+    pub nsswitch_configured: bool,
+    pub uid_map_loaded: bool,
+    pub journal_committed: bool,
+    pub db_files_updated: bool,
+    pub nss_lookup_result: Option<u32>,
+    pub nss_lookup_local: bool,
+    pub nss_no_network: bool,
+    pub nss_not_found: bool,
+    pub nss_fallthrough: bool,
+    pub service_waiting_for_uid_map: bool,
+    pub service_started_after_resolve: bool,
 
     // --- Workload integration ---
     pub mount_manager: Option<pact_agent::handoff::MountRefManager>,
+
+    // --- Network management ---
+    /// Declared network interface configurations from overlay.
+    pub network_configs: Vec<pact_agent::network::InterfaceConfig>,
+    /// Configured interface states after network phase.
+    pub network_interface_states: Vec<pact_agent::network::InterfaceState>,
+    /// Whether network configuration should fail.
+    pub network_config_will_fail: bool,
+    /// Whether network has been configured.
+    pub network_configured: bool,
+    /// Default route configured.
+    pub network_default_route: Option<String>,
+    /// Whether pact-agent configured network interfaces (for systemd mode check).
+    pub network_configured_by_pact: bool,
+
+    // --- Boot phase state (platform_bootstrap) ---
+    /// Ordered list of boot phases that should execute.
+    pub boot_phase_order: Vec<String>,
+    /// Boot phase that will fail (if any).
+    pub boot_phase_fail: Option<String>,
+    /// Current boot state: "Booting", "Ready", "BootFailed".
+    pub boot_state: String,
+    /// Which boot phase failed (if any).
+    pub boot_failed_at: Option<String>,
+    /// Whether boot was retried after failure resolution.
+    pub boot_retried: bool,
+    /// Whether failure condition has been resolved.
+    pub boot_failure_resolved: bool,
+    /// Whether running as PID 1.
+    pub running_as_pid1: bool,
+    /// Boot start timestamp (for timing).
+    pub boot_start_time: Option<std::time::Instant>,
+    /// Boot end timestamp.
+    pub boot_end_time: Option<std::time::Instant>,
+    /// Whether a warm journal (cached overlay) is available.
+    pub warm_journal: bool,
+
+    // --- Watchdog state ---
+    /// Whether /dev/watchdog is available.
+    pub watchdog_available: bool,
+    /// Whether a watchdog handle has been opened.
+    pub watchdog_handle_opened: bool,
+    /// Whether the watchdog is being petted periodically.
+    pub watchdog_petted: bool,
+    /// Watchdog timeout in seconds.
+    pub watchdog_timeout_seconds: Option<u32>,
+    /// Whether the supervision loop is hung.
+    pub supervision_loop_hung: bool,
+    /// Whether the watchdog timer has expired.
+    pub watchdog_timer_expired: bool,
+    /// Whether BMC triggered a reboot.
+    pub bmc_reboot_triggered: bool,
+
+    // --- Adaptive supervision loop ---
+    /// Whether there are active allocations on the node.
+    pub has_active_allocations: bool,
+    /// Current poll interval in ms (adaptive).
+    pub supervision_poll_interval_ms: u64,
+    /// Whether deep inspections are performed.
+    pub deep_inspections: bool,
+    /// Simulated CPU usage percent.
+    pub cpu_usage_percent: f64,
+
+    // --- Bootstrap identity / SPIRE ---
+    /// Whether a bootstrap identity from OpenCHAMI is available.
+    pub bootstrap_identity_available: bool,
+    /// Whether pact-agent authenticated with bootstrap identity.
+    pub authenticated_with_bootstrap: bool,
+    /// Whether SPIRE agent is reachable.
+    pub spire_agent_reachable: bool,
+    /// Whether SPIRE agent has become reachable (after initially unreachable).
+    pub spire_agent_became_reachable: bool,
+    /// Whether an SVID was obtained from SPIRE.
+    pub svid_obtained: bool,
+    /// Whether pact-agent rotated to SPIRE-managed mTLS.
+    pub spire_mtls_active: bool,
+    /// Whether bootstrap identity was discarded.
+    pub bootstrap_identity_discarded: bool,
+    /// Whether SPIRE SVID acquisition is being retried.
+    pub spire_retry_active: bool,
+    /// Whether no SPIRE agent is available at all.
+    pub no_spire_agent: bool,
+
+    // --- Device coldplug ---
+    /// Whether device nodes were set up from sysfs.
+    pub device_nodes_setup: bool,
+    /// Whether kernel modules were loaded.
+    pub kernel_modules_loaded: bool,
+    /// Whether device permissions were set.
+    pub device_permissions_set: bool,
+    /// Whether a persistent hotplug daemon is running.
+    pub hotplug_daemon_running: bool,
+
+    // --- Node assignment ---
+    /// Node ID to vCluster assignment.
+    pub node_vcluster_assignment: Option<(String, String)>,
+
+    // --- Diag fleet ---
+    pub diag_fleet_nodes: Vec<String>,
+    pub diag_unreachable_nodes: Vec<String>,
 
     // --- Auth (hpc-auth) ---
     /// Auth server URL for test scenarios.
@@ -247,6 +410,13 @@ impl fmt::Debug for PactWorld {
 // ---------------------------------------------------------------------------
 // Supporting types (test-only)
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct AuditEventRecord {
+    pub action: String,
+    pub detail: String,
+    pub identity: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ExecResult {
@@ -365,6 +535,11 @@ impl PactWorld {
             // Capability stubs
             capability_report: None,
             gpu_capabilities: Vec::new(),
+            cpu_capability: None,
+            memory_capability: None,
+            network_interfaces: None,
+            storage_capability: None,
+            software_capability: None,
             manifest_written: false,
             socket_available: false,
 
@@ -418,15 +593,111 @@ impl PactWorld {
 
             // Resource isolation
             cgroup_manager: None,
+            cgroup_scopes: HashMap::new(),
+            cgroup_fail_services: Vec::new(),
+            audit_events: Vec::new(),
+            emergency_session_active: false,
+            emergency_session_identity: None,
+            frozen_slices: Vec::new(),
+            namespace_sets: HashMap::new(),
+            systemd_scope_created: None,
+            direct_cgroup_entries_created: false,
+            scope_processes: HashMap::new(),
+            killed_scopes: Vec::new(),
+            operation_denied: false,
+            metric_read_value: None,
+
+            // Workload integration (extended)
+            handoff_server: None,
+            handoff_socket_available: true,
+            lattice_standalone: false,
+            readiness_signal_emitted: false,
+            queued_requests: Vec::new(),
+            active_allocations: HashMap::new(),
+            agent_restarted: false,
+            ended_allocations_during_crash: Vec::new(),
 
             // Identity mapping
             uid_map: None,
             identity_mode: pact_common::types::IdentityMode::OnDemand,
             last_auth_subject: None,
             last_assigned_uid: None,
+            nfs_configured: false,
+            passwd_db_created: false,
+            group_db_created: false,
+            nsswitch_configured: false,
+            uid_map_loaded: false,
+            journal_committed: false,
+            db_files_updated: false,
+            nss_lookup_result: None,
+            nss_lookup_local: false,
+            nss_no_network: false,
+            nss_not_found: false,
+            nss_fallthrough: false,
+            service_waiting_for_uid_map: false,
+            service_started_after_resolve: false,
 
             // Workload integration
             mount_manager: None,
+
+            // Network management
+            network_configs: Vec::new(),
+            network_interface_states: Vec::new(),
+            network_config_will_fail: false,
+            network_configured: false,
+            network_default_route: None,
+            network_configured_by_pact: false,
+
+            // Boot phase state (platform_bootstrap)
+            boot_phase_order: Vec::new(),
+            boot_phase_fail: None,
+            boot_state: "Idle".to_string(),
+            boot_failed_at: None,
+            boot_retried: false,
+            boot_failure_resolved: false,
+            running_as_pid1: false,
+            boot_start_time: None,
+            boot_end_time: None,
+            warm_journal: false,
+
+            // Watchdog
+            watchdog_available: false,
+            watchdog_handle_opened: false,
+            watchdog_petted: false,
+            watchdog_timeout_seconds: None,
+            supervision_loop_hung: false,
+            watchdog_timer_expired: false,
+            bmc_reboot_triggered: false,
+
+            // Adaptive supervision loop
+            has_active_allocations: false,
+            supervision_poll_interval_ms: 1000,
+            deep_inspections: false,
+            cpu_usage_percent: 0.0,
+
+            // Bootstrap identity / SPIRE
+            bootstrap_identity_available: false,
+            authenticated_with_bootstrap: false,
+            spire_agent_reachable: false,
+            spire_agent_became_reachable: false,
+            svid_obtained: false,
+            spire_mtls_active: false,
+            bootstrap_identity_discarded: false,
+            spire_retry_active: false,
+            no_spire_agent: false,
+
+            // Device coldplug
+            device_nodes_setup: false,
+            kernel_modules_loaded: false,
+            device_permissions_set: false,
+            hotplug_daemon_running: false,
+
+            // Node assignment
+            node_vcluster_assignment: None,
+
+            // Diag fleet
+            diag_fleet_nodes: Vec::new(),
+            diag_unreachable_nodes: Vec::new(),
 
             // Auth (hpc-auth)
             auth_server_url: None,

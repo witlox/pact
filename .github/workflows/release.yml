@@ -34,20 +34,27 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --run-ignored all
-      - run: cargo deny check
+      - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e --run-ignored all
+      - run: cargo test -p pact-acceptance
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
-  build:
-    name: Build (${{ matrix.target }})
+  # ---------------------------------------------------------------------------
+  # Platform binaries: journal, CLI, MCP — no hardware features, one per arch
+  # ---------------------------------------------------------------------------
+  platform:
+    name: Platform (${{ matrix.arch }})
     needs: preflight
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            cross: false
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            cross: true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -57,36 +64,253 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: platform-${{ matrix.arch }}
+
+      - name: Install native build deps
+        if: ${{ !matrix.cross }}
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install cross-compilation toolchain (aarch64)
+        if: matrix.cross
+        env:
+          OPENSSL_DIR: /usr
+          OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
+          OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
+        run: |
+          sudo dpkg --add-architecture arm64
+          # Pin ALL existing apt sources to amd64 (sources.list, .list files, .sources files)
+          [ -f /etc/apt/sources.list ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' /etc/apt/sources.list || true
+          for f in /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' "$f" || true
+          done
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] && grep -q '^Architectures:' "$f" || sudo sed -i '/^Types:/a Architectures: amd64' "$f" || true
+          done
+          # Add arm64 ports
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe' | sudo tee /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-security main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 pkg-config
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu" >> $GITHUB_ENV
+
       - name: Set version
         run: |
           chmod +x scripts/set-version.sh
           scripts/set-version.sh
-      - name: Build release
-        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Build pact-journal
+        run: cargo build --release --target ${{ matrix.target }} -p pact-journal
+
+      - name: Build pact (CLI)
+        run: cargo build --release --target ${{ matrix.target }} -p pact-cli
+
+      - name: Build pact-mcp
+        run: cargo build --release --target ${{ matrix.target }} -p pact-mcp
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          for bin in pact pact-journal pact-mcp; do
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$bin"
+          done
+          cd dist
+          tar czf "../pact-platform-${{ matrix.arch }}.tar.gz" *
+          cd ..
+          sha256sum "pact-platform-${{ matrix.arch }}.tar.gz" > "pact-platform-${{ matrix.arch }}.tar.gz.sha256"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: pact-${{ matrix.target }}
+          name: pact-platform-${{ matrix.arch }}
           path: |
-            target/${{ matrix.target }}/release/pact
-            target/${{ matrix.target }}/release/pact-agent
-            target/${{ matrix.target }}/release/pact-journal
+            pact-platform-${{ matrix.arch }}.tar.gz
+            pact-platform-${{ matrix.arch }}.tar.gz.sha256
 
+  # ---------------------------------------------------------------------------
+  # Agent binaries: arch × GPU × supervisor matrix
+  # ---------------------------------------------------------------------------
+  agent:
+    name: Agent (${{ matrix.name }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- x86_64 × PactSupervisor ---
+          - name: x86_64-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire
+            cross: false
+          - name: x86_64-nvidia-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,nvidia
+            cross: false
+          - name: x86_64-amd-pact
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,amd
+            cross: false
+
+          # --- x86_64 × systemd ---
+          - name: x86_64-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,systemd
+            cross: false
+          - name: x86_64-nvidia-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,nvidia,systemd
+            cross: false
+          - name: x86_64-amd-systemd
+            target: x86_64-unknown-linux-gnu
+            features: ebpf,spire,amd,systemd
+            cross: false
+
+          # --- aarch64 × PactSupervisor ---
+          - name: aarch64-pact
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire
+            cross: true
+          - name: aarch64-nvidia-pact
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,nvidia
+            cross: true
+
+          # --- aarch64 × systemd ---
+          - name: aarch64-systemd
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,systemd
+            cross: true
+          - name: aarch64-nvidia-systemd
+            target: aarch64-unknown-linux-gnu
+            features: ebpf,spire,nvidia,systemd
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: agent-${{ matrix.name }}
+
+      - name: Install native build deps
+        if: ${{ !matrix.cross }}
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install cross-compilation toolchain (aarch64)
+        if: matrix.cross
+        env:
+          OPENSSL_DIR: /usr
+          OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
+          OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
+        run: |
+          sudo dpkg --add-architecture arm64
+          # Pin ALL existing apt sources to amd64 (sources.list, .list files, .sources files)
+          [ -f /etc/apt/sources.list ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' /etc/apt/sources.list || true
+          for f in /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] && sudo sed -i '/^deb \[/! s/^deb /deb [arch=amd64] /' "$f" || true
+          done
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] && grep -q '^Architectures:' "$f" || sudo sed -i '/^Types:/a Architectures: amd64' "$f" || true
+          done
+          # Add arm64 ports
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe' | sudo tee /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          echo 'deb [arch=arm64] http://ports.ubuntu.com/ noble-security main restricted universe' | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 pkg-config
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu" >> $GITHUB_ENV
+
+      - name: Set version
+        run: |
+          chmod +x scripts/set-version.sh
+          scripts/set-version.sh
+
+      - name: Build pact-agent
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -p pact-agent --features ${{ matrix.features }}
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/pact-agent" dist/
+          cd dist
+          tar czf "../pact-agent-${{ matrix.name }}.tar.gz" *
+          cd ..
+          sha256sum "pact-agent-${{ matrix.name }}.tar.gz" > "pact-agent-${{ matrix.name }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pact-agent-${{ matrix.name }}
+          path: |
+            pact-agent-${{ matrix.name }}.tar.gz
+            pact-agent-${{ matrix.name }}.tar.gz.sha256
+
+  # ---------------------------------------------------------------------------
+  # Publish: collect all artifacts into a GitHub release
+  # ---------------------------------------------------------------------------
   publish:
     name: Publish release
-    needs: [preflight, build]
+    needs: [preflight, platform, agent]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.preflight.outputs.version }}
           name: pact v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
+          body: |
+            ## Platform binaries (journal, CLI, MCP)
+
+            | Archive | Arch | Contents |
+            |---------|------|----------|
+            | `pact-platform-x86_64` | x86_64 | pact, pact-journal (opa + federation), pact-mcp |
+            | `pact-platform-aarch64` | aarch64 | pact, pact-journal (opa + federation), pact-mcp |
+
+            ## Agent binaries
+
+            | Archive | Arch | GPU | Supervisor | Features |
+            |---------|------|-----|------------|----------|
+            | `pact-agent-x86_64-pact` | x86_64 | — | PactSupervisor | ebpf, spire |
+            | `pact-agent-x86_64-nvidia-pact` | x86_64 | NVIDIA | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-agent-x86_64-amd-pact` | x86_64 | AMD | PactSupervisor | ebpf, spire, amd |
+            | `pact-agent-x86_64-systemd` | x86_64 | — | systemd | ebpf, spire, systemd |
+            | `pact-agent-x86_64-nvidia-systemd` | x86_64 | NVIDIA | systemd | ebpf, spire, nvidia, systemd |
+            | `pact-agent-x86_64-amd-systemd` | x86_64 | AMD | systemd | ebpf, spire, amd, systemd |
+            | `pact-agent-aarch64-pact` | aarch64 | — | PactSupervisor | ebpf, spire |
+            | `pact-agent-aarch64-nvidia-pact` | aarch64 | NVIDIA | PactSupervisor | ebpf, spire, nvidia |
+            | `pact-agent-aarch64-systemd` | aarch64 | — | systemd | ebpf, spire, systemd |
+            | `pact-agent-aarch64-nvidia-systemd` | aarch64 | NVIDIA | systemd | ebpf, spire, nvidia, systemd |
           files: |
-            pact-*/pact
-            pact-*/pact-agent
-            pact-*/pact-journal
+            pact-platform-*/pact-platform-*.tar.gz
+            pact-platform-*/pact-platform-*.tar.gz.sha256
+            pact-agent-*/pact-agent-*.tar.gz
+            pact-agent-*/pact-agent-*.tar.gz.sha256

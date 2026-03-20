@@ -201,3 +201,64 @@ Alerts ──→ Grafana alerting ──→ PagerDuty / Slack
 - Configuration state is site-local
 - Policy templates are federated via Sovra mTLS
 - Consistent with lattice's federation model
+
+## Feature Flags
+
+Cargo feature flags control optional subsystems. All default to off —
+production deployments enable what the hardware and infrastructure support.
+
+### pact-agent
+
+| Feature    | Dependency       | What it enables |
+|------------|------------------|-----------------|
+| `ebpf`     | `aya`, `aya-log` | eBPF-based state observers (mount, sysctl, module changes). Requires Linux + `CAP_BPF`. Falls back to inotify/netlink when disabled. |
+| `spire`    | `spiffe`         | SPIRE workload identity provider in the identity cascade. When disabled, the cascade uses bootstrap → self-signed only. |
+| `nvidia`   | —                | NVIDIA GPU detection backend (`nvidia-smi` parsing, NVML). Without this, GPU capability reports use `MockGpuBackend`. |
+| `amd`      | —                | AMD GPU detection backend (`rocm-smi` parsing). Same fallback as `nvidia`. |
+| `systemd`  | —                | systemd service manager backend (D-Bus/`systemctl`). The `PactSupervisor` (direct process management) is always available. |
+
+**Typical production build:**
+```bash
+cargo build -p pact-agent --features ebpf,spire,nvidia
+# or for AMD GPU nodes:
+cargo build -p pact-agent --features ebpf,spire,amd
+```
+
+### pact-policy
+
+| Feature      | Dependency | What it enables |
+|--------------|------------|-----------------|
+| `opa`        | `reqwest`  | OPA/Rego policy evaluation via localhost REST API (ADR-003). When RBAC returns `Defer`, the engine calls OPA at `{opa_endpoint}/v1/data/pact/authz/allow`. Falls back to cached RBAC when OPA is unreachable (ADR-011). |
+| `federation` | `reqwest`  | Sovra policy template synchronization. Syncs Rego bundles from Sovra on a configurable interval. |
+
+### pact-journal
+
+Both features are **on by default** — they add no platform dependencies (just `reqwest`)
+and are no-ops when the respective endpoints are not configured.
+
+| Feature      | Dependency              | What it enables |
+|--------------|-------------------------|-----------------|
+| `opa`        | `pact-policy/opa`       | OPA/Rego policy evaluation via localhost REST on journal nodes (ADR-003). |
+| `federation` | `pact-policy/federation`| Sovra policy template synchronization on journal nodes. |
+
+### pact-acceptance (test only)
+
+| Feature       | What it enables |
+|---------------|-----------------|
+| `integration` | Integration-level BDD scenarios requiring running services. |
+
+### Build matrix
+
+| Scenario | Agent features | Journal features |
+|----------|---------------|------------------|
+| **Dev (macOS)** | (none) | (none) |
+| **CI (Linux)** | (none) | `opa` |
+| **Production x86_64 NVIDIA** | `ebpf,spire,nvidia` | `opa` |
+| **Production x86_64 AMD** | `ebpf,spire,amd` | `opa` |
+| **Production aarch64 NVIDIA** | `ebpf,spire,nvidia` | `opa` |
+| **Systemd fallback** | `ebpf,spire,nvidia,systemd` | `opa` |
+| **Regulated site** | `ebpf,spire,nvidia` | `opa,federation` |
+
+Primary builds use `PactSupervisor` (no `systemd` feature) — the default
+for diskless HPC nodes where pact-agent runs as init. The `systemd`
+variant is for conservative deployments with persistent root filesystems.

@@ -63,7 +63,12 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - run: >
+          cargo llvm-cov --workspace
+          --exclude pact-test-harness
+          --exclude pact-acceptance
+          --exclude pact-e2e
+          --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
@@ -102,6 +107,36 @@ jobs:
       # Run ignored tests that require root/CAP_SYS_ADMIN
       - run: sudo apt-get install -y squashfs-tools
       - run: sudo env "PATH=$PATH" cargo test -p pact-e2e --test linux_cgroup --test linux_namespace -- --ignored --test-threads=1
+
+  feature-check:
+    name: Feature Check (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent-spire
+            cmd: cargo check -p pact-agent --features spire
+          - name: agent-ebpf
+            cmd: cargo check -p pact-agent --features ebpf
+          - name: agent-nvidia
+            cmd: cargo check -p pact-agent --features nvidia
+          - name: agent-amd
+            cmd: cargo check -p pact-agent --features amd
+          - name: agent-systemd
+            cmd: cargo check -p pact-agent --features systemd
+          - name: agent-all
+            cmd: cargo check -p pact-agent --features ebpf,spire,nvidia,systemd
+          - name: journal-all
+            cmd: cargo check -p pact-journal --all-features
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: features-${{ matrix.name }}
+      - run: ${{ matrix.cmd }}
 
   deny:
     name: Cargo Deny

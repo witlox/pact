@@ -1,6 +1,65 @@
 # Getting Started with pact
 
-## Prerequisites
+## Install from Release
+
+Download pre-built binaries from the [latest release](https://github.com/witlox/pact/releases/latest).
+
+### Platform binaries (journal, CLI, MCP)
+
+```bash
+# x86_64
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-platform-x86_64.tar.gz
+sudo tar xzf pact-platform-x86_64.tar.gz -C /usr/local/bin/
+
+# aarch64
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-platform-aarch64.tar.gz
+sudo tar xzf pact-platform-aarch64.tar.gz -C /usr/local/bin/
+```
+
+This installs `pact` (CLI), `pact-journal`, and `pact-mcp`.
+
+### Agent binary
+
+Choose the variant matching your hardware and supervisor model:
+
+```bash
+# x86_64 NVIDIA node with PactSupervisor (diskless HPC)
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-nvidia-pact.tar.gz
+sudo tar xzf pact-agent-x86_64-nvidia-pact.tar.gz -C /usr/local/bin/
+
+# aarch64 NVIDIA node with PactSupervisor
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-aarch64-nvidia-pact.tar.gz
+sudo tar xzf pact-agent-aarch64-nvidia-pact.tar.gz -C /usr/local/bin/
+```
+
+Available agent variants:
+
+| Variant | Arch | GPU | Supervisor |
+|---------|------|-----|------------|
+| `pact-agent-x86_64-pact` | x86_64 | — | PactSupervisor |
+| `pact-agent-x86_64-nvidia-pact` | x86_64 | NVIDIA | PactSupervisor |
+| `pact-agent-x86_64-amd-pact` | x86_64 | AMD | PactSupervisor |
+| `pact-agent-x86_64-systemd` | x86_64 | — | systemd |
+| `pact-agent-x86_64-nvidia-systemd` | x86_64 | NVIDIA | systemd |
+| `pact-agent-x86_64-amd-systemd` | x86_64 | AMD | systemd |
+| `pact-agent-aarch64-pact` | aarch64 | — | PactSupervisor |
+| `pact-agent-aarch64-nvidia-pact` | aarch64 | NVIDIA | PactSupervisor |
+| `pact-agent-aarch64-systemd` | aarch64 | — | systemd |
+| `pact-agent-aarch64-nvidia-systemd` | aarch64 | NVIDIA | systemd |
+
+All variants include eBPF and SPIRE support. See [ARCHITECTURE.md](../../ARCHITECTURE.md#feature-flags) for details.
+
+### Verify
+
+```bash
+pact --version
+pact-agent --version
+pact-journal --version
+```
+
+## Build from Source (development)
+
+### Prerequisites
 
 - **Rust toolchain**: stable (1.85+). The repo pins the toolchain via `rust-toolchain.toml`.
 - **protoc**: Protocol Buffers compiler (required for building `pact-common`).
@@ -11,8 +70,6 @@
 - **cargo-nextest** (optional, recommended): Faster test runner. Install with `cargo install cargo-nextest`.
 - **cargo-deny** (optional): License and advisory checks. Install with `cargo install cargo-deny`.
 
-## Building from Source
-
 Clone and build the entire workspace:
 
 ```bash
@@ -21,10 +78,11 @@ cd pact
 cargo build --workspace
 ```
 
-This produces three binaries in `target/debug/`:
+This produces four binaries in `target/debug/`:
+- `pact` -- CLI tool
 - `pact-agent` -- per-node daemon
 - `pact-journal` -- distributed log server (Raft quorum member)
-- `pact` -- CLI tool
+- `pact-mcp` -- AI agent tool-use interface
 
 For optimized release builds:
 
@@ -191,7 +249,7 @@ pact --token "eyJhbGciOiJS..." status
 
 ```bash
 just test            # Unit + integration tests (fast, no Docker needed)
-just test-accept     # BDD acceptance tests (287 scenarios)
+just test-accept     # BDD acceptance tests (531 scenarios)
 just test-e2e        # End-to-end tests (requires Docker)
 just ci              # Full CI suite (fmt + clippy + tests + deny)
 ```

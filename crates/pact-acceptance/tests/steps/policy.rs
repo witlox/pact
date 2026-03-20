@@ -2,6 +2,7 @@
 
 use cucumber::{given, then, when};
 use pact_common::types::{Identity, PrincipalType, Scope, VClusterPolicy};
+use pact_policy::rules::opa::MockOpaClient;
 use pact_policy::rules::PolicyRequest;
 
 use super::helpers::map_action;
@@ -120,12 +121,34 @@ async fn given_policy_unreachable(world: &mut PactWorld) {
 async fn given_opa_running(world: &mut PactWorld) {
     world.opa_available = true;
     world.policy_degraded = false;
+    // Wire up MockOpaClient::allowing() so the engine actually calls OPA on Defer
+    world.policy_engine = pact_policy::rules::DefaultPolicyEngine::new(1800)
+        .with_opa(Box::new(MockOpaClient::allowing()));
+    // Set a default identity so evaluation can proceed
+    if world.current_identity.is_none() {
+        world.current_identity = Some(Identity {
+            principal: "admin@example.com".to_string(),
+            role: "pact-platform-admin".to_string(),
+            principal_type: PrincipalType::Human,
+        });
+    }
 }
 
 #[given("OPA is unavailable")]
 async fn given_opa_unavailable(world: &mut PactWorld) {
     world.opa_available = false;
     world.policy_degraded = true;
+    // Wire up MockOpaClient::unavailable() so the engine exercises degraded mode
+    world.policy_engine = pact_policy::rules::DefaultPolicyEngine::new(1800)
+        .with_opa(Box::new(MockOpaClient::unavailable()));
+    // Set a default identity so evaluation can proceed
+    if world.current_identity.is_none() {
+        world.current_identity = Some(Identity {
+            principal: "admin@example.com".to_string(),
+            role: "pact-platform-admin".to_string(),
+            principal_type: PrincipalType::Human,
+        });
+    }
 }
 
 #[given(regex = r#"^a pending approval for a commit on vCluster "([\w-]+)"$"#)]
@@ -534,19 +557,32 @@ async fn then_opa_called(world: &mut PactWorld) {
 
 #[then("the OPA decision should be returned")]
 async fn then_opa_decision(world: &mut PactWorld) {
-    assert!(world.auth_result.is_some());
+    // With MockOpaClient::allowing() wired, the result should be Authorized
+    match &world.auth_result {
+        Some(AuthResult::Authorized) => {}
+        other => panic!("expected OPA decision to produce Authorized, got {other:?}"),
+    }
 }
 
 #[then("the cached policy should be used for basic authorization")]
 async fn then_cached_policy(world: &mut PactWorld) {
     assert!(world.policy_degraded);
-    // Even when OPA is unavailable, basic RBAC authorization still works
-    assert!(world.auth_result.is_some());
+    // Even when OPA is unavailable, basic RBAC authorization still works via cached policy.
+    // The result should still be some kind of decision (Allow via RBAC or degraded mode).
+    match &world.auth_result {
+        Some(AuthResult::Authorized) => {}
+        Some(AuthResult::Denied { .. }) => {
+            // Denied is also acceptable — RBAC may deny, but the point is a result was produced
+        }
+        other => panic!("expected a policy decision from cached RBAC, got {other:?}"),
+    }
 }
 
 #[then("complex Rego rules should be skipped")]
 async fn then_rego_skipped(world: &mut PactWorld) {
+    // OPA is unavailable — Rego rules are skipped, RBAC handles it alone
     assert!(!world.opa_available);
+    assert!(world.policy_degraded);
 }
 
 #[then(regex = r"^the policy should include commit window (\d+)$")]

@@ -1,0 +1,22 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        target: auto
+
+ignore:
+  - "crates/pact-test-harness/**"
+  - "crates/pact-acceptance/**"
+  - "crates/pact-e2e/**"
+  - "crates/pact-nss/**"
+  - "tests/**"
+  - "proto/**"
+  - "scripts/**"
+  - "infra/**"
+  - "config/**"
+  - "docs/**"
+  - "specs/**"

@@ -693,6 +693,12 @@ async fn then_exec_log_entry(world: &mut PactWorld) {
 
 #[then(regex = r#"^the command should be rejected with "(.*)"$"#)]
 async fn then_command_rejected(world: &mut PactWorld, expected: String) {
+    // Check cli_output first (diag and CLI scenarios set this)
+    if let Some(ref output) = world.cli_output {
+        if output.to_lowercase().contains(&expected.to_lowercase()) {
+            return;
+        }
+    }
     if let Some(ref err) = world.last_error {
         assert!(
             err.to_string().contains(&expected) || expected.contains("whitelisted"),
@@ -704,12 +710,13 @@ async fn then_command_rejected(world: &mut PactWorld, expected: String) {
             "expected '{expected}', got '{reason}'"
         );
     } else {
-        panic!("expected rejection with '{expected}'");
+        let output = world.cli_output.as_deref().unwrap_or("<none>");
+        panic!("expected rejection with '{expected}', cli_output='{output}'");
     }
 }
 
 #[then(regex = r"^exit code should be (\d+)$")]
-async fn then_exit_code(world: &mut PactWorld, code: i32) {
+async fn then_exit_code_shell(world: &mut PactWorld, code: i32) {
     if let Some(actual) = world.cli_exit_code {
         assert_eq!(actual, code, "expected exit code {code}, got {actual}");
     } else {

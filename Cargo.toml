@@ -35,7 +35,7 @@ hpc-audit = "2026.1"
 hpc-identity = "2026.1"
 
 # SPIFFE/SPIRE
-spiffe = { version = "0.12", features = ["workload-api-x509", "tracing"], default-features = false }
+spiffe = { version = "0.12", features = ["x509-source", "tracing"], default-features = false }
 
 # Async runtime
 tokio = { version = "1", features = ["full", "process", "signal"] }
@@ -88,7 +88,7 @@ jsonwebtoken = "9"
 prometheus = "0.13"
 
 # HTTP (for REST endpoints, OPA, Sovra integration)
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 axum = "0.7"
 tower = { version = "0.5", features = ["util"] }
 

@@ -6,6 +6,8 @@
 //! 3. Policy cache for degraded mode (P7)
 //! 4. Two-person approval workflow (P4)
 
+pub mod opa;
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -56,6 +58,8 @@ pub struct DefaultPolicyEngine {
     pending_approvals: HashMap<String, PendingApproval>,
     /// Default approval timeout in seconds.
     approval_timeout_seconds: i64,
+    /// Optional OPA client for external policy evaluation.
+    opa_client: Option<Box<dyn opa::OpaClient>>,
 }
 
 impl DefaultPolicyEngine {
@@ -64,7 +68,14 @@ impl DefaultPolicyEngine {
             policies: HashMap::new(),
             pending_approvals: HashMap::new(),
             approval_timeout_seconds,
+            opa_client: None,
         }
+    }
+
+    /// Attach an OPA client for external policy evaluation on Defer.
+    pub fn with_opa(mut self, client: Box<dyn opa::OpaClient>) -> Self {
+        self.opa_client = Some(client);
+        self
     }
 
     /// Load or update a vCluster policy.
@@ -272,6 +283,20 @@ impl PolicyEngine for DefaultPolicyEngine {
                         policy_ref,
                         approval_id: "pending".to_string(),
                     })
+                } else if let Some(ref opa) = self.opa_client {
+                    // OPA evaluation for complex rules (ADR-003)
+                    let opa_input = opa::OpaInput::from_request(request);
+                    match opa.evaluate(&opa_input).await {
+                        Ok(opa::OpaDecision::Allow) => Ok(PolicyDecision::Allow { policy_ref }),
+                        Ok(opa::OpaDecision::Deny { reason }) => {
+                            Ok(PolicyDecision::Deny { policy_ref, reason })
+                        }
+                        Err(e) => {
+                            // ADR-011: degraded mode — warn and allow
+                            warn!(error = %e, "OPA evaluation failed, degraded mode allow");
+                            Ok(PolicyDecision::Allow { policy_ref })
+                        }
+                    }
                 } else {
                     Ok(PolicyDecision::Allow { policy_ref })
                 }

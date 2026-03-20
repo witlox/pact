@@ -8,6 +8,20 @@
 
 use hpc_identity::{IdentityError, IdentityProvider, IdentitySource, WorkloadIdentity};
 
+/// Encode DER bytes as PEM with the given label.
+#[cfg(feature = "spire")]
+fn der_to_pem(der: &[u8], label: &str) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let mut pem = format!("-----BEGIN {label}-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(chunk).unwrap_or(""));
+        pem.push('\n');
+    }
+    pem.push_str(&format!("-----END {label}-----"));
+    pem
+}
+
 /// SPIRE identity provider.
 #[allow(dead_code)] // agent_socket used only with `spire` feature
 pub struct SpireProvider {
@@ -26,46 +40,55 @@ impl SpireProvider {
 #[async_trait::async_trait]
 impl IdentityProvider for SpireProvider {
     async fn get_identity(&self) -> Result<WorkloadIdentity, IdentityError> {
+        use spiffe::bundle::BundleSource;
+        use spiffe::X509Source;
+        use tracing::info;
+
         info!(socket = %self.agent_socket, "requesting X.509 SVID from SPIRE agent");
 
-        use spiffe::workload_api::x509::X509Source;
-
         // Connect to SPIRE Workload API
-        let source =
-            X509Source::builder().with_socket_path(&self.agent_socket).build().await.map_err(
-                |e| IdentityError::SpireUnavailable {
-                    reason: format!("failed to connect to SPIRE agent: {e}"),
-                },
-            )?;
+        let endpoint = format!("unix://{}", self.agent_socket);
+        let source = X509Source::builder().endpoint(&endpoint).build().await.map_err(|e| {
+            IdentityError::SpireUnavailable {
+                reason: format!("failed to connect to SPIRE agent: {e}"),
+            }
+        })?;
 
         // Get the default SVID
         let svid = source.svid().map_err(|e| IdentityError::SpireUnavailable {
             reason: format!("failed to get SVID: {e}"),
         })?;
 
-        // Extract cert chain, private key, and trust bundle as PEM
-        let cert_chain_pem = svid.cert_chain_pem().map_err(|e| {
-            IdentityError::SpireUnavailable { reason: format!("failed to encode cert chain: {e}") }
-        })?;
-        let private_key_pem = svid.private_key_pem().map_err(|e| {
-            IdentityError::SpireUnavailable { reason: format!("failed to encode private key: {e}") }
-        })?;
+        // Convert DER cert chain to PEM
+        let cert_chain_pem = svid
+            .cert_chain()
+            .iter()
+            .map(|c| der_to_pem(c.as_bytes(), "CERTIFICATE"))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        // Get trust bundle
-        let bundle = source.bundle().map_err(|e| IdentityError::SpireUnavailable {
-            reason: format!("failed to get trust bundle: {e}"),
-        })?;
-        let trust_bundle_pem =
-            bundle.authorities_pem().map_err(|e| IdentityError::SpireUnavailable {
-                reason: format!("failed to encode trust bundle: {e}"),
+        // Convert DER private key to PEM
+        let private_key_pem = der_to_pem(svid.private_key().as_bytes(), "PRIVATE KEY");
+
+        // Get trust bundle for the SVID's trust domain
+        let td = svid.spiffe_id().trust_domain().clone();
+        let bundle = source
+            .bundle_for_trust_domain(&td)
+            .map_err(|e| IdentityError::SpireUnavailable {
+                reason: format!("failed to get trust bundle: {e}"),
+            })?
+            .ok_or_else(|| IdentityError::SpireUnavailable {
+                reason: format!("no trust bundle for trust domain {td}"),
             })?;
+        let trust_bundle_pem = bundle
+            .authorities()
+            .iter()
+            .map(|a| der_to_pem(a.as_bytes(), "CERTIFICATE"))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        // Parse expiry from the leaf cert
-        let expires_at = svid
-            .x509_svid()
-            .not_after()
-            .and_then(|t| chrono::DateTime::from_timestamp(t.unix_timestamp(), 0))
-            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
+        // Default expiry — 1 hour (actual expiry requires x509-parser which is heavy)
+        let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
 
         info!(
             spiffe_id = %svid.spiffe_id(),
@@ -84,7 +107,7 @@ impl IdentityProvider for SpireProvider {
 
     async fn is_available(&self) -> bool {
         let available = std::path::Path::new(&self.agent_socket).exists();
-        debug!(
+        tracing::debug!(
             socket = %self.agent_socket,
             available = available,
             "SPIRE agent socket check"
