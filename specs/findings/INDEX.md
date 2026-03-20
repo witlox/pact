@@ -8,10 +8,10 @@ Status: COMPLETE (7/7 chunks)
 | Severity | Count | Resolved | Open |
 |----------|-------|----------|------|
 | Critical | 2 | **2** | 0 |
-| High | 2 | **1** | 1 |
-| Medium | 13 | **6** | 7 |
-| Low | 7 | **1** | 6 |
-| **Total** | **24** | **9** | **15** |
+| High | 2 | **2** | 0 |
+| Medium | 13 | **9** | 4 |
+| Low | 7 | **2** | 5 |
+| **Total** | **24** | **15** | **9** |
 
 ## Open findings (sorted by severity)
 
@@ -59,8 +59,12 @@ Status: COMPLETE (7/7 chunks)
 | F3 | mount read-only | Medium | Reclassified as state_changing: true | whitelist.rs |
 | F4 | exec PATH includes /usr/sbin | Low | PATH restricted to /usr/bin:/bin | exec.rs |
 | F5 | No argument validation | High | validate_args() blocks sensitive paths + path traversal | whitelist.rs, mod.rs |
+| F11 | CSR not parsed | High | rcgen x509-parser: from_der() extracts agent public key | ca.rs |
+| F20 | Wildcard bypasses P8 emergency | Medium | Emergency actions require explicit binding, not wildcard | rbac/mod.rs |
+| F22 | Audit log unbounded | Medium | Capped at 100k entries with drain | raft/state.rs |
 | F24 | DecideApproval no self-check | Medium | Added self-approval check at Raft layer | raft/state.rs |
 | F31 | gRPC no resource limits | Medium | Added concurrency_limit_per_connection + window sizes | journal main.rs |
+| F32 | Overlay not size-limited | Low | Max 10 MB check in SetOverlay handler | raft/state.rs |
 
 ## Priority fix order
 

@@ -184,6 +184,18 @@ impl RbacEngine {
                 && binding.principals.contains(&identity.principal)
                 && binding.allowed_actions.iter().any(|a| a == action || a == "*")
             {
+                // F20 fix: wildcard bindings must not grant emergency access.
+                // Emergency actions require explicit listing, not wildcards.
+                if (action == actions::EMERGENCY_START || action == actions::EMERGENCY_END)
+                    && !binding
+                        .allowed_actions
+                        .iter()
+                        .any(|a| a == action)
+                {
+                    return RbacDecision::Deny {
+                        reason: "emergency actions require explicit binding, not wildcard".into(),
+                    };
+                }
                 return RbacDecision::Allow;
             }
         }
@@ -561,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_binding_allows_all_actions() {
+    fn wildcard_binding_allows_non_emergency_actions() {
         let user = identity("superuser@example.com", "custom-super");
         let mut policy = default_policy("ml");
         policy.role_bindings.push(pact_common::types::RoleBinding {
@@ -574,6 +586,25 @@ mod tests {
             RbacEngine::evaluate(&user, actions::COMMIT, &scope_vc("ml"), &policy),
             RbacDecision::Allow
         );
+        // F20 fix: wildcard must NOT grant emergency access
+        let result =
+            RbacEngine::evaluate(&user, actions::EMERGENCY_START, &scope_vc("ml"), &policy);
+        assert!(
+            matches!(result, RbacDecision::Deny { .. }),
+            "wildcard binding should not grant emergency access"
+        );
+    }
+
+    #[test]
+    fn explicit_emergency_binding_allows_emergency() {
+        let user = identity("oncall@example.com", "custom-oncall");
+        let mut policy = default_policy("ml");
+        policy.role_bindings.push(pact_common::types::RoleBinding {
+            role: "custom-oncall".into(),
+            principals: vec!["oncall@example.com".into()],
+            allowed_actions: vec!["emergency_start".into(), "emergency_end".into()],
+        });
+
         assert_eq!(
             RbacEngine::evaluate(&user, actions::EMERGENCY_START, &scope_vc("ml"), &policy),
             RbacDecision::Allow

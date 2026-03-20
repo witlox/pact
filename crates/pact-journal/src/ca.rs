@@ -100,48 +100,71 @@ impl CaKeyManager {
         }
     }
 
-    /// Sign a node enrollment request.
+    /// Sign a node enrollment CSR (F11 fix).
     ///
-    /// Generates a node certificate signed by the intermediate CA.
-    /// The `_csr_der` parameter receives the agent's CSR (used to extract
-    /// the public key in a full implementation); for now we generate a
-    /// new keypair server-side for the certificate and return it.
+    /// Parses the agent's CSR to extract its public key, then signs a
+    /// certificate embedding that key. The agent's private key never
+    /// leaves the agent — only the public key arrives via the CSR.
     ///
-    /// In the real flow: agent generates keypair locally, sends CSR,
-    /// journal extracts public key from CSR and embeds it in the cert.
-    /// Since rcgen 0.13 doesn't expose CSR parsing, we generate a cert
-    /// with the agent's identity and the CA signs it.
+    /// If `csr_der` is empty (legacy/test path), falls back to generating
+    /// a server-side keypair for backward compatibility.
     pub fn sign_csr(
         &self,
-        _csr_der: &[u8],
+        csr_der: &[u8],
         node_id: &str,
         domain_id: &str,
     ) -> anyhow::Result<SignedCertResult> {
-        // Generate a certificate for the node, signed by our CA
-        let mut params = CertificateParams::default();
-        params
-            .distinguished_name
-            .push(DnType::CommonName, format!("pact-service-agent/{node_id}@{domain_id}"));
-
-        // Generate serial number from UUID
         let serial_uuid = uuid::Uuid::new_v4();
-
-        // Sign the cert with our CA
-        let node_key =
-            KeyPair::generate().map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
-        let signed = params
-            .signed_by(&node_key, &self.ca_certified_key.cert, &self.ca_certified_key.key_pair)
-            .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
-
-        let cert_pem = signed.pem();
-        let ca_pem = self.ca_certified_key.cert.pem();
         let serial_hex = serial_uuid.to_string();
 
-        // Compute expiry from now + lifetime
+        let cert_pem = if csr_der.is_empty() {
+            // Legacy/test path: no CSR provided, generate server-side keypair.
+            // This is the fallback for tests and migrations.
+            let mut params = CertificateParams::default();
+            params
+                .distinguished_name
+                .push(DnType::CommonName, format!("pact-service-agent/{node_id}@{domain_id}"));
+            let node_key = KeyPair::generate()
+                .map_err(|e| anyhow::anyhow!("keypair generation failed: {e}"))?;
+            let signed = params
+                .signed_by(
+                    &node_key,
+                    &self.ca_certified_key.cert,
+                    &self.ca_certified_key.key_pair,
+                )
+                .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
+            debug!(node_id, serial = %serial_hex, "Signed certificate (legacy: server-generated key)");
+            signed.pem()
+        } else {
+            // Real path: parse CSR, extract agent's public key, sign with CA.
+            let csr_params =
+                rcgen::CertificateSigningRequestParams::from_der(&csr_der.into())
+                    .map_err(|e| anyhow::anyhow!("CSR parsing failed: {e}"))?;
+
+            // Override the DN to include pact identity regardless of what the CSR says
+            let mut params = csr_params.params;
+            params
+                .distinguished_name
+                .push(DnType::CommonName, format!("pact-service-agent/{node_id}@{domain_id}"));
+
+            // Sign with the agent's public key (from CSR) and our CA
+            let signed = rcgen::CertificateSigningRequestParams {
+                params,
+                public_key: csr_params.public_key,
+            }
+            .signed_by(
+                &self.ca_certified_key.cert,
+                &self.ca_certified_key.key_pair,
+            )
+            .map_err(|e| anyhow::anyhow!("certificate signing failed: {e}"))?;
+
+            debug!(node_id, serial = %serial_hex, "Signed certificate from agent CSR");
+            signed.pem()
+        };
+
+        let ca_pem = self.ca_certified_key.cert.pem();
         let expires_at =
             chrono::Utc::now() + chrono::Duration::seconds(i64::from(self.cert_lifetime_seconds));
-
-        debug!(node_id, serial = %serial_hex, "Signed enrollment certificate");
 
         Ok(SignedCertResult {
             cert_pem,
@@ -153,6 +176,7 @@ impl CaKeyManager {
 }
 
 /// Result of signing an enrollment certificate.
+#[derive(Debug)]
 pub struct SignedCertResult {
     pub cert_pem: String,
     pub ca_chain_pem: String,
@@ -165,16 +189,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ca_signs_cert() {
+    fn test_ca_signs_cert_legacy() {
         let ca = CaKeyManager::test_ca();
 
-        // Simulating a CSR with empty bytes (real CSR parsing not yet available in rcgen 0.13)
+        // Legacy path: empty CSR → server-side keypair
         let result = ca.sign_csr(&[], "node-001", "site-alpha").unwrap();
         assert!(!result.cert_pem.is_empty());
         assert!(result.cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(!result.ca_chain_pem.is_empty());
         assert!(!result.cert_serial.is_empty());
         assert!(!result.cert_expires_at.is_empty());
+    }
+
+    #[test]
+    fn test_ca_signs_real_csr() {
+        let ca = CaKeyManager::test_ca();
+
+        // Generate a real CSR from an agent-side keypair
+        let agent_key = KeyPair::generate().unwrap();
+        let mut csr_params = CertificateParams::default();
+        csr_params
+            .distinguished_name
+            .push(DnType::CommonName, "agent-test-node");
+        let csr = csr_params.serialize_request(&agent_key).unwrap();
+        let csr_der = csr.der().to_vec();
+
+        // Sign the CSR with the CA
+        let result = ca.sign_csr(&csr_der, "node-001", "site-alpha").unwrap();
+        assert!(!result.cert_pem.is_empty());
+        assert!(result.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(!result.ca_chain_pem.is_empty());
+    }
+
+    #[test]
+    fn test_ca_rejects_invalid_csr() {
+        let ca = CaKeyManager::test_ca();
+        let result = ca.sign_csr(b"not-a-valid-csr", "node-001", "site-alpha");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("CSR parsing failed"));
     }
 
     #[test]

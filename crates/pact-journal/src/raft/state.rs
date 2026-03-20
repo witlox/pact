@@ -156,6 +156,8 @@ pub fn hw_canonical_key(hw: &pact_common::types::HardwareIdentity) -> String {
 const TTL_MIN_SECONDS: u32 = 900;
 /// Maximum TTL: 10 days (ND2).
 const TTL_MAX_SECONDS: u32 = 864_000;
+/// Maximum overlay data size: 10 MB (F32 fix).
+const OVERLAY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 impl StateMachineState<JournalTypeConfig> for JournalState {
     #[allow(clippy::too_many_lines)]
@@ -214,6 +216,16 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
                 JournalResponse::Ok
             }
             JournalCommand::SetOverlay { vcluster_id, overlay } => {
+                // F32 fix: reject oversized overlays.
+                if overlay.data.len() > OVERLAY_MAX_BYTES {
+                    return JournalResponse::ValidationError {
+                        reason: format!(
+                            "overlay data too large: {} bytes (max {})",
+                            overlay.data.len(),
+                            OVERLAY_MAX_BYTES
+                        ),
+                    };
+                }
                 // J5: validate overlay checksum matches hash of data.
                 let computed = pact_common::types::compute_overlay_checksum(&overlay.data);
                 if overlay.checksum != computed {
@@ -229,6 +241,13 @@ impl StateMachineState<JournalTypeConfig> for JournalState {
             }
             JournalCommand::RecordOperation(op) => {
                 self.audit_log.push(op);
+                // F22 fix: cap audit log to prevent unbounded growth.
+                // Oldest entries are dropped. Production: archive to Loki first.
+                const AUDIT_LOG_MAX: usize = 100_000;
+                if self.audit_log.len() > AUDIT_LOG_MAX {
+                    let drain_count = self.audit_log.len() - AUDIT_LOG_MAX;
+                    self.audit_log.drain(..drain_count);
+                }
                 JournalResponse::Ok
             }
             JournalCommand::AssignNode { node_id, vcluster_id } => {
