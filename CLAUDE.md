@@ -238,3 +238,33 @@ See `docs/decisions/` for full ADRs:
 - ADR-015: hpc-core shared contracts (hpc-node, hpc-audit, hpc-identity)
 - ADR-016: Identity mapping — OIDC-to-POSIX UID/GID shim for NFS
 - ADR-017: Network topology — management network for pact, HSN for lattice
+
+## Test fidelity index
+
+The project maintains a fidelity index at `specs/fidelity/INDEX.md` that tracks what
+the test suite ACTUALLY verifies versus what the specs claim. This is distinct from
+code coverage — it measures assertion depth and mock faithfulness.
+
+**Read `specs/fidelity/INDEX.md` when:**
+- Starting work on any feature (check its confidence level first)
+- The implementer marks a feature as "done" (verify confidence is HIGH)
+- Before any release or integration phase
+
+**The fidelity index is maintained by the auditor profile:**
+```
+./switch-profile.sh auditor OR dynamically load the profile yourself if in session
+```
+
+**Trigger commands (in auditor mode):**
+- "audit" or "scan fidelity" — full scan, updates everything
+- "audit [feature-name]" — scan one feature only
+- "audit mocks" — scan mock fidelity only
+- "audit adrs" — scan ADR enforcement only
+
+**Other profiles reference the index but do not modify it:**
+- **Implementer**: check fidelity before marking done. If confidence < HIGH,
+  improve tests before closing the feature.
+- **Adversary**: cross-reference fidelity index when reviewing. Shallow tests
+  on critical paths should be flagged as findings.
+- **Integrator**: the fidelity index is an input to integration assessment.
+  Don't declare integration complete if critical features have LOW confidence.

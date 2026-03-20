@@ -15,7 +15,7 @@ set -euo pipefail
 PROFILES_DIR=".claude"
 TARGET=".claude/CLAUDE.md"
 
-VALID_PROFILES=("analyst" "architect" "adversary" "implementer" "integrator")
+VALID_PROFILES=("analyst" "architect" "adversary" "implementer" "integrator" "auditor")
 
 usage() {
     echo "Usage: $0 <profile-name> [feature-scope]"
