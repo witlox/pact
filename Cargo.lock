@@ -3390,9 +3390,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "raft-hpc-core"
-version = "2026.1.19"
+version = "2026.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b8791f6a508c9b32363c6f98339821021fa8b9fab756e8becc1208785c1aff9"
+checksum = "8b5a31aec312c5e213dd2ab0d01db75c5ce8f9c7a6ff306ad174669dd257d422"
 dependencies = [
  "chrono",
  "flate2",
