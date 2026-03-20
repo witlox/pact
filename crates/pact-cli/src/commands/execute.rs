@@ -1054,15 +1054,12 @@ pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String>
         } else {
             proto_policy.supervisor_backend.clone()
         },
+        ai_exec_allowed: proto_policy.ai_exec_allowed,
         exec_whitelist: proto_policy.exec_whitelist.clone(),
         shell_whitelist: proto_policy.shell_whitelist.clone(),
     };
 
-    let detail = GroupDetail {
-        name: name.to_string(),
-        policy,
-        node_ids: vec![], // node list requires enrollment service
-    };
+    let detail = GroupDetail { name: name.to_string(), policy, node_ids: vec![] };
 
     Ok(format_group_detail(&detail))
 }
@@ -1114,6 +1111,7 @@ pub async fn group_set_policy(
         exec_whitelist: policy.exec_whitelist,
         shell_whitelist: policy.shell_whitelist,
         emergency_allowed: policy.emergency_allowed,
+        ai_exec_allowed: policy.ai_exec_allowed,
     };
 
     let mut client = PolicyServiceClient::new(channel.clone());

@@ -9,7 +9,7 @@ use openraft::Raft;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use pact_common::types::EnrollmentState;
+use pact_common::types::{ApprovalStatus, EnrollmentState, Identity, PrincipalType};
 
 use crate::raft::types::{JournalCommand, JournalTypeConfig};
 use crate::JournalState;
@@ -38,6 +38,42 @@ impl HeartbeatMonitor {
         loop {
             interval.tick().await;
             self.check_timeouts().await;
+            self.expire_approvals().await;
+        }
+    }
+
+    /// F19 fix: expire timed-out two-person approvals (P5).
+    async fn expire_approvals(&self) {
+        let state = self.state.read().await;
+        let now = chrono::Utc::now();
+
+        let expired: Vec<String> = state
+            .pending_approvals
+            .values()
+            .filter(|a| a.status == ApprovalStatus::Pending && now > a.expires_at)
+            .map(|a| a.approval_id.clone())
+            .collect();
+        drop(state);
+
+        let system = Identity {
+            principal: "system".into(),
+            principal_type: PrincipalType::Service,
+            role: "pact-service-agent".into(),
+        };
+
+        for approval_id in expired {
+            warn!(approval_id = %approval_id, "Two-person approval expired (P5)");
+            let cmd = JournalCommand::DecideApproval {
+                approval_id: approval_id.clone(),
+                approver: system.clone(),
+                decision: ApprovalStatus::Expired,
+            };
+            match self.raft.client_write(cmd).await {
+                Ok(_) => info!(approval_id = %approval_id, "Approval expired via heartbeat"),
+                Err(e) => {
+                    warn!(approval_id = %approval_id, error = %e, "Failed to expire approval");
+                }
+            }
         }
     }
 

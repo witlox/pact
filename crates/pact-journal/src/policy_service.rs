@@ -406,6 +406,7 @@ pub fn vcluster_policy_to_proto(
         exec_whitelist: policy.exec_whitelist.clone(),
         shell_whitelist: policy.shell_whitelist.clone(),
         emergency_allowed: policy.emergency_allowed,
+        ai_exec_allowed: policy.ai_exec_allowed,
     }
 }
 
@@ -442,6 +443,7 @@ pub fn proto_to_vcluster_policy(proto: ProtoVClusterPolicy) -> pact_common::type
         audit_retention_days: proto.audit_retention_days,
         federation_template: proto.federation_template,
         supervisor_backend: proto.supervisor_backend,
+        ai_exec_allowed: proto.ai_exec_allowed, // proto3 default: false
         exec_whitelist: proto.exec_whitelist,
         shell_whitelist: proto.shell_whitelist,
     }
@@ -703,6 +705,7 @@ mod tests {
             two_person_approval: true,
             emergency_allowed: false,
             audit_retention_days: 365,
+            ai_exec_allowed: true,
             federation_template: Some("template-eu".into()),
             supervisor_backend: "systemd".into(),
             exec_whitelist: vec!["nvidia-smi".into()],

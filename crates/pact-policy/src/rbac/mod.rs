@@ -171,8 +171,20 @@ impl RbacEngine {
 
         if identity.role == "pact-service-ai" {
             // AI agent: limited write access (already checked P8 emergency above)
-            if READ_ACTIONS.contains(&action) || action == actions::EXEC {
+            // F16 fix: AI exec requires explicit policy authorization per vCluster.
+            // Read-only actions are allowed globally. Exec requires ai_exec_allowed in policy.
+            if READ_ACTIONS.contains(&action) {
                 return RbacDecision::Allow;
+            }
+            if action == actions::EXEC && policy.ai_exec_allowed {
+                return RbacDecision::Allow;
+            }
+            if action == actions::EXEC {
+                return RbacDecision::Deny {
+                    reason: format!(
+                        "AI exec not authorized for vCluster '{vcluster_id}' (set ai_exec_allowed in policy)"
+                    ),
+                };
             }
             return RbacDecision::Deny {
                 reason: format!("AI agent cannot perform action: {action}"),
@@ -488,14 +500,24 @@ mod tests {
     }
 
     #[test]
-    fn ai_agent_can_exec() {
+    fn ai_agent_can_exec_when_allowed() {
         let ai = service_identity("claude-agent", "pact-service-ai");
-        let policy = default_policy("ml");
+        let mut policy = default_policy("ml");
+        policy.ai_exec_allowed = true;
 
         assert_eq!(
             RbacEngine::evaluate(&ai, actions::EXEC, &scope_vc("ml"), &policy),
             RbacDecision::Allow
         );
+    }
+
+    #[test]
+    fn ai_agent_denied_exec_when_not_allowed() {
+        let ai = service_identity("claude-agent", "pact-service-ai");
+        let policy = default_policy("ml"); // ai_exec_allowed defaults to false
+
+        let result = RbacEngine::evaluate(&ai, actions::EXEC, &scope_vc("ml"), &policy);
+        assert!(matches!(result, RbacDecision::Deny { .. }));
     }
 
     #[test]

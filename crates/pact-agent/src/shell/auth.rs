@@ -352,6 +352,11 @@ fn map_jwt_error(e: &jsonwebtoken::errors::Error, config: &AuthConfig) -> AuthEr
 }
 
 /// Convert validated claims to a pact Identity.
+///
+/// F8 trust model: the `pact_role` claim is set by the IdP (e.g., Keycloak
+/// attribute mapper). The IdP is trusted to assign roles correctly. The role
+/// is validated against known pact role patterns — unknown patterns default
+/// to no access (the RBAC engine denies unknown roles).
 pub fn claims_to_identity(claims: &TokenClaims) -> Identity {
     let principal_type = match claims.pact_principal_type.as_deref() {
         Some("agent") => PrincipalType::Agent,
@@ -359,11 +364,21 @@ pub fn claims_to_identity(claims: &TokenClaims) -> Identity {
         _ => PrincipalType::Human,
     };
 
-    Identity {
-        principal: claims.sub.clone(),
-        principal_type,
-        role: claims.pact_role.clone().unwrap_or_default(),
+    let role = claims.pact_role.clone().unwrap_or_default();
+
+    // F8 fix: validate role matches known pact patterns.
+    // Unknown roles are kept but will be denied by the RBAC engine.
+    if !role.is_empty()
+        && !role.starts_with("pact-platform-")
+        && !role.starts_with("pact-ops-")
+        && !role.starts_with("pact-viewer-")
+        && !role.starts_with("pact-regulated-")
+        && !role.starts_with("pact-service-")
+    {
+        warn!(role = %role, sub = %claims.sub, "Unknown pact_role pattern in token — will be denied by RBAC");
     }
+
+    Identity { principal: claims.sub.clone(), principal_type, role }
 }
 
 /// Check if an identity has platform admin privileges.

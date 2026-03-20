@@ -55,6 +55,7 @@ message VClusterPolicy {
   repeated string exec_whitelist = 16;
   repeated string shell_whitelist = 17;
   bool emergency_allowed = 18;
+  bool ai_exec_allowed = 19;
 }
 
 message RoleBinding {

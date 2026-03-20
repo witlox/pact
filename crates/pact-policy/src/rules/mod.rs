@@ -185,6 +185,21 @@ impl DefaultPolicyEngine {
             return Err(PolicyError::SelfApproval);
         }
 
+        // F21 fix: Approver must have at least ops-level access for the target scope
+        let vcluster_id = match &approval.scope {
+            Scope::VCluster(vc) | Scope::Node(vc) => vc.clone(),
+            Scope::Global => String::new(),
+        };
+        let approver_has_access = approver.role == "pact-platform-admin"
+            || approver.role == format!("pact-ops-{vcluster_id}")
+            || approver.role == format!("pact-regulated-{vcluster_id}");
+        if !approver_has_access {
+            return Err(PolicyError::InsufficientPrivileges(format!(
+                "approver role '{}' does not have ops access to vCluster '{vcluster_id}'",
+                approver.role
+            )));
+        }
+
         approval.status = ApprovalStatus::Approved;
         approval.approver = Some(approver.clone());
 
@@ -325,6 +340,8 @@ pub enum PolicyError {
     ApprovalAlreadyResolved(String),
     #[error("requester cannot approve their own request (P4)")]
     SelfApproval,
+    #[error("insufficient privileges: {0}")]
+    InsufficientPrivileges(String),
     #[error("OPA evaluation failed: {0}")]
     OpaError(String),
     #[error("not implemented: {0}")]

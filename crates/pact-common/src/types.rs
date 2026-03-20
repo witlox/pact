@@ -550,6 +550,9 @@ pub struct VClusterPolicy {
     /// Audit log retention in days (default 2555 = ~7 years).
     #[serde(default = "default_audit_retention_days")]
     pub audit_retention_days: u32,
+    /// Whether AI agents can exec on this vCluster (F16 fix, default false).
+    #[serde(default)]
+    pub ai_exec_allowed: bool,
     /// Federation policy template name (optional).
     #[serde(default)]
     pub federation_template: Option<String>,
@@ -601,6 +604,7 @@ impl Default for VClusterPolicy {
             two_person_approval: false,
             emergency_allowed: true,
             audit_retention_days: 2555,
+            ai_exec_allowed: false,
             federation_template: None,
             supervisor_backend: "pact".to_string(),
             exec_whitelist: Vec::new(),
