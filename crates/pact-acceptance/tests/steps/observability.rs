@@ -303,13 +303,25 @@ async fn then_commit_recorded(world: &mut PactWorld) {
 }
 
 #[then("the agent should not expose a /metrics endpoint")]
-async fn then_no_agent_metrics(_world: &mut PactWorld) {
-    // ADR-005: agents don't expose /metrics
+async fn then_no_agent_metrics(world: &mut PactWorld) {
+    // ADR-005: agents don't expose /metrics.
+    // Verify at the design level: the agent's boot sequence does not start
+    // a metrics HTTP server. In BDD we check that no metrics endpoint was
+    // registered during the boot flow.
+    assert!(
+        !world.metrics_available || world.boot_state != "Ready",
+        "pact-agent should not have a metrics endpoint (ADR-005)"
+    );
 }
 
 #[then("agent health should be monitored via lattice-node-agent eBPF")]
-async fn then_ebpf_monitoring(_world: &mut PactWorld) {
-    // ADR-005: eBPF is the monitoring path for agents
+async fn then_ebpf_monitoring(world: &mut PactWorld) {
+    // ADR-005: agents are monitored via lattice-node-agent's eBPF probes,
+    // not via agent-level Prometheus. Verify agent has no metrics endpoint.
+    assert!(
+        !world.metrics_available || world.boot_state != "Ready",
+        "agent health monitoring should be via eBPF, not Prometheus (ADR-005)"
+    );
 }
 
 #[then("the data should support a drift heatmap")]
@@ -320,8 +332,12 @@ async fn then_drift_heatmap(world: &mut PactWorld) {
 
 #[then("the data should show commit activity over time")]
 async fn then_commit_activity(world: &mut PactWorld) {
-    // Journal entries with timestamps support time-series view
-    // May or may not have entries depending on scenario
+    // Journal entries carry timestamps, enabling time-series views.
+    // The journal stores all entry types with timestamps — commits, drift events,
+    // state changes — all of which contribute to the commit activity timeline.
+    // Verify the journal has timestamped data that can feed a time-series view.
+    let has_data = !world.journal.entries.is_empty() || !world.journal.node_states.is_empty();
+    assert!(has_data, "should have journal data for commit activity timeline");
 }
 
 #[then("the data should show operation frequency")]
@@ -330,8 +346,14 @@ async fn then_op_frequency(world: &mut PactWorld) {
 }
 
 #[then("the data should show whitelist violations")]
-async fn then_whitelist_violations(_world: &mut PactWorld) {
-    // Whitelist violation data is available from WhitelistManager
+async fn then_whitelist_violations(world: &mut PactWorld) {
+    // Whitelist violations are recorded as ExecLog entries with error details
+    // or as audit log entries with AdminOperationType::Exec that were denied.
+    // Verify the audit log has operations that can feed violation views.
+    assert!(
+        !world.journal.audit_log.is_empty(),
+        "audit log should have operations for whitelist violation tracking"
+    );
 }
 
 #[then("the data should show active emergency count")]

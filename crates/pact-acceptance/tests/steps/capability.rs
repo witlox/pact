@@ -90,6 +90,11 @@ fn parse_cpu_range(s: &str) -> Vec<u32> {
     cpus
 }
 
+/// Build a `CapabilityReport` for the given node. Used by boot.rs during boot completion.
+pub(super) fn build_report_for_boot(world: &PactWorld, node_id: &str) -> CapabilityReport {
+    build_report(world, node_id)
+}
+
 fn build_report(world: &PactWorld, node_id: &str) -> CapabilityReport {
     let config_state =
         world.journal.node_states.get(node_id).cloned().unwrap_or(ConfigState::ObserveOnly);

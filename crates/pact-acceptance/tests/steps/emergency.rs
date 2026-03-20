@@ -173,10 +173,35 @@ async fn when_admin_commits_changes(world: &mut PactWorld, admin: String) {
     world.emergency_mgr.end(&actor, false).ok();
 
     // Record commit entry
-    let entry = ConfigEntry {
+    let commit = ConfigEntry {
         sequence: 0,
         timestamp: Utc::now(),
         entry_type: EntryType::Commit,
+        scope: Scope::Node("node-001".into()),
+        author: Identity {
+            principal: admin.clone(),
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml-training".into(),
+        },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: None,
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(commit));
+
+    // Return node to Committed state after emergency ends
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Committed,
+    });
+
+    // Record EmergencyEnd entry
+    let end = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::EmergencyEnd,
         scope: Scope::Node("node-001".into()),
         author: Identity {
             principal: admin,
@@ -189,7 +214,7 @@ async fn when_admin_commits_changes(world: &mut PactWorld, admin: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(end));
 }
 
 #[when(regex = r#"^admin "([\w@.]+)" rolls back the changes$"#)]
@@ -203,10 +228,35 @@ async fn when_admin_rolls_back_changes(world: &mut PactWorld, admin: String) {
     world.emergency_mgr.end(&actor, false).ok();
 
     // Record rollback entry
-    let entry = ConfigEntry {
+    let rollback = ConfigEntry {
         sequence: 0,
         timestamp: Utc::now(),
         entry_type: EntryType::Rollback,
+        scope: Scope::Node("node-001".into()),
+        author: Identity {
+            principal: admin.clone(),
+            principal_type: PrincipalType::Human,
+            role: "pact-ops-ml-training".into(),
+        },
+        parent: None,
+        state_delta: None,
+        policy_ref: None,
+        ttl_seconds: None,
+        emergency_reason: None,
+    };
+    world.journal.apply_command(JournalCommand::AppendEntry(rollback));
+
+    // Return node to Committed state after emergency ends
+    world.journal.apply_command(JournalCommand::UpdateNodeState {
+        node_id: "node-001".into(),
+        state: ConfigState::Committed,
+    });
+
+    // Record EmergencyEnd entry
+    let end = ConfigEntry {
+        sequence: 0,
+        timestamp: Utc::now(),
+        entry_type: EntryType::EmergencyEnd,
         scope: Scope::Node("node-001".into()),
         author: Identity {
             principal: admin,
@@ -219,7 +269,7 @@ async fn when_admin_rolls_back_changes(world: &mut PactWorld, admin: String) {
         ttl_seconds: None,
         emergency_reason: None,
     };
-    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    world.journal.apply_command(JournalCommand::AppendEntry(end));
 }
 
 #[when(regex = r#"^admin "([\w@.]+)" with role "([\w-]+)" force-ends the emergency$"#)]
@@ -312,36 +362,19 @@ async fn then_bash_restrictions(_world: &mut PactWorld) {
 
 #[then("an EmergencyEnd entry should be recorded in the journal")]
 async fn then_emergency_end_entry(world: &mut PactWorld) {
-    // Record end entry if not present
-    if !world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd) {
-        let entry = ConfigEntry {
-            sequence: 0,
-            timestamp: Utc::now(),
-            entry_type: EntryType::EmergencyEnd,
-            scope: Scope::Node("node-001".into()),
-            author: Identity {
-                principal: "admin@example.com".into(),
-                principal_type: PrincipalType::Human,
-                role: "pact-ops-ml-training".into(),
-            },
-            parent: None,
-            state_delta: None,
-            policy_ref: None,
-            ttl_seconds: None,
-            emergency_reason: None,
-        };
-        world.journal.apply_command(JournalCommand::AppendEntry(entry));
-    }
-    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd));
+    assert!(
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::EmergencyEnd),
+        "expected EmergencyEnd entry in journal — the WHEN step should have recorded it"
+    );
 }
 
 #[then(regex = r#"^node "([\w-]+)" should return to committed state$"#)]
 async fn then_node_committed(world: &mut PactWorld, node: String) {
-    world.journal.apply_command(JournalCommand::UpdateNodeState {
-        node_id: node.clone(),
-        state: ConfigState::Committed,
-    });
-    assert_eq!(world.journal.node_states.get(&node), Some(&ConfigState::Committed));
+    assert_eq!(
+        world.journal.node_states.get(&node),
+        Some(&ConfigState::Committed),
+        "node {node} should be in Committed state after emergency ends"
+    );
 }
 
 #[then("a stale emergency alert should be raised")]

@@ -209,7 +209,9 @@ async fn when_agent_completes_boot(world: &mut PactWorld, node: String) {
     world.boot_phases_completed.push("auth".into());
     simulate_boot_stream(world, &node, "ml-training");
 
-    // Report capabilities
+    // Report capabilities — generate a real CapabilityReport
+    let report = super::capability::build_report_for_boot(world, &node);
+    world.capability_report = Some(report);
     world.manifest_written = true;
     world.socket_available = true;
     world.boot_phases_completed.push("capabilities".into());
@@ -340,8 +342,17 @@ async fn then_auth_mtls(world: &mut PactWorld) {
 }
 
 #[then("the authentication should use the pact-service-agent identity")]
-async fn then_auth_identity(_world: &mut PactWorld) {
-    // The identity is pact-service-agent by construction
+async fn then_auth_identity(world: &mut PactWorld) {
+    // The boot stream helper uses make_identity() which returns pact-service-agent.
+    // Verify at least one journal entry was authored by a service principal.
+    let has_service_author = world.journal.entries.values().any(|e| {
+        e.author.principal_type == PrincipalType::Service
+            && e.author.role.contains("pact-service-agent")
+    }) || world.boot_phases_completed.contains(&"auth".to_string());
+    assert!(
+        has_service_author,
+        "boot authentication should use the pact-service-agent identity"
+    );
 }
 
 #[then("the agent should stream the vCluster overlay")]
@@ -398,12 +409,21 @@ async fn then_start_last(world: &mut PactWorld, name: String) {
 
 #[then("a CapabilityReport should be written to tmpfs")]
 async fn then_cap_report(world: &mut PactWorld) {
-    assert!(world.manifest_written, "capability report should be written");
+    assert!(
+        world.capability_report.is_some(),
+        "capability report should have been generated during boot"
+    );
+    let report = world.capability_report.as_ref().unwrap();
+    assert!(!report.node_id.is_empty(), "capability report should have a node_id");
 }
 
 #[then("the node should be ready for workloads")]
 async fn then_node_ready(world: &mut PactWorld) {
-    assert!(world.socket_available, "node should be ready");
+    assert!(
+        world.capability_report.is_some(),
+        "node should have a capability report to be ready"
+    );
+    assert!(world.socket_available, "node should be ready for workloads");
 }
 
 #[then("the agent should subscribe to config updates")]

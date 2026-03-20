@@ -253,6 +253,16 @@ async fn given_corrupted_cache(world: &mut PactWorld) {
         .clone()
         .unwrap_or_else(|| "https://test-journal.example.com:9443".to_string());
     world.auth_server_tokens.insert(server, AuthTokenState::Corrupted);
+
+    // Create a real corrupted cache file via hpc-auth
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache_path = tmp.path().join("tokens.json");
+    std::fs::write(&cache_path, "NOT VALID JSON {{{").unwrap();
+    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    // Verify the real cache rejects it
+    let result = cache.read(&"https://test.example.com");
+    assert!(result.is_err(), "real TokenCache should reject corrupted file");
+    world.auth_cache_dir = Some(tmp);
 }
 
 #[given("strict permission mode is enabled")]
@@ -267,7 +277,27 @@ async fn given_wrong_permissions(world: &mut PactWorld) {
         .auth_default_server
         .clone()
         .unwrap_or_else(|| "https://test-journal.example.com:9443".to_string());
+    let server_url = server.clone();
     world.auth_server_tokens.entry(server).or_insert(AuthTokenState::Valid);
+
+    // Create a real cache file with wrong permissions via hpc-auth
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    let tokens = hpc_auth::TokenSet {
+        access_token: "test-token".to_string(),
+        refresh_token: Some("test-refresh".to_string()),
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        scopes: vec!["openid".to_string()],
+    };
+    cache.write(&server_url, &tokens).unwrap();
+    // Now set wrong permissions
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = tmp.path().join("tokens.json");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    world.auth_cache_dir = Some(tmp);
 }
 
 #[given("lenient permission mode is enabled")]
@@ -296,6 +326,26 @@ async fn given_logins_server_a_and_b(world: &mut PactWorld) {
     world
         .auth_server_tokens
         .insert("https://server-b.example.com:9443".to_string(), AuthTokenState::Valid);
+
+    // Wire through real TokenCache — write tokens for both servers
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache = hpc_auth::cache::TokenCache::new(tmp.path().to_path_buf(), hpc_auth::PermissionMode::Strict);
+    let tokens = hpc_auth::TokenSet {
+        access_token: "token-a".to_string(),
+        refresh_token: Some("refresh-a".to_string()),
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        scopes: vec!["openid".to_string()],
+    };
+    cache.write("https://server-a.example.com:9443", &tokens).unwrap();
+    let tokens_b = hpc_auth::TokenSet {
+        access_token: "token-b".to_string(),
+        refresh_token: Some("refresh-b".to_string()),
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        scopes: vec!["openid".to_string()],
+    };
+    cache.write("https://server-b.example.com:9443", &tokens_b).unwrap();
+    cache.set_default_server("https://server-a.example.com:9443").unwrap();
+    world.auth_cache_dir = Some(tmp);
     world.auth_default_server = Some("https://server-a.example.com:9443".to_string());
 }
 
@@ -1082,8 +1132,19 @@ async fn then_stores_token(world: &mut PactWorld) {
 }
 
 #[then("the cache file has 0600 permissions")]
-async fn then_cache_0600(_world: &mut PactWorld) {
-    // In real implementation, hpc-auth sets 0600. Verified at integration level.
+async fn then_cache_0600(world: &mut PactWorld) {
+    // Verify real cache file has 0600 permissions
+    if let Some(ref dir) = world.auth_cache_dir {
+        let path = dir.path().join("tokens.json");
+        if path.exists() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "cache file should have 0600 permissions, got {mode:04o}");
+            }
+        }
+    }
 }
 
 #[then("the system reports a timeout error")]

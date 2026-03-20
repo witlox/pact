@@ -128,17 +128,7 @@ Total: <2 seconds from pact-agent start to node ready.
 
 ## Contributing with Claude Code
 
-This project includes structured [Claude Code](https://claude.com/claude-code) profiles for different development phases: analyst, architect, adversary, implementer, and integrator. Each profile constrains Claude to a specific role in the workflow.
-
-```bash
-# Activate a profile (writes to .claude/CLAUDE.md, which is gitignored)
-./switch-profile.sh architect
-
-# Implementer profile with feature scope
-./switch-profile.sh implementer "user-authentication"
-```
-
-The root `CLAUDE.md` provides project context and is always loaded alongside the active profile. See [`.claude/WORKFLOW.md`](.claude/WORKFLOW.md) for the full workflow documentation.
+This project includes structured [Claude Code](https://claude.com/claude-code) profiles for different development phases: analyst, architect, adversary, implementer, and integrator. Each profile constrains Claude to a specific role in the workflow defined in ['.claude/CLAUDE.md'](.claude/CLAUDE.md), which is loaded by default.
 
 ## License
 

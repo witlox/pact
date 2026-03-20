@@ -157,8 +157,10 @@ pub struct PactWorld {
     pub rollback_triggered: bool,
     pub rollback_deferred: bool,
     pub alert_raised: bool,
+    pub active_consumer_count: usize,
 
     // --- Merge conflict ---
+    pub conflict_mgr: pact_agent::conflict::ConflictManager,
     pub conflict_local_value: Option<String>,
     pub conflict_journal_value: Option<String>,
 
@@ -585,9 +587,11 @@ impl PactWorld {
             // Rollback/alert
             rollback_triggered: false,
             rollback_deferred: false,
+            active_consumer_count: 0,
             alert_raised: false,
 
             // Merge conflict
+            conflict_mgr: pact_agent::conflict::ConflictManager::new(900),
             conflict_local_value: None,
             conflict_journal_value: None,
 

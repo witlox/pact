@@ -252,27 +252,10 @@ async fn then_drift_logged(world: &mut PactWorld) {
 
 #[then("a DriftDetected entry should be recorded in the journal")]
 async fn then_drift_entry(world: &mut PactWorld) {
-    // If not yet recorded, record one
-    if !world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected) {
-        let entry = ConfigEntry {
-            sequence: 0,
-            timestamp: Utc::now(),
-            entry_type: EntryType::DriftDetected,
-            scope: Scope::Node("node-001".into()),
-            author: Identity {
-                principal: "system".into(),
-                principal_type: PrincipalType::Service,
-                role: "pact-service-agent".into(),
-            },
-            parent: None,
-            state_delta: None,
-            policy_ref: None,
-            ttl_seconds: None,
-            emergency_reason: None,
-        };
-        world.journal.apply_command(JournalCommand::AppendEntry(entry));
-    }
-    assert!(world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected));
+    assert!(
+        world.journal.entries.values().any(|e| e.entry_type == EntryType::DriftDetected),
+        "expected DriftDetected entry in journal — the WHEN step should have recorded it"
+    );
 }
 
 #[then("no rollback should be triggered")]

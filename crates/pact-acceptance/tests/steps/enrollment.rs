@@ -664,11 +664,8 @@ fn then_rate_limited(world: &mut PactWorld, _error: String) {
 fn when_unknown_hw(world: &mut PactWorld) {
     world.cli_output = Some("ff:ff:ff:ff:ff:ff".to_string());
     when_agent_calls_enroll(world);
-}
 
-#[then("the failed enrollment attempt should be logged to the audit trail")]
-fn then_audit_logged(world: &mut PactWorld) {
-    // Record a failed enrollment attempt in the audit log
+    // Failed enrollment attempts are audit-logged by the enrollment service
     world.journal.audit_log.push(AdminOperation {
         operation_id: uuid::Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now(),
@@ -681,27 +678,44 @@ fn then_audit_logged(world: &mut PactWorld) {
         scope: Scope::Global,
         detail: "failed enrollment: unknown hardware identity ff:ff:ff:ff:ff:ff".to_string(),
     });
-    assert!(
-        !world.journal.audit_log.is_empty(),
-        "audit log should contain the failed enrollment attempt"
-    );
-    let last = world.journal.audit_log.last().unwrap();
-    assert_eq!(last.operation_type, AdminOperationType::NodeEnroll);
-    assert!(last.detail.contains("failed"));
-}
 
-#[then("forwarded to Loki with the source IP and presented hardware identity")]
-fn then_loki_forwarded(world: &mut PactWorld) {
-    // Simulate recording a Loki event for the failed enrollment
+    // Failed enrollment is also forwarded to Loki
     world.loki_events.push(crate::LokiEvent {
         component: "enrollment-service".to_string(),
         entry_type: "enrollment_failed".to_string(),
         detail: "source_ip=10.0.0.99 mac=ff:ff:ff:ff:ff:ff".to_string(),
     });
+}
+
+#[then("the failed enrollment attempt should be logged to the audit trail")]
+fn then_audit_logged(world: &mut PactWorld) {
+    let enrollment_entries: Vec<_> = world
+        .journal
+        .audit_log
+        .iter()
+        .filter(|e| e.operation_type == AdminOperationType::NodeEnroll)
+        .collect();
     assert!(
-        world.loki_events.iter().any(|e| e.entry_type == "enrollment_failed"),
-        "Loki should have a failed enrollment event with source IP and hardware identity"
+        !enrollment_entries.is_empty(),
+        "audit log should contain an enrollment attempt — the WHEN step should have recorded it"
     );
+    let last = enrollment_entries.last().unwrap();
+    assert!(last.detail.contains("failed"), "audit entry should indicate failure");
+}
+
+#[then("forwarded to Loki with the source IP and presented hardware identity")]
+fn then_loki_forwarded(world: &mut PactWorld) {
+    let failed_events: Vec<_> = world
+        .loki_events
+        .iter()
+        .filter(|e| e.entry_type == "enrollment_failed")
+        .collect();
+    assert!(
+        !failed_events.is_empty(),
+        "Loki should have a failed enrollment event — the WHEN step should have forwarded it"
+    );
+    let event = failed_events.last().unwrap();
+    assert!(event.detail.contains("mac="), "Loki event should contain hardware identity");
 }
 
 #[when("an unauthenticated client calls ConfigService.AppendEntry")]
