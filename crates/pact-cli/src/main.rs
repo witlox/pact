@@ -380,6 +380,12 @@ enum NodeSubcommand {
         /// Node ID.
         node_id: String,
     },
+    /// Import nodes from OpenCHAMI SMD inventory.
+    Import {
+        /// Filter by SMD group/role.
+        #[arg(long)]
+        group: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -760,6 +766,21 @@ async fn main() {
                 }
                 NodeSubcommand::Inspect { node_id } => {
                     pact_cli::commands::node::inspect(channel, &token, &node_id).await
+                }
+                NodeSubcommand::Import { group } => {
+                    let Some(ref smd_url) = delegation_config.openchami_smd_url else {
+                        eprintln!("Error: PACT_OPENCHAMI_SMD_URL not configured");
+                        std::process::exit(1);
+                    };
+                    pact_cli::commands::node::import_from_smd(
+                        channel,
+                        &token,
+                        smd_url,
+                        delegation_config.openchami_token.as_deref(),
+                        group.as_deref(),
+                        delegation_config.timeout_secs,
+                    )
+                    .await
                 }
             }
         }

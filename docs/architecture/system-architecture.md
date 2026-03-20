@@ -140,9 +140,8 @@ GPU soft-fails → agent detects (NVML for NVIDIA, ROCm SMI for AMD, or eBPF)
 
 | Action | Owner | pact does |
 |--------|-------|-----------|
-| Reboot node | OpenCHAMI | `pact reboot` calls Manta/Redfish API |
-| Re-image node | OpenCHAMI | `pact reimage` calls Manta API |
-| Firmware update | OpenCHAMI | `pact firmware` calls Magellan API |
+| Reboot node | OpenCHAMI | `pact reboot` calls OpenCHAMI SMD Redfish API |
+| Re-image node | OpenCHAMI | `pact reimage` calls OpenCHAMI SMD API |
 | Drain node | Lattice | `pact drain` calls lattice scheduler API |
 | Cordon node | Lattice | `pact cordon` calls lattice scheduler API |
 | Job status | Lattice | `pact jobs` calls lattice API |

@@ -450,6 +450,133 @@ Requires `pact-ops-{vcluster}` or `pact-platform-admin` role.
 
 ---
 
+## Node Enrollment Commands
+
+These commands manage node enrollment, assignment, and inventory. Requires
+`pact-ops-{vcluster}` or `pact-platform-admin` role.
+
+### `pact node enroll`
+
+Register a node with a hardware identity.
+
+```bash
+pact node enroll compute-001 --mac aa:bb:cc:dd:ee:01
+pact node enroll compute-002 --mac aa:bb:cc:dd:ee:02 --bmc-serial SN12345
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID to enroll (required) |
+| `--mac <MAC>` | Primary MAC address (required) |
+| `--bmc-serial <SERIAL>` | BMC serial number (optional) |
+
+### `pact node import`
+
+Batch-import nodes from OpenCHAMI SMD inventory. Discovers nodes via the SMD
+`/hsm/v2/State/Components` API and enrolls them with their hardware identity
+(MAC addresses from `/hsm/v2/Inventory/EthernetInterfaces`).
+
+Requires `PACT_OPENCHAMI_SMD_URL` to be configured.
+
+```bash
+pact node import                        # Import all nodes from SMD
+pact node import --group Compute        # Import only nodes with role "Compute"
+```
+
+| Option | Description |
+|--------|-------------|
+| `--group <ROLE>` | Filter by SMD role (e.g., "Compute", "Service") |
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `PACT_OPENCHAMI_SMD_URL` | OpenCHAMI SMD base URL (required) |
+| `PACT_OPENCHAMI_TOKEN` | OpenCHAMI auth token (optional) |
+
+### `pact node decommission`
+
+Decommission an enrolled node.
+
+```bash
+pact node decommission compute-001
+pact node decommission compute-001 --force
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID to decommission (required) |
+| `--force` | Force decommission even with active sessions |
+
+### `pact node assign`
+
+Assign a node to a vCluster.
+
+```bash
+pact node assign compute-001 --vcluster ml-training
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID (required) |
+| `--vcluster <NAME>` | Target vCluster (required) |
+
+### `pact node unassign`
+
+Unassign a node from its vCluster.
+
+```bash
+pact node unassign compute-001
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID (required) |
+
+### `pact node move`
+
+Move a node between vClusters.
+
+```bash
+pact node move compute-001 --to-vcluster dev-sandbox
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID (required) |
+| `--to-vcluster <NAME>` | Target vCluster (required) |
+
+### `pact node list`
+
+List enrolled nodes with optional filters.
+
+```bash
+pact node list
+pact node list --vcluster ml-training
+pact node list --state active
+pact node list --unassigned
+```
+
+| Option | Description |
+|--------|-------------|
+| `--state <STATE>` | Filter by enrollment state (active, inactive, registered, revoked) |
+| `--vcluster <NAME>` | Filter by vCluster |
+| `--unassigned` | Show only unassigned nodes |
+
+### `pact node inspect`
+
+Show detailed enrollment information for a node.
+
+```bash
+pact node inspect compute-001
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node_id>` | Node ID to inspect (required) |
+
+---
+
 ## Node Lifecycle Commands
 
 These commands manage node state transitions via delegation to external systems.

@@ -289,15 +289,20 @@ Typical image sizes:
 Upload the image to OpenCHAMI's image server and configure the boot parameters:
 
 ```bash
-# Upload image to OpenCHAMI image server
-ochami image upload --name pact-ml-training-v1 --file /tmp/pact-image/pact-node.squashfs
+# Upload image to OpenCHAMI image server.
+# Use your site's image management tooling to upload the SquashFS to the image server,
+# e.g. scp, s3 upload, or your image registry workflow.
 
-# Set boot parameters for a node group
-ochami bss set \
-    --group ml-training \
-    --kernel /boot/vmlinuz \
-    --initrd /boot/initramfs.img \
-    --params "root=live:http://image-server/pact-ml-training-v1.squashfs init=/init pact.nodeid=\${hostname} console=tty0"
+# Set boot parameters for a node group via BSS REST API
+curl -X PUT https://bss.mgmt/boot/v1/bootparameters \
+    -H "Content-Type: application/json" \
+    -d '{
+        "macs": [],
+        "hosts": ["ml-training"],
+        "params": "root=live:http://image-server/pact-ml-training-v1.squashfs init=/init pact.nodeid=${hostname} console=tty0",
+        "kernel": "http://image-server/vmlinuz",
+        "initrd": "http://image-server/initramfs.img"
+    }'
 ```
 
 The `init=/init` parameter tells the kernel to run our init wrapper.
@@ -308,11 +313,11 @@ The `pact.nodeid=${hostname}` is expanded by OpenCHAMI's DHCP/BSS.
 Before the first boot, register nodes in the journal:
 
 ```bash
-# Register nodes with their hardware identity
-pact node register --node-id compute-001 --mac aa:bb:cc:dd:ee:01
-pact node register --node-id compute-002 --mac aa:bb:cc:dd:ee:02
-# ... or batch register from SMD inventory:
-pact node register --from-smd --group ml-training
+# Enroll nodes with their hardware identity
+pact node enroll compute-001 --mac aa:bb:cc:dd:ee:01
+pact node enroll compute-002 --mac aa:bb:cc:dd:ee:02
+# ... or batch import from SMD inventory:
+pact node import --group ml-training
 
 # Assign to vCluster
 pact node assign compute-001 --vcluster ml-training
@@ -324,7 +329,13 @@ pact node assign compute-002 --vcluster ml-training
 Power on the nodes via OpenCHAMI/Redfish:
 
 ```bash
-ochami power on --group ml-training
+# Power on nodes via BMC/Redfish (use your BMC management tool: ipmitool, Redfish, etc.)
+# Example with curl against OpenCHAMI SMD:
+curl -X POST https://smd.mgmt/hsm/v2/State/Components/x1000c0s0b0n0/Actions/PowerCycle \
+    -H "Content-Type: application/json" \
+    -d '{"ResetType": "On"}'
+# Or use pact's delegation command for enrolled nodes:
+pact reboot compute-001
 ```
 
 Monitor boot progress:
@@ -348,13 +359,144 @@ pact service status compute-001
 To update the base image (new drivers, new pact-agent version):
 
 1. Build a new SquashFS image (steps 1-9)
-2. Upload to OpenCHAMI: `ochami image upload --name pact-ml-training-v2 ...`
-3. Update boot config: `ochami bss set --group ml-training --params "root=live:http://image-server/pact-ml-training-v2.squashfs ..."`
+2. Upload to OpenCHAMI image server (using your site's image management tooling)
+3. Update boot config via BSS REST API: `curl -X PUT https://bss.mgmt/boot/v1/bootparameters -d '{"hosts":["ml-training"],"params":"root=live:http://image-server/pact-ml-training-v2.squashfs ..."}'`
 4. Rolling reboot: `pact drain compute-001 && pact reboot compute-001`
 
 Nodes pick up the new image on reboot. pact configuration (sysctl, mounts,
 services) is streamed from the journal — not baked into the image — so most
 config changes don't require a new image.
+
+## Including Lattice (Supercharged Mode)
+
+When deploying pact alongside lattice for workload scheduling, the compute node
+image includes both `pact-agent` and `lattice-node-agent`. pact supervises
+lattice-node-agent as a declared service — this is "supercharged mode" where
+both systems cooperate.
+
+### Additional binaries in the image
+
+Add lattice-node-agent to the SquashFS image alongside pact-agent:
+
+```bash
+# Download lattice node agent
+curl -LO https://github.com/witlox/lattice/releases/latest/download/lattice-node-agent-x86_64.tar.gz
+sudo tar xzf lattice-node-agent-x86_64.tar.gz -C /tmp/pact-image/rootfs/usr/local/bin/
+```
+
+### lattice-node-agent config
+
+Create the lattice node agent config. The agent connects to the lattice
+scheduler quorum and reports node capabilities (read from pact's capability
+manifest):
+
+```bash
+sudo mkdir -p /tmp/pact-image/rootfs/etc/lattice
+sudo tee /tmp/pact-image/rootfs/etc/lattice/node-agent.toml << 'EOF'
+[node_agent]
+# lattice scheduler quorum endpoints
+scheduler_endpoints = [
+    "lattice-1.mgmt:50051",
+    "lattice-2.mgmt:50051",
+    "lattice-3.mgmt:50051",
+]
+
+# pact capability manifest (lattice-node-agent reads this)
+capability_manifest = "/run/pact/capability.json"
+capability_socket = "/run/pact/capability.sock"
+
+# Namespace handoff socket (pact creates namespaces, lattice uses them)
+namespace_socket = "/run/pact/ns-handoff.sock"
+
+# Mount refcounting (shared between pact and lattice)
+mount_socket = "/run/pact/mount-refcount.sock"
+
+[node_agent.identity]
+# Uses the same SPIRE socket as pact for workload identity
+spire_socket = "/run/spire/agent.sock"
+EOF
+```
+
+### Declare lattice-node-agent as a pact service
+
+pact-agent supervises lattice-node-agent as a declared service. This is
+configured in the vCluster overlay (streamed at boot, not baked in the image).
+
+Create the overlay spec:
+
+```toml
+# vcluster-overlay.toml — applied with: pact apply vcluster-overlay.toml
+[vcluster.ml-training.services.lattice-node-agent]
+binary = "/usr/local/bin/lattice-node-agent"
+args = ["--config", "/etc/lattice/node-agent.toml"]
+restart_policy = "always"
+order = 50
+depends_on = ["chronyd"]
+
+[vcluster.ml-training.services.chronyd]
+binary = "/usr/sbin/chronyd"
+args = ["-d"]
+restart_policy = "always"
+order = 10
+
+# For GPU nodes, add nvidia-persistenced
+[vcluster.ml-training.services.nvidia-persistenced]
+binary = "/usr/bin/nvidia-persistenced"
+args = ["--no-persistence-mode"]
+restart_policy = "on_failure"
+order = 20
+```
+
+### Boot sequence with lattice
+
+```
+Kernel → SquashFS root → pact-agent (PID 1)
+  → auth to journal → stream vCluster config overlay
+  → apply: kernel params, modules, mounts, uenv
+  → start services in dependency order:
+      1. chronyd (time sync)
+      2. nvidia-persistenced (GPU, if declared)
+      3. lattice-node-agent (workload scheduling)
+  → pact writes CapabilityReport to /run/pact/capability.json
+  → lattice-node-agent reads manifest, reports to scheduler
+  → node ready for workloads
+```
+
+### Supercharged CLI
+
+With both systems running, operators get unified admin access:
+
+```bash
+# pact-native commands work as before
+pact status --vcluster ml-training
+pact exec compute-001 -- nvidia-smi
+pact diag compute-001 --grep "ECC"
+
+# Supercharged commands query both systems
+pact jobs list --vcluster ml-training    # lattice allocations
+pact health                              # pact + lattice health
+pact drain compute-001                   # lattice drain + pact audit
+```
+
+Configure the lattice endpoint for supercharged commands:
+
+```bash
+export PACT_LATTICE_ENDPOINT=http://lattice-1.mgmt:50051
+export PACT_LATTICE_TOKEN=<lattice-auth-token>
+```
+
+### Network separation
+
+pact and lattice use separate networks (ADR-017):
+
+| Traffic | Network | Port |
+|---------|---------|------|
+| pact agent ↔ journal | Management | 9443, 9444 |
+| pact shell/exec/diag | Management | 9445 |
+| lattice agent ↔ scheduler | Management | 50051 |
+| Workload data (MPI, NCCL) | HSN (Slingshot) | Application-defined |
+
+pact never touches the HSN. lattice never touches pact's Raft ports.
 
 ## Troubleshooting
 
@@ -382,8 +524,9 @@ spire-server entry show
 # Create a join token for manual attestation:
 spire-server token generate -spiffeID spiffe://example.org/pact-agent/compute-001
 
-# Pass the token to the node via kernel cmdline:
-#   ochami bss set --node compute-001 --params "... spire.join_token=<token>"
+# Pass the token to the node via kernel cmdline (update BSS):
+#   curl -X PUT https://bss.mgmt/boot/v1/bootparameters \
+#     -d '{"hosts":["compute-001"],"params":"... spire.join_token=<token>"}'
 ```
 
 ### Agent falls back to bootstrap identity

@@ -42,8 +42,8 @@ authorized, and logged.
 
 | Command | Delegates to | Description |
 |---------|-------------|-------------|
-| `pact reboot <node>` | OpenCHAMI/Manta | Reboot via Redfish BMC |
-| `pact reimage <node>` | OpenCHAMI/Manta | Re-image node |
+| `pact reboot <node>` | OpenCHAMI SMD | Reboot via Redfish BMC |
+| `pact reimage <node>` | OpenCHAMI SMD | Re-image node |
 | `pact drain <node>` | Lattice | Drain jobs from node |
 | `pact cordon <node>` | Lattice | Remove from scheduling |
 | `pact uncordon <node>` | Lattice | Return to scheduling |
