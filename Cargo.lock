@@ -1720,9 +1720,9 @@ dependencies = [
 
 [[package]]
 name = "hpc-auth"
-version = "2026.1.23"
+version = "2026.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bc99d8f1db99e8ab050e6a5da0366bb9f3221eb02e55c13f302c82b6bfc58eb"
+checksum = "c7738f460c335c562dbfe0f2fccf096f0f02adf9d9c9f1a45a69d491f0e36f4a"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

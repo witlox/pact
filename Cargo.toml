@@ -28,7 +28,7 @@ pact-agent = { path = "crates/pact-agent", default-features = false, version = "
 pact-policy = { path = "crates/pact-policy", default-features = false, version = "2026.1.0" }
 pact-cli = { path = "crates/pact-cli", version = "2026.1.0" }
 pact-mcp = { path = "crates/pact-mcp", version = "2026.1.0" }
-hpc-auth = "2026.1.23"
+hpc-auth = "2026.1.28"
 lattice-client = "2026.1"
 hpc-node = "2026.1"
 hpc-audit = "2026.1"
