@@ -1756,9 +1756,9 @@ dependencies = [
 
 [[package]]
 name = "hpc-node"
-version = "2026.1.25"
+version = "2026.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d7a2582149b62962826c71fcf3db0eb09edda024542834aa380c9a830e23588"
+checksum = "3a09d7859341a5d5ec5330f7e168ca414bb290c260dcea4237478ec966989e3a"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
