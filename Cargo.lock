@@ -1743,9 +1743,9 @@ dependencies = [
 
 [[package]]
 name = "hpc-identity"
-version = "2026.1.25"
+version = "2026.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d7f9bef7632454698eeb0531a1d18bc106bfe00cddb83525568031421f610c3"
+checksum = "ca44fc7daf5538c95dca6028be1e2de23130df7cb2e935ca5d13813dc9f7f7b2"
 dependencies = [
  "async-trait",
  "chrono",
