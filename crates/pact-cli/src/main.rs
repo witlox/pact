@@ -589,8 +589,18 @@ async fn main() {
     // clutter --help for sites without lattice.
     let cli = if std::env::var("PACT_LATTICE_ENDPOINT").is_err() {
         let lattice_commands = [
-            "drain", "undrain", "cordon", "uncordon", "jobs", "queue", "accounting", "dag",
-            "budget", "backup", "nodes", "services",
+            "drain",
+            "undrain",
+            "cordon",
+            "uncordon",
+            "jobs",
+            "queue",
+            "accounting",
+            "dag",
+            "budget",
+            "backup",
+            "nodes",
+            "services",
         ];
         let mut cmd = Cli::command();
         for name in &lattice_commands {
