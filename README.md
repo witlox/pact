@@ -103,7 +103,7 @@ pact blacklist                 # Drift detection exclusions
 pact login                     # OIDC login (Auth Code, Device Code, Service Account)
 pact logout                    # Clear session
 
-# Supercharged (pact + lattice)
+# Supercharged (pact + lattice) — hidden from --help without PACT_LATTICE_ENDPOINT
 pact jobs list [--node X]         # List running allocations
 pact jobs cancel <id>             # Cancel a stuck job
 pact jobs inspect <id>            # Job details

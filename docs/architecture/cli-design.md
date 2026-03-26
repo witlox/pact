@@ -60,7 +60,9 @@ authorized, and logged.
 ### Supercharged (pact + lattice)
 
 These commands combine data from pact and lattice into unified views.
-Requires `PACT_LATTICE_ENDPOINT` to be configured.
+Requires `PACT_LATTICE_ENDPOINT` to be configured. Lattice-only commands
+(delegation + supercharged) are hidden from `--help` when the endpoint is
+not set, keeping the CLI clean for sites without lattice.
 
 | Command | Description |
 |---------|-------------|

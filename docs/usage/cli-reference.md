@@ -746,6 +746,11 @@ pact blacklist remove "/var/cache/**"
 These commands combine pact and lattice data into unified views. They require
 `PACT_LATTICE_ENDPOINT` to be configured (or `--lattice-endpoint` flag).
 
+> **Note:** Lattice commands (including node lifecycle delegation) are hidden from
+> `pact --help` when `PACT_LATTICE_ENDPOINT` is not set. They are always compiled
+> in and can be invoked directly — they return a clear "not configured" error.
+> Set the environment variable to see them in help output.
+
 ### `pact jobs list`
 
 List running job allocations across nodes.
