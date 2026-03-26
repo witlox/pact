@@ -24,6 +24,8 @@ pub struct Connections {
     pub journal: Option<Channel>,
     pub agent: Option<Channel>,
     pub delegation: DelegationConfig,
+    /// Bearer token for MCP→agent authentication (from PACT_MCP_TOKEN env var).
+    pub mcp_token: Option<String>,
 }
 
 /// Dispatch a tool call using available gRPC connections.
@@ -73,7 +75,7 @@ pub async fn dispatch_connected(
         }),
         // Agent-targeted tools
         "pact_exec" => Some(match &connections.agent {
-            Some(ch) => handle_exec(arguments, ch).await,
+            Some(ch) => handle_exec(arguments, ch, connections.mcp_token.as_deref()).await,
             None => no_agent(),
         }),
         "pact_cap" => Some(match &connections.agent {
@@ -81,7 +83,9 @@ pub async fn dispatch_connected(
             None => no_agent(),
         }),
         "pact_service_status" => Some(match &connections.agent {
-            Some(ch) => handle_service_status(arguments, ch).await,
+            Some(ch) => {
+                handle_service_status(arguments, ch, connections.mcp_token.as_deref()).await
+            }
             None => no_agent(),
         }),
         // Supercharged commands — delegated to lattice via DelegationConfig
@@ -133,6 +137,7 @@ pub async fn dispatch_tool_connected(
         journal: Some(channel.clone()),
         agent: None,
         delegation: DelegationConfig::default(),
+        mcp_token: None,
     };
     dispatch_connected(name, arguments, &connections).await
 }
@@ -319,7 +324,11 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
 
 // --- Agent-targeted tool handlers ---
 
-async fn handle_exec(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_exec(
+    args: &serde_json::Value,
+    channel: &Channel,
+    mcp_token: Option<&str>,
+) -> ToolCallResult {
     let node = match args.get("node").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => return tool_result("Error: node ID required".to_string(), true),
@@ -338,9 +347,10 @@ async fn handle_exec(args: &serde_json::Value, channel: &Channel) -> ToolCallRes
 
     let mut client = ShellServiceClient::new(channel.clone());
     let mut request = tonic::Request::new(ExecRequest { command: cmd.to_string(), args: cmd_args });
-    // MCP server authenticates as pact-service-ai
-    if let Ok(val) = "Bearer mcp-service-token".parse() {
-        request.metadata_mut().insert("authorization", val);
+    if let Some(token) = mcp_token {
+        if let Ok(val) = format!("Bearer {token}").parse() {
+            request.metadata_mut().insert("authorization", val);
+        }
     }
 
     match client.exec(request).await {
@@ -397,7 +407,11 @@ async fn handle_cap(_args: &serde_json::Value, channel: &Channel) -> ToolCallRes
     }
 }
 
-async fn handle_service_status(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_service_status(
+    args: &serde_json::Value,
+    channel: &Channel,
+    mcp_token: Option<&str>,
+) -> ToolCallResult {
     let service = args.get("service").and_then(|v| v.as_str()).unwrap_or("--all");
     let mut client = ShellServiceClient::new(channel.clone());
 
@@ -405,8 +419,10 @@ async fn handle_service_status(args: &serde_json::Value, channel: &Channel) -> T
         command: "systemctl".to_string(),
         args: vec!["status".to_string(), service.to_string()],
     });
-    if let Ok(val) = "Bearer mcp-service-token".parse() {
-        request.metadata_mut().insert("authorization", val);
+    if let Some(token) = mcp_token {
+        if let Ok(val) = format!("Bearer {token}").parse() {
+            request.metadata_mut().insert("authorization", val);
+        }
     }
 
     match client.exec(request).await {
@@ -881,16 +897,24 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_unknown_tool_returns_none() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("nonexistent_tool", &json!({}), &connections).await;
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn dispatch_connected_journal_tools_without_connection() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let journal_tools = vec![
             "pact_status",
             "pact_log",
@@ -916,8 +940,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_agent_tools_without_connection() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let agent_tools = vec!["pact_exec", "pact_cap", "pact_service_status"];
 
         for tool_name in agent_tools {
@@ -936,8 +964,12 @@ mod tests {
     async fn dispatch_tool_connected_backward_compat_returns_none_for_unknown() {
         // dispatch_tool_connected wraps dispatch_connected with journal-only connections
         // Create a fake channel that won't actually connect
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("no_such_tool", &json!({}), &connections).await;
         assert!(result.is_none());
     }
@@ -953,8 +985,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_emergency_start_without_connection() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected(
             "pact_emergency",
             &json!({"action": "start", "reason": "test"}),
@@ -971,8 +1007,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_jobs_list_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_jobs_list", &json!({"vcluster": "ml"}), &connections).await;
         let result = result.unwrap();
@@ -982,8 +1022,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_queue_status_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_queue_status", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -992,8 +1036,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_cluster_health_no_journal() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_cluster_health", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -1002,8 +1050,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_system_health_no_journal() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_system_health", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -1012,8 +1064,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_accounting_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_accounting", &json!({"vcluster": "ml"}), &connections).await;
         let result = result.unwrap();
@@ -1025,8 +1081,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_undrain_no_journal() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_undrain", &json!({"node": "n01"}), &connections).await;
         let result = result.unwrap();
@@ -1036,8 +1096,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_dag_list_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_dag_list", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -1046,8 +1110,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_dag_inspect_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_dag_inspect", &json!({"dag_id": "d1"}), &connections).await;
         let result = result.unwrap();
@@ -1057,8 +1125,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_budget_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_budget", &json!({"tenant": "ml"}), &connections).await;
         let result = result.unwrap();
@@ -1068,8 +1140,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_budget_missing_args() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_budget", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -1078,8 +1154,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_backup_create_no_journal() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_backup_create", &json!({"path": "/tmp/b"}), &connections)
                 .await;
@@ -1090,8 +1170,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_backup_verify_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_backup_verify", &json!({"path": "/tmp/b"}), &connections)
                 .await;
@@ -1102,8 +1186,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_nodes_list_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result = dispatch_connected("pact_nodes_list", &json!({}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
@@ -1112,8 +1200,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_connected_node_inspect_no_lattice() {
-        let connections =
-            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let connections = Connections {
+            journal: None,
+            agent: None,
+            delegation: DelegationConfig::default(),
+            mcp_token: None,
+        };
         let result =
             dispatch_connected("pact_node_inspect", &json!({"node_id": "n01"}), &connections).await;
         let result = result.unwrap();

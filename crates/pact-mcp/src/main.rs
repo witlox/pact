@@ -44,7 +44,13 @@ async fn main() {
         ..DelegationConfig::default()
     };
 
-    let connections = connected::Connections { journal: channel, agent: agent_channel, delegation };
+    let mcp_token = std::env::var("PACT_MCP_TOKEN").ok();
+    if mcp_token.is_none() {
+        warn!("PACT_MCP_TOKEN not set — agent requests will be unauthenticated");
+    }
+
+    let connections =
+        connected::Connections { journal: channel, agent: agent_channel, delegation, mcp_token };
 
     eprintln!("pact-mcp: starting MCP server on stdio");
 

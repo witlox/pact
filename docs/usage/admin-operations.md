@@ -301,3 +301,6 @@ from MCP — use the CLI for those.
 |----------|-------------|---------|
 | `PACT_ENDPOINT` | Journal gRPC endpoint | `http://localhost:9443` |
 | `PACT_AGENT_ENDPOINT` | Agent gRPC endpoint | `http://localhost:9445` |
+| `PACT_MCP_TOKEN` | Bearer token for MCP→agent authentication | (none — warns if unset) |
+| `PACT_LATTICE_ENDPOINT` | Lattice gRPC endpoint for delegation | (none — lattice tools disabled) |
+| `PACT_LATTICE_TOKEN` | Bearer token for lattice API | (none) |
