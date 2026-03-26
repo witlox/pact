@@ -85,7 +85,7 @@ rcgen = { version = "0.13", features = ["x509-parser", "pem"] }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 
 # HTTP (for REST endpoints, OPA, Sovra integration)
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
