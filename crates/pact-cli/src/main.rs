@@ -2,7 +2,7 @@
 //!
 //! See `docs/architecture/cli-design.md` for command reference.
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use pact_cli::commands::config::CliConfig;
 use pact_cli::commands::execute;
 
@@ -584,7 +584,22 @@ enum NodesSubcommand {
 #[tokio::main]
 #[allow(clippy::too_many_lines, clippy::large_stack_frames)]
 async fn main() {
-    let cli = Cli::parse();
+    // Hide lattice-only commands when PACT_LATTICE_ENDPOINT is not configured.
+    // Commands still compile and work if invoked directly — they just don't
+    // clutter --help for sites without lattice.
+    let cli = if std::env::var("PACT_LATTICE_ENDPOINT").is_err() {
+        let lattice_commands = [
+            "drain", "undrain", "cordon", "uncordon", "jobs", "queue", "accounting", "dag",
+            "budget", "backup", "nodes", "services",
+        ];
+        let mut cmd = Cli::command();
+        for name in &lattice_commands {
+            cmd = cmd.mut_subcommand(name, |sub| sub.hide(true));
+        }
+        Cli::from_arg_matches(&cmd.get_matches()).unwrap_or_else(|e| e.exit())
+    } else {
+        Cli::parse()
+    };
 
     // Load config with precedence: CLI args > env vars > config file > defaults
     let mut config = CliConfig::load().with_env_overrides();
