@@ -471,18 +471,13 @@ pub async fn list_dags(
     }
 
     let mut out = String::new();
-    out.push_str(&format!(
-        "{:<36}  {:<12}  {:<12}  {}\n",
-        "DAG ID", "STATE", "STEPS", "CREATED"
-    ));
+    out.push_str(&format!("{:<36}  {:<12}  {:<12}  {}\n", "DAG ID", "STATE", "STEPS", "CREATED"));
     out.push_str(&"-".repeat(80));
     out.push('\n');
 
     for dag in &resp.dags {
-        let created = dag
-            .created_at
-            .as_ref()
-            .map_or_else(|| "-".into(), |t| format!("{}s", t.seconds));
+        let created =
+            dag.created_at.as_ref().map_or_else(|| "-".into(), |t| format!("{}s", t.seconds));
         out.push_str(&format!(
             "{:<36}  {:<12}  {:<12}  {}\n",
             dag.dag_id,
@@ -552,14 +547,14 @@ pub async fn tenant_budget(
 ) -> anyhow::Result<String> {
     let mut lc = connect_lattice(config).await?;
 
-    let resp = lc
-        .tenant_usage(tenant_id, days)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = lc.tenant_usage(tenant_id, days).await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let mut out = String::new();
     out.push_str(&format!("Tenant: {}\n", resp.tenant));
-    out.push_str(&format!("Period: {} — {} ({} days)\n", resp.period_start, resp.period_end, resp.period_days));
+    out.push_str(&format!(
+        "Period: {} — {} ({} days)\n",
+        resp.period_start, resp.period_end, resp.period_days
+    ));
     out.push_str(&format!("GPU hours:  {:.1}", resp.gpu_hours_used));
     if let Some(budget) = resp.gpu_hours_budget {
         out.push_str(&format!(" / {budget:.1}"));
@@ -588,10 +583,7 @@ pub async fn user_budget(
 ) -> anyhow::Result<String> {
     let mut lc = connect_lattice(config).await?;
 
-    let resp = lc
-        .user_usage(user, days)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = lc.user_usage(user, days).await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let mut out = String::new();
     out.push_str(&format!("User: {}\n", resp.user));
@@ -647,17 +639,14 @@ pub async fn backup_create(
         emergency_reason: None,
     };
     let _audit = journal_client
-        .append_entry(tonic::Request::new(
-            pact_common::proto::journal::AppendEntryRequest { entry: Some(entry) },
-        ))
+        .append_entry(tonic::Request::new(pact_common::proto::journal::AppendEntryRequest {
+            entry: Some(entry),
+        }))
         .await
         .map_err(|e| anyhow::anyhow!("audit logging for backup_create failed: {e}"))?;
 
     let mut lc = connect_lattice(config).await?;
-    let resp = lc
-        .create_backup(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = lc.create_backup(path).await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if resp.success {
         let mut out = String::new();
@@ -678,10 +667,7 @@ pub async fn backup_create(
 /// Verify a lattice backup.
 pub async fn backup_verify(config: &DelegationConfig, path: &str) -> anyhow::Result<String> {
     let mut lc = connect_lattice(config).await?;
-    let resp = lc
-        .verify_backup(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = lc.verify_backup(path).await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -728,17 +714,14 @@ pub async fn backup_restore(
         emergency_reason: None,
     };
     let _audit = journal_client
-        .append_entry(tonic::Request::new(
-            pact_common::proto::journal::AppendEntryRequest { entry: Some(entry) },
-        ))
+        .append_entry(tonic::Request::new(pact_common::proto::journal::AppendEntryRequest {
+            entry: Some(entry),
+        }))
         .await
         .map_err(|e| anyhow::anyhow!("audit logging for backup_restore failed: {e}"))?;
 
     let mut lc = connect_lattice(config).await?;
-    let resp = lc
-        .restore_backup(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = lc.restore_backup(path).await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if resp.success {
         Ok(format!("Restore completed: {}", resp.message))
@@ -835,7 +818,6 @@ pub async fn inspect_lattice_node(
 
     Ok(out)
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -615,10 +615,7 @@ async fn handle_undrain(
     )
     .await;
 
-    tool_result(
-        pact_cli::commands::delegate::format_delegation_result(&result),
-        !result.success,
-    )
+    tool_result(pact_cli::commands::delegate::format_delegation_result(&result), !result.success)
 }
 
 async fn handle_dag_list(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
@@ -632,10 +629,7 @@ async fn handle_dag_list(args: &serde_json::Value, config: &DelegationConfig) ->
     }
 }
 
-async fn handle_dag_inspect(
-    args: &serde_json::Value,
-    config: &DelegationConfig,
-) -> ToolCallResult {
+async fn handle_dag_inspect(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
     let dag_id = match args.get("dag_id").and_then(|v| v.as_str()) {
         Some(id) => id,
         None => return tool_result("Error: dag_id required".to_string(), true),
@@ -1086,12 +1080,9 @@ mod tests {
     async fn dispatch_connected_backup_create_no_journal() {
         let connections =
             Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
-        let result = dispatch_connected(
-            "pact_backup_create",
-            &json!({"path": "/tmp/b"}),
-            &connections,
-        )
-        .await;
+        let result =
+            dispatch_connected("pact_backup_create", &json!({"path": "/tmp/b"}), &connections)
+                .await;
         let result = result.unwrap();
         assert!(result.is_error);
         assert!(result.content[0].text.contains("not connected to journal"));
@@ -1101,12 +1092,9 @@ mod tests {
     async fn dispatch_connected_backup_verify_no_lattice() {
         let connections =
             Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
-        let result = dispatch_connected(
-            "pact_backup_verify",
-            &json!({"path": "/tmp/b"}),
-            &connections,
-        )
-        .await;
+        let result =
+            dispatch_connected("pact_backup_verify", &json!({"path": "/tmp/b"}), &connections)
+                .await;
         let result = result.unwrap();
         assert!(result.is_error);
         assert!(result.content[0].text.contains("failed"));
@@ -1127,8 +1115,7 @@ mod tests {
         let connections =
             Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let result =
-            dispatch_connected("pact_node_inspect", &json!({"node_id": "n01"}), &connections)
-                .await;
+            dispatch_connected("pact_node_inspect", &json!({"node_id": "n01"}), &connections).await;
         let result = result.unwrap();
         assert!(result.is_error);
         assert!(result.content[0].text.contains("failed"));

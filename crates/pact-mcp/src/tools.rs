@@ -402,8 +402,8 @@ fn pact_services_lookup() -> ToolDefinition {
 fn pact_undrain() -> ToolDefinition {
     ToolDefinition {
         name: "pact_undrain".into(),
-        description: "Cancel a drain on a node, returning it to Ready state (delegates to lattice)."
-            .into(),
+        description:
+            "Cancel a drain on a node, returning it to Ready state (delegates to lattice).".into(),
         input_schema: json!({
             "type": "object",
             "required": ["node"],
@@ -730,10 +730,7 @@ fn handle_backup_create(args: &serde_json::Value) -> ToolCallResult {
         Some(p) => p,
         None => return tool_result("Error: path required", true),
     };
-    tool_result(
-        format!("Backup create: path={path} (journal + lattice client required)"),
-        false,
-    )
+    tool_result(format!("Backup create: path={path} (journal + lattice client required)"), false)
 }
 
 fn handle_backup_verify(args: &serde_json::Value) -> ToolCallResult {
@@ -1096,7 +1093,8 @@ mod tests {
 
     #[test]
     fn dispatch_pact_dag_list() {
-        let result = dispatch_tool("pact_dag_list", &json!({"tenant": "ml-team", "state": "running"}));
+        let result =
+            dispatch_tool("pact_dag_list", &json!({"tenant": "ml-team", "state": "running"}));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("ml-team"));
     }
@@ -1159,8 +1157,7 @@ mod tests {
 
     #[test]
     fn dispatch_pact_nodes_list() {
-        let result =
-            dispatch_tool("pact_nodes_list", &json!({"state": "ready", "vcluster": "ml"}));
+        let result = dispatch_tool("pact_nodes_list", &json!({"state": "ready", "vcluster": "ml"}));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("ready"));
     }
