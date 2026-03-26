@@ -582,7 +582,7 @@ enum NodesSubcommand {
 }
 
 #[tokio::main]
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::large_stack_frames)]
 async fn main() {
     let cli = Cli::parse();
 
@@ -1188,11 +1188,7 @@ async fn main() {
                 pact_cli::commands::lattice::backup_verify(&delegation_config, &path).await
             }
             BackupSubcommand::Restore { path, confirm } => {
-                if !confirm {
-                    Err(anyhow::anyhow!(
-                        "backup restore is destructive — pass --confirm to proceed"
-                    ))
-                } else {
+                if confirm {
                     pact_cli::commands::lattice::backup_restore(
                         journal_client.as_mut().unwrap(),
                         &delegation_config,
@@ -1201,6 +1197,10 @@ async fn main() {
                         &role,
                     )
                     .await
+                } else {
+                    Err(anyhow::anyhow!(
+                        "backup restore is destructive — pass --confirm to proceed"
+                    ))
                 }
             }
         },
