@@ -161,6 +161,12 @@ enum Commands {
         node: String,
     },
 
+    /// Cancel a drain, returning node to Ready (delegates to lattice).
+    Undrain {
+        /// Target node ID.
+        node: String,
+    },
+
     /// Reboot a node via BMC (delegates to OpenCHAMI).
     Reboot {
         /// Target node ID.
@@ -238,6 +244,30 @@ enum Commands {
         /// vCluster filter.
         #[arg(long)]
         vcluster: Option<String>,
+    },
+
+    /// DAG workflow management (lattice).
+    Dag {
+        #[command(subcommand)]
+        action: DagSubcommand,
+    },
+
+    /// Budget/usage tracking (lattice).
+    Budget {
+        #[command(subcommand)]
+        action: BudgetSubcommand,
+    },
+
+    /// Lattice backup/restore operations.
+    Backup {
+        #[command(subcommand)]
+        action: BackupSubcommand,
+    },
+
+    /// Query lattice node state.
+    Nodes {
+        #[command(subcommand)]
+        action: NodesSubcommand,
     },
 
     /// Combined system health check (pact + lattice).
@@ -462,6 +492,95 @@ enum BlacklistSubcommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum DagSubcommand {
+    /// List DAG workflows.
+    List {
+        /// Filter by tenant.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Filter by state (running, completed, failed, cancelled).
+        #[arg(long)]
+        state: Option<String>,
+        /// Max results.
+        #[arg(short, long, default_value = "50")]
+        n: u32,
+    },
+    /// Inspect a DAG workflow.
+    Inspect {
+        /// DAG ID.
+        id: String,
+    },
+    /// Cancel a DAG workflow.
+    Cancel {
+        /// DAG ID.
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BudgetSubcommand {
+    /// Show tenant budget/usage.
+    Tenant {
+        /// Tenant ID (maps to vCluster).
+        id: String,
+        /// Rolling window in days (default: 90).
+        #[arg(long, default_value = "90")]
+        days: u32,
+    },
+    /// Show user budget/usage across all tenants.
+    User {
+        /// User ID.
+        id: String,
+        /// Rolling window in days (default: 90).
+        #[arg(long, default_value = "90")]
+        days: u32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BackupSubcommand {
+    /// Create a backup of lattice Raft state.
+    Create {
+        /// Backup file path.
+        path: String,
+    },
+    /// Verify a backup file.
+    Verify {
+        /// Backup file path.
+        path: String,
+    },
+    /// Restore lattice state from a backup.
+    Restore {
+        /// Backup file path.
+        path: String,
+        /// Required confirmation flag.
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum NodesSubcommand {
+    /// List lattice nodes.
+    List {
+        /// Filter by state (ready, draining, drained, down, etc.).
+        #[arg(long)]
+        state: Option<String>,
+        /// Filter by vCluster.
+        #[arg(long)]
+        vcluster: Option<String>,
+        /// Max results.
+        #[arg(short, long, default_value = "100")]
+        n: u32,
+    },
+    /// Inspect a lattice node.
+    Inspect {
+        /// Node ID.
+        node_id: String,
+    },
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -512,10 +631,12 @@ async fn main() {
             | Commands::Drain { .. }
             | Commands::Cordon { .. }
             | Commands::Uncordon { .. }
+            | Commands::Undrain { .. }
             | Commands::Reboot { .. }
             | Commands::Reimage { .. }
             | Commands::ClusterStatus
             | Commands::Audit { .. }
+            | Commands::Backup { .. }
             | Commands::Health
             | Commands::Services { .. }
     );
@@ -855,6 +976,21 @@ async fn main() {
             }
             Ok(String::new())
         }
+        Commands::Undrain { node } => {
+            let result = pact_cli::commands::delegate::undrain_node(
+                journal_client.as_mut().unwrap(),
+                &node,
+                &principal,
+                &role,
+                &delegation_config,
+            )
+            .await;
+            println!("{}", pact_cli::commands::delegate::format_delegation_result(&result));
+            if !result.success {
+                std::process::exit(1);
+            }
+            Ok(String::new())
+        }
         Commands::Reboot { node } => {
             let result = pact_cli::commands::delegate::reboot_node(
                 journal_client.as_mut().unwrap(),
@@ -1012,6 +1148,77 @@ async fn main() {
         Commands::Accounting { vcluster } => {
             pact_cli::commands::lattice::accounting(&delegation_config, vcluster.as_deref()).await
         }
+        Commands::Dag { action } => match action {
+            DagSubcommand::List { tenant, state, n } => {
+                pact_cli::commands::lattice::list_dags(
+                    &delegation_config,
+                    tenant.as_deref(),
+                    state.as_deref(),
+                    n,
+                )
+                .await
+            }
+            DagSubcommand::Inspect { id } => {
+                pact_cli::commands::lattice::inspect_dag(&delegation_config, &id).await
+            }
+            DagSubcommand::Cancel { id } => {
+                pact_cli::commands::lattice::cancel_dag(&delegation_config, &id).await
+            }
+        },
+        Commands::Budget { action } => match action {
+            BudgetSubcommand::Tenant { id, days } => {
+                pact_cli::commands::lattice::tenant_budget(&delegation_config, &id, days).await
+            }
+            BudgetSubcommand::User { id, days } => {
+                pact_cli::commands::lattice::user_budget(&delegation_config, &id, days).await
+            }
+        },
+        Commands::Backup { action } => match action {
+            BackupSubcommand::Create { path } => {
+                pact_cli::commands::lattice::backup_create(
+                    journal_client.as_mut().unwrap(),
+                    &delegation_config,
+                    &path,
+                    &principal,
+                    &role,
+                )
+                .await
+            }
+            BackupSubcommand::Verify { path } => {
+                pact_cli::commands::lattice::backup_verify(&delegation_config, &path).await
+            }
+            BackupSubcommand::Restore { path, confirm } => {
+                if !confirm {
+                    Err(anyhow::anyhow!(
+                        "backup restore is destructive — pass --confirm to proceed"
+                    ))
+                } else {
+                    pact_cli::commands::lattice::backup_restore(
+                        journal_client.as_mut().unwrap(),
+                        &delegation_config,
+                        &path,
+                        &principal,
+                        &role,
+                    )
+                    .await
+                }
+            }
+        },
+        Commands::Nodes { action } => match action {
+            NodesSubcommand::List { state, vcluster, n } => {
+                pact_cli::commands::lattice::list_lattice_nodes(
+                    &delegation_config,
+                    state.as_deref(),
+                    vcluster.as_deref(),
+                    n,
+                )
+                .await
+            }
+            NodesSubcommand::Inspect { node_id } => {
+                pact_cli::commands::lattice::inspect_lattice_node(&delegation_config, &node_id)
+                    .await
+            }
+        },
         Commands::Health => {
             pact_cli::commands::lattice::health_check(
                 journal_client.as_mut().unwrap(),

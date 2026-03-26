@@ -102,6 +102,23 @@ pub async fn dispatch_connected(
         "pact_services_lookup" => {
             Some(handle_services_lookup(arguments, &connections.delegation).await)
         }
+        // New lattice delegation tools
+        "pact_undrain" => Some(match &connections.journal {
+            Some(ch) => handle_undrain(arguments, ch, &connections.delegation).await,
+            None => no_journal(),
+        }),
+        "pact_dag_list" => Some(handle_dag_list(arguments, &connections.delegation).await),
+        "pact_dag_inspect" => Some(handle_dag_inspect(arguments, &connections.delegation).await),
+        "pact_budget" => Some(handle_budget(arguments, &connections.delegation).await),
+        "pact_backup_create" => Some(match &connections.journal {
+            Some(ch) => handle_backup_create(arguments, ch, &connections.delegation).await,
+            None => no_journal(),
+        }),
+        "pact_backup_verify" => {
+            Some(handle_backup_verify(arguments, &connections.delegation).await)
+        }
+        "pact_nodes_list" => Some(handle_nodes_list(arguments, &connections.delegation).await),
+        "pact_node_inspect" => Some(handle_node_inspect(arguments, &connections.delegation).await),
         _ => None,
     }
 }
@@ -576,6 +593,144 @@ async fn handle_services_lookup(
     }
 }
 
+// --- New lattice delegation handlers ---
+
+async fn handle_undrain(
+    args: &serde_json::Value,
+    channel: &Channel,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let node = match args.get("node").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return tool_result("Error: node ID required".to_string(), true),
+    };
+
+    let mut client = ConfigServiceClient::new(channel.clone());
+    let result = pact_cli::commands::delegate::undrain_node(
+        &mut client,
+        node,
+        "mcp-agent",
+        "pact-service-ai",
+        config,
+    )
+    .await;
+
+    tool_result(
+        pact_cli::commands::delegate::format_delegation_result(&result),
+        !result.success,
+    )
+}
+
+async fn handle_dag_list(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
+    let tenant = args.get("tenant").and_then(|v| v.as_str());
+    let state = args.get("state").and_then(|v| v.as_str());
+    let limit = args.get("limit").and_then(serde_json::Value::as_u64).unwrap_or(50) as u32;
+
+    match pact_cli::commands::lattice::list_dags(config, tenant, state, limit).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("DAG list failed: {e}"), true),
+    }
+}
+
+async fn handle_dag_inspect(
+    args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let dag_id = match args.get("dag_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => return tool_result("Error: dag_id required".to_string(), true),
+    };
+
+    match pact_cli::commands::lattice::inspect_dag(config, dag_id).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("DAG inspect failed: {e}"), true),
+    }
+}
+
+async fn handle_budget(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
+    let days = args.get("days").and_then(serde_json::Value::as_u64).unwrap_or(90) as u32;
+
+    if let Some(tenant) = args.get("tenant").and_then(|v| v.as_str()) {
+        match pact_cli::commands::lattice::tenant_budget(config, tenant, days).await {
+            Ok(output) => tool_result(output, false),
+            Err(e) => tool_result(format!("Tenant budget failed: {e}"), true),
+        }
+    } else if let Some(user) = args.get("user").and_then(|v| v.as_str()) {
+        match pact_cli::commands::lattice::user_budget(config, user, days).await {
+            Ok(output) => tool_result(output, false),
+            Err(e) => tool_result(format!("User budget failed: {e}"), true),
+        }
+    } else {
+        tool_result("Error: specify tenant or user".to_string(), true)
+    }
+}
+
+async fn handle_backup_create(
+    args: &serde_json::Value,
+    channel: &Channel,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let path = match args.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return tool_result("Error: path required".to_string(), true),
+    };
+
+    let mut client = ConfigServiceClient::new(channel.clone());
+    match pact_cli::commands::lattice::backup_create(
+        &mut client,
+        config,
+        path,
+        "mcp-agent",
+        "pact-service-ai",
+    )
+    .await
+    {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Backup create failed: {e}"), true),
+    }
+}
+
+async fn handle_backup_verify(
+    args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let path = match args.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return tool_result("Error: path required".to_string(), true),
+    };
+
+    match pact_cli::commands::lattice::backup_verify(config, path).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Backup verify failed: {e}"), true),
+    }
+}
+
+async fn handle_nodes_list(args: &serde_json::Value, config: &DelegationConfig) -> ToolCallResult {
+    let state = args.get("state").and_then(|v| v.as_str());
+    let vcluster = args.get("vcluster").and_then(|v| v.as_str());
+    let limit = args.get("limit").and_then(serde_json::Value::as_u64).unwrap_or(100) as u32;
+
+    match pact_cli::commands::lattice::list_lattice_nodes(config, state, vcluster, limit).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Nodes list failed: {e}"), true),
+    }
+}
+
+async fn handle_node_inspect(
+    args: &serde_json::Value,
+    config: &DelegationConfig,
+) -> ToolCallResult {
+    let node_id = match args.get("node_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => return tool_result("Error: node_id required".to_string(), true),
+    };
+
+    match pact_cli::commands::lattice::inspect_lattice_node(config, node_id).await {
+        Ok(output) => tool_result(output, false),
+        Err(e) => tool_result(format!("Node inspect failed: {e}"), true),
+    }
+}
+
 /// Format a config entry for display. Public for testing.
 pub fn format_entry(entry: &ProtoConfigEntry) -> String {
     let entry_type_name = match entry.entry_type {
@@ -867,6 +1022,113 @@ mod tests {
             Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
         let result =
             dispatch_connected("pact_accounting", &json!({"vcluster": "ml"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    // --- New delegation tool dispatch tests ---
+
+    #[tokio::test]
+    async fn dispatch_connected_undrain_no_journal() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_undrain", &json!({"node": "n01"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("not connected to journal"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_dag_list_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_dag_list", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_dag_inspect_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_dag_inspect", &json!({"dag_id": "d1"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_budget_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_budget", &json!({"tenant": "ml"}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_budget_missing_args() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_budget", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("specify tenant or user"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_backup_create_no_journal() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected(
+            "pact_backup_create",
+            &json!({"path": "/tmp/b"}),
+            &connections,
+        )
+        .await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("not connected to journal"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_backup_verify_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected(
+            "pact_backup_verify",
+            &json!({"path": "/tmp/b"}),
+            &connections,
+        )
+        .await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_nodes_list_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result = dispatch_connected("pact_nodes_list", &json!({}), &connections).await;
+        let result = result.unwrap();
+        assert!(result.is_error);
+        assert!(result.content[0].text.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_connected_node_inspect_no_lattice() {
+        let connections =
+            Connections { journal: None, agent: None, delegation: DelegationConfig::default() };
+        let result =
+            dispatch_connected("pact_node_inspect", &json!({"node_id": "n01"}), &connections)
+                .await;
         let result = result.unwrap();
         assert!(result.is_error);
         assert!(result.content[0].text.contains("failed"));

@@ -217,7 +217,7 @@ just ci                       # all checks (fmt + clippy + deny + test)
   manifest from tmpfs + unix socket
 - **OpenCHAMI**: provisions base image with pact-agent + mTLS cert.
   pact delegates: reboot, re-image, firmware → OpenCHAMI/Manta APIs
-- **Lattice**: pact delegates: drain, cordon, job management → lattice APIs
+- **Lattice**: pact delegates: drain/undrain, cordon/uncordon, DAG workflows, budget tracking, backup/restore, node queries, job management → lattice APIs
 - **Sovra**: policy templates federated, config state site-local
 - **Grafana/Loki**: journal streams events to Loki, Prometheus scrapes journal servers
 - **AI agents**: MCP server for Claude Code-style tool-use

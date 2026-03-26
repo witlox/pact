@@ -86,6 +86,7 @@ pact promote <node>            # Export committed node deltas as overlay TOML
 
 # Node lifecycle (delegated)
 pact drain <node>              # Drain workloads from node (→ lattice)
+pact undrain <node>            # Cancel drain, return to Ready (→ lattice)
 pact cordon <node>             # Mark node as unschedulable (→ lattice)
 pact uncordon <node>           # Remove cordon from node (→ lattice)
 pact reboot <node>             # Reboot node via BMC/Redfish (→ OpenCHAMI)
@@ -113,6 +114,16 @@ pact accounting [--vcluster X]    # Resource usage (GPU/CPU hours)
 pact health                       # Combined system health check
 pact services list                # List registered lattice services
 pact services lookup <name>       # Service endpoint details
+pact dag list [--tenant X]        # List DAG workflows
+pact dag inspect <id>             # DAG details and step status
+pact dag cancel <id>              # Cancel a DAG workflow
+pact budget tenant <id>           # Tenant GPU/node hours budget
+pact budget user <id>             # User usage across tenants
+pact backup create <path>         # Backup lattice Raft state
+pact backup verify <path>         # Verify backup integrity
+pact backup restore <path>        # Restore from backup (--confirm required)
+pact nodes list [--state X]       # List lattice nodes with state
+pact nodes inspect <id>           # Node hardware/ownership details
 ```
 
 ## Boot Sequence (pact as init)

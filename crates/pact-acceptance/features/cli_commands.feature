@@ -138,9 +138,65 @@ Feature: CLI Commands
     When the user runs "pact cordon node-001"
     Then the command should delegate to the lattice scheduler API
 
+  Scenario: pact undrain delegates to lattice
+    When the user runs "pact undrain node-001"
+    Then the command should delegate to the lattice scheduler API
+
   Scenario: pact reboot delegates to OpenCHAMI
     When the user runs "pact reboot node-001"
     Then the command should delegate to the OpenCHAMI Manta API
+
+  # --- DAG workflow commands ---
+
+  Scenario: pact dag list shows DAG workflows
+    When the user runs "pact dag list"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact dag inspect shows DAG details
+    When the user runs "pact dag inspect dag-001"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact dag cancel terminates a DAG
+    When the user runs "pact dag cancel dag-001"
+    Then the command should delegate to the lattice scheduler API
+
+  # --- Budget/usage commands ---
+
+  Scenario: pact budget tenant shows GPU and node hours
+    When the user runs "pact budget tenant ml-team"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact budget user shows usage across tenants
+    When the user runs "pact budget user alice"
+    Then the command should delegate to the lattice scheduler API
+
+  # --- Backup commands ---
+
+  Scenario: pact backup create saves lattice state
+    When the user runs "pact backup create /tmp/backup.bin"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact backup verify checks backup integrity
+    When the user runs "pact backup verify /tmp/backup.bin"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact backup restore requires --confirm flag
+    When the user runs "pact backup restore /tmp/backup.bin"
+    Then the exit code should be 1
+
+  Scenario: pact backup restore with --confirm delegates to lattice
+    When the user runs "pact backup restore /tmp/backup.bin --confirm"
+    Then the command should delegate to the lattice scheduler API
+
+  # --- Lattice node query commands ---
+
+  Scenario: pact nodes list shows lattice node state
+    When the user runs "pact nodes list"
+    Then the command should delegate to the lattice scheduler API
+
+  Scenario: pact nodes inspect shows node details
+    When the user runs "pact nodes inspect node-001"
+    Then the command should delegate to the lattice scheduler API
 
   # --- Group management ---
 

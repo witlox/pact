@@ -596,6 +596,18 @@ pact drain node-042
 |--------|-------------|
 | `<node>` | Target node ID (required) |
 
+### `pact undrain`
+
+Cancel a drain operation, returning a draining node to Ready state.
+
+```bash
+pact undrain node-042
+```
+
+| Option | Description |
+|--------|-------------|
+| `<node>` | Target node ID (required) |
+
 ### `pact cordon`
 
 Mark a node as unschedulable. Existing workloads continue running but no new
@@ -869,6 +881,74 @@ pact services lookup my-inference-api
 
 Returns service details including registered endpoints, health status, and
 vCluster association.
+
+### `pact dag`
+
+Manage DAG (directed acyclic graph) workflows in lattice.
+
+```bash
+pact dag list                            # List all DAGs
+pact dag list --tenant ml-team           # Filter by tenant
+pact dag list --state running            # Filter by state
+pact dag inspect dag-7f3a                # Show DAG details and steps
+pact dag cancel dag-7f3a                 # Cancel a running DAG
+```
+
+| Subcommand | Options | Description |
+|------------|---------|-------------|
+| `list` | `--tenant`, `--state`, `-n` | List DAG workflows |
+| `inspect` | `<id>` | Show DAG details and allocation status |
+| `cancel` | `<id>` | Cancel a DAG and its allocations |
+
+### `pact budget`
+
+Query resource budget and usage tracking from lattice.
+
+```bash
+pact budget tenant ml-team               # Tenant GPU/node hours
+pact budget tenant ml-team --days 30     # Last 30 days
+pact budget user alice                   # User usage across all tenants
+```
+
+| Subcommand | Options | Description |
+|------------|---------|-------------|
+| `tenant` | `<id>`, `--days` | GPU hours, node hours, budget fractions for a tenant |
+| `user` | `<id>`, `--days` | Usage breakdown by tenant for a user |
+
+### `pact backup`
+
+Manage lattice Raft state backups. Requires `pact-platform-admin` role.
+
+```bash
+pact backup create /path/to/backup.bin   # Create a backup
+pact backup verify /path/to/backup.bin   # Verify backup integrity
+pact backup restore /path/to/backup.bin --confirm  # Restore from backup
+```
+
+| Subcommand | Options | Description |
+|------------|---------|-------------|
+| `create` | `<path>` | Snapshot lattice state to file (audit-logged) |
+| `verify` | `<path>` | Check backup validity, show snapshot term/index |
+| `restore` | `<path>`, `--confirm` | Restore lattice state (destructive, audit-logged) |
+
+**Note:** `restore` requires the `--confirm` flag — it replaces the entire lattice
+scheduler state and cannot be undone.
+
+### `pact nodes`
+
+Query lattice node inventory with hardware and ownership details.
+
+```bash
+pact nodes list                          # All nodes
+pact nodes list --state draining         # Filter by state
+pact nodes list --vcluster ml-training   # Filter by vCluster
+pact nodes inspect node-042              # Full node details
+```
+
+| Subcommand | Options | Description |
+|------------|---------|-------------|
+| `list` | `--state`, `--vcluster`, `-n` | Tabular view: state, GPUs, cores, memory, vCluster |
+| `inspect` | `<node_id>` | Full details: hardware, ownership, allocations, heartbeat |
 
 ---
 

@@ -45,6 +45,7 @@ authorized, and logged.
 | `pact reboot <node>` | OpenCHAMI SMD | Reboot via Redfish BMC |
 | `pact reimage <node>` | OpenCHAMI SMD | Re-image node |
 | `pact drain <node>` | Lattice | Drain jobs from node |
+| `pact undrain <node>` | Lattice | Cancel drain, return to Ready |
 | `pact cordon <node>` | Lattice | Remove from scheduling |
 | `pact uncordon <node>` | Lattice | Return to scheduling |
 
@@ -71,6 +72,16 @@ Requires `PACT_LATTICE_ENDPOINT` to be configured.
 | `pact audit [--source all]` | Unified audit trail (pact + lattice) |
 | `pact accounting [--vcluster X]` | Resource usage (GPU/CPU hours) |
 | `pact health` | Combined system health check |
+| `pact dag list [--tenant X]` | List DAG workflows |
+| `pact dag inspect <id>` | DAG details and step status |
+| `pact dag cancel <id>` | Cancel a DAG workflow |
+| `pact budget tenant <id>` | Tenant GPU/node hours budget |
+| `pact budget user <id>` | User usage across tenants |
+| `pact backup create <path>` | Backup lattice Raft state (admin) |
+| `pact backup verify <path>` | Verify backup integrity (admin) |
+| `pact backup restore <path>` | Restore from backup (admin, --confirm) |
+| `pact nodes list [--state X]` | List lattice nodes with state |
+| `pact nodes inspect <id>` | Node hardware/ownership details |
 
 ## Example: Debug Session
 

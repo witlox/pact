@@ -33,7 +33,7 @@ diagnostics. Service lifecycle management.
 ## What pact delegates
 
 - **To OpenCHAMI/Manta**: reboot, re-image, firmware updates, hardware discovery, DHCP
-- **To lattice**: drain/cordon nodes, job management, vCluster creation, scheduling policy
+- **To lattice**: drain/undrain/cordon/uncordon nodes, DAG workflows, budget tracking, backup/restore, node queries, job management, vCluster creation, scheduling policy
 - **To Sovra**: cross-site trust establishment, federated policy attestation
 
 pact provides a unified CLI for all operations, calling OpenCHAMI and lattice APIs

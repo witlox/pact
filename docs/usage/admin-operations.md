@@ -250,7 +250,7 @@ The shell provides a restricted environment on the node. Same whitelist rules ap
 ## Using the MCP Server
 
 pact includes an MCP (Model Context Protocol) server for AI-assisted operations.
-The MCP server exposes 11 tools that mirror the CLI commands.
+The MCP server exposes 24 tools that mirror the CLI commands.
 
 ### Starting the MCP server
 
@@ -276,10 +276,24 @@ or any MCP-compatible AI agent.
 | `pact_apply` | Write | Apply a config spec |
 | `pact_exec` | Write | Run a remote command |
 | `pact_emergency` | Admin | Emergency mode (restricted to human admins) |
+| `pact_jobs_list` | Lattice | List running allocations |
+| `pact_queue_status` | Lattice | Scheduling queue depth |
+| `pact_cluster_health` | Lattice | Combined Raft cluster status |
+| `pact_system_health` | Lattice | Combined system health check |
+| `pact_accounting` | Lattice | Resource usage accounting |
+| `pact_undrain` | Lattice | Cancel drain on a node |
+| `pact_dag_list` | Lattice | List DAG workflows |
+| `pact_dag_inspect` | Lattice | DAG details and step status |
+| `pact_budget` | Lattice | Tenant or user budget/usage |
+| `pact_backup_create` | Admin | Create lattice state backup |
+| `pact_backup_verify` | Lattice | Verify backup integrity |
+| `pact_nodes_list` | Lattice | List nodes with state |
+| `pact_node_inspect` | Lattice | Node hardware/ownership details |
 
-The MCP server connects to both the journal (for config operations) and the
-agent (for exec/shell operations). If either is unreachable, it falls back to
-stub responses.
+The MCP server connects to the journal (config operations), agent (exec/shell),
+and lattice (delegation). If any backend is unreachable, it falls back to stub
+responses. Destructive operations (`dag cancel`, `backup restore`) are excluded
+from MCP — use the CLI for those.
 
 ### Environment variables
 

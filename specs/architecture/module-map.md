@@ -126,20 +126,22 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 **Owns:**
 - Command parsing (clap derive)
 - gRPC client connections (journal ConfigService/PolicyService/BootConfigService/EnrollmentService, agent ShellService)
-- Lattice client connection (for supercharged commands: jobs, queue, cluster, audit, accounting, health)
+- Lattice client connection (for supercharged commands: jobs, queue, cluster, audit, accounting, health, dag, budget, backup, nodes, undrain)
 - OIDC token acquisition
 - Output formatting (table, JSON)
 - Exit code semantics
-- Delegation stubs (lattice drain/cordon, OpenCHAMI reboot/reimage)
+- Delegation commands (lattice drain/cordon/uncordon/undrain, OpenCHAMI reboot/reimage)
 
 **Submodules:**
-- `commands/` — one module per command group (status, diff, commit, exec, shell, diag, jobs, queue, cluster, audit, accounting, health, etc.)
+- `commands/` — one module per command group (status, diff, commit, exec, shell, diag, jobs, queue, cluster, audit, accounting, health, dag, budget, backup, nodes, etc.)
+  - `delegate.rs` — write operations delegated to lattice (drain, cordon, uncordon, undrain) and OpenCHAMI (reboot, reimage). All audit-logged.
+  - `lattice.rs` — read operations + admin ops delegated to lattice (jobs, queue, cluster, audit, accounting, health, dag, budget, backup, nodes).
   - `diag.rs` — CLI handler for `pact diag`. Single-node mode: connects to one agent, calls CollectDiag, displays chunks. Fleet mode (`--vcluster`): queries EnrollmentService for node list, fans out CollectDiag to all agents concurrently (max 50 parallel, 5s timeout per agent), prefixes output with `[node_id]`. Handles F42 (unreachable agents → partial results + warning) and F43 (missing sources → empty chunk).
 - `client/` — gRPC client wrappers (journal + lattice)
 - `auth/` — OIDC token flow
 - `output/` — formatting
 
-**Lattice integration:** The supercharged commands (`jobs list/cancel/inspect`, `queue`, `cluster`, `audit`, `accounting`, `health`) require a lattice-client dependency to query the lattice scheduler and audit APIs. Configured via `PACT_LATTICE_ENDPOINT`.
+**Lattice integration:** Supercharged commands require lattice-client v2026.1.124. Node management ops (drain, cordon, uncordon, undrain) are audit-logged write operations. DAG, budget, and node queries are read-only. Backup create/restore are audit-logged admin ops (restore requires --confirm). Configured via `PACT_LATTICE_ENDPOINT`.
 
 **Justification:** CLI is the Admin Operations bounded context entry point (domain-model.md). cli-design.md defines the full command set.
 

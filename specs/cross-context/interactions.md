@@ -260,13 +260,24 @@ new fields, using only the fields they understand.
 
 ### E3: pact CLI → Lattice API (Delegation)
 
-**Direction:** CLI delegates drain/cordon to lattice scheduler.
-**Protocol:** Lattice Rust client library (gRPC)
+**Direction:** CLI delegates node management, queries, and admin ops to lattice scheduler.
+**Protocol:** Lattice Rust client library (gRPC), lattice-client v2026.1.124
 **Data flow:**
 - `pact drain <node>` → lattice drain API
 - `pact cordon/uncordon <node>` → lattice cordon API
+- `pact undrain <node>` → lattice undrain API (cancel drain)
+- `pact dag list/inspect/cancel` → lattice DAG workflow API (read-only + cancel)
+- `pact budget tenant/user` → lattice budget/usage API (read-only)
+- `pact backup create/verify/restore` → lattice backup API (admin, audit-logged)
+- `pact nodes list/inspect` → lattice node query API (read-only)
+- `pact jobs list/cancel/inspect` → lattice allocation API
+- `pact queue` → lattice queue API
+- `pact accounting` → lattice accounting API
+- `pact cluster` → combined pact journal + lattice Raft status
+- `pact health` → combined pact + lattice health check
 **Failure mode:** Lattice unreachable — delegation fails with clear error
 **Invariant:** A-Int1 (lattice Rust client exists)
+**RBAC:** Node ops (drain/undrain/cordon) require pact-ops-{vcluster}. DAG/budget/nodes read requires pact-viewer-{vcluster}. DAG cancel requires pact-ops-{vcluster}. Backup requires pact-platform-admin. Restore additionally requires --confirm flag.
 
 ### E4: pact CLI → OpenCHAMI API (Delegation)
 

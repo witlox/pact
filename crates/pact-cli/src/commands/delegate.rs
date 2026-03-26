@@ -259,6 +259,66 @@ pub async fn uncordon_node(
     }
 }
 
+/// Cancel a drain via lattice scheduler API.
+///
+/// Returns a draining node to the Ready state.
+/// Records the delegation in the journal for audit trail.
+pub async fn undrain_node(
+    client: &mut ConfigServiceClient<Channel>,
+    node_id: &str,
+    principal: &str,
+    role: &str,
+    delegation_config: &DelegationConfig,
+) -> DelegationResult {
+    let audit_seq = audit_delegation(client, "undrain", node_id, "lattice", principal, role).await;
+    let audit_msg = match &audit_seq {
+        Ok(seq) => format!("audit seq:{seq}"),
+        Err(_) => String::new(),
+    };
+
+    let Some(ref endpoint) = delegation_config.lattice_endpoint else {
+        return DelegationResult {
+            command: "undrain".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("lattice endpoint not configured ({audit_msg})"),
+        };
+    };
+
+    let config = lattice_client::ClientConfig {
+        endpoint: endpoint.clone(),
+        timeout_secs: delegation_config.timeout_secs,
+        token: delegation_config.lattice_token.clone(),
+    };
+
+    match lattice_client::LatticeClient::connect(config).await {
+        Ok(mut lc) => match lc.undrain_node(node_id).await {
+            Ok(resp) => DelegationResult {
+                command: "undrain".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: resp.success,
+                message: format!("undrained ({audit_msg})"),
+            },
+            Err(e) => DelegationResult {
+                command: "undrain".into(),
+                node_id: node_id.into(),
+                target_system: "lattice".into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            },
+        },
+        Err(e) => DelegationResult {
+            command: "undrain".into(),
+            node_id: node_id.into(),
+            target_system: "lattice".into(),
+            success: false,
+            message: format!("connection failed: {e} ({audit_msg})"),
+        },
+    }
+}
+
 // --- OpenCHAMI delegation ---
 
 /// Reboot a node via OpenCHAMI Redfish API.
