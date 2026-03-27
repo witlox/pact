@@ -311,11 +311,24 @@ impl JwksTokenValidator {
                     debug!(error = %e, "HS256 validation failed, trying RS256 with JWKS");
                 }
             }
+        } else {
+            debug!("no HMAC secret, going directly to JWKS");
         }
 
         // RS256 with JWKS.
-        let keys = self.jwks_cache.fetch(&self.jwks_url).await?;
+        debug!(jwks_url = %self.jwks_url, "fetching JWKS keys");
+        let keys = match self.jwks_cache.fetch(&self.jwks_url).await {
+            Ok(k) => {
+                debug!(count = k.len(), "JWKS keys fetched");
+                k
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, jwks_url = %self.jwks_url, "JWKS fetch failed");
+                return Err(e);
+            }
+        };
         if keys.is_empty() {
+            tracing::warn!(jwks_url = %self.jwks_url, "JWKS returned zero keys");
             return Err(AuthError::NoSigningKey);
         }
 
