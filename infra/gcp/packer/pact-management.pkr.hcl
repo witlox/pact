@@ -122,9 +122,9 @@ build {
     ]
   }
 
-  // Upload deploy scripts
+  // Upload deploy scripts (from repo root scripts/deploy/)
   provisioner "file" {
-    source      = "deploy/"
+    source      = "../../../scripts/deploy/"
     destination = "/tmp/deploy"
   }
 
