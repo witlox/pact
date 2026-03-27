@@ -10,8 +10,7 @@ use pact_common::proto::config::{
     scope::Scope as ProtoScope, ConfigEntry as ProtoConfigEntry, Identity as ProtoIdentity,
     Scope as ProtoScopeMsg,
 };
-use pact_common::proto::journal::{config_service_client::ConfigServiceClient, AppendEntryRequest};
-use tonic::transport::Channel;
+use pact_common::proto::journal::AppendEntryRequest;
 
 use super::openchami::OpenChamiClient;
 
@@ -42,7 +41,7 @@ pub fn format_delegation_result(result: &DelegationResult) -> String {
 
 /// Record a delegation request in the journal for audit trail.
 async fn audit_delegation(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     command: &str,
     node_id: &str,
     target_system: &str,
@@ -81,7 +80,7 @@ async fn audit_delegation(
 /// Removes all running workloads from the node and prevents new scheduling.
 /// Records the delegation in the journal for audit trail.
 pub async fn drain_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,
@@ -144,7 +143,7 @@ pub async fn drain_node(
 /// Removes node from scheduling but does not affect running workloads.
 /// Records the delegation in the journal for audit trail.
 pub async fn cordon_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,
@@ -204,7 +203,7 @@ pub async fn cordon_node(
 /// Returns node to scheduling pool.
 /// Records the delegation in the journal for audit trail.
 pub async fn uncordon_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,
@@ -264,7 +263,7 @@ pub async fn uncordon_node(
 /// Returns a draining node to the Ready state.
 /// Records the delegation in the journal for audit trail.
 pub async fn undrain_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,
@@ -326,7 +325,7 @@ pub async fn undrain_node(
 /// Triggers a BMC-level reboot through the management network.
 /// Records the delegation in the journal for audit trail.
 pub async fn reboot_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,
@@ -377,7 +376,7 @@ pub async fn reboot_node(
 /// Triggers a full re-image of the node's SquashFS root.
 /// Records the delegation in the journal for audit trail.
 pub async fn reimage_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut super::execute::AuthConfigClient,
     node_id: &str,
     principal: &str,
     role: &str,

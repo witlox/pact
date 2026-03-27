@@ -131,6 +131,264 @@ pub fn claims_to_identity(claims: &TokenClaims) -> Identity {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JWKS token validator (production)
+// ---------------------------------------------------------------------------
+
+/// JWKS response from an OIDC provider's keys endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwksResponse {
+    pub keys: Vec<Jwk>,
+}
+
+/// A single JSON Web Key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Jwk {
+    pub kty: String,
+    #[serde(default)]
+    pub kid: Option<String>,
+    #[serde(default)]
+    pub alg: Option<String>,
+    #[serde(default)]
+    pub n: Option<String>,
+    #[serde(default)]
+    pub e: Option<String>,
+    #[serde(default, rename = "use")]
+    pub key_use: Option<String>,
+}
+
+/// Cache for JWKS keys fetched from an OIDC provider.
+///
+/// Keys are cached for a configurable TTL (default 1 hour).
+/// In degraded mode (P7), stale cached keys are returned if refresh fails.
+#[derive(Debug, Clone)]
+pub struct JwksCache {
+    inner: std::sync::Arc<tokio::sync::RwLock<JwksCacheInner>>,
+    ttl: std::time::Duration,
+}
+
+#[derive(Debug)]
+struct JwksCacheInner {
+    keys: Vec<Jwk>,
+    fetched_at: Option<std::time::Instant>,
+}
+
+impl JwksCache {
+    pub fn new() -> Self {
+        Self {
+            inner: std::sync::Arc::new(tokio::sync::RwLock::new(JwksCacheInner {
+                keys: Vec::new(),
+                fetched_at: None,
+            })),
+            ttl: std::time::Duration::from_secs(3600),
+        }
+    }
+
+    pub fn with_ttl(ttl: std::time::Duration) -> Self {
+        Self {
+            inner: std::sync::Arc::new(tokio::sync::RwLock::new(JwksCacheInner {
+                keys: Vec::new(),
+                fetched_at: None,
+            })),
+            ttl,
+        }
+    }
+
+    /// Fetch JWKS keys, using cache if still valid.
+    /// Degraded mode (P7): returns stale keys if refresh fails.
+    #[cfg(feature = "jwks")]
+    pub async fn fetch(&self, jwks_url: &str) -> Result<Vec<Jwk>, AuthError> {
+        {
+            let inner = self.inner.read().await;
+            if let Some(fetched_at) = inner.fetched_at {
+                if fetched_at.elapsed() < self.ttl && !inner.keys.is_empty() {
+                    return Ok(inner.keys.clone());
+                }
+            }
+        }
+
+        match self.fetch_remote(jwks_url).await {
+            Ok(keys) => {
+                let mut inner = self.inner.write().await;
+                inner.keys.clone_from(&keys);
+                inner.fetched_at = Some(std::time::Instant::now());
+                Ok(keys)
+            }
+            Err(e) => {
+                let inner = self.inner.read().await;
+                if inner.keys.is_empty() {
+                    Err(e)
+                } else {
+                    tracing::warn!(error = %e, "JWKS refresh failed, using stale cached keys (P7 degraded mode)");
+                    Ok(inner.keys.clone())
+                }
+            }
+        }
+    }
+
+    /// Stub for non-jwks builds: always returns empty.
+    #[cfg(not(feature = "jwks"))]
+    pub async fn fetch(&self, _jwks_url: &str) -> Result<Vec<Jwk>, AuthError> {
+        Err(AuthError::JwksFetchError("JWKS feature not enabled".into()))
+    }
+
+    pub async fn cached_keys(&self) -> Vec<Jwk> {
+        self.inner.read().await.keys.clone()
+    }
+
+    pub async fn set_keys(&self, keys: Vec<Jwk>) {
+        let mut inner = self.inner.write().await;
+        inner.keys = keys;
+        inner.fetched_at = Some(std::time::Instant::now());
+    }
+
+    #[cfg(feature = "jwks")]
+    async fn fetch_remote(&self, jwks_url: &str) -> Result<Vec<Jwk>, AuthError> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| AuthError::JwksFetchError(e.to_string()))?;
+
+        let resp = client
+            .get(jwks_url)
+            .send()
+            .await
+            .map_err(|e| AuthError::JwksFetchError(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(AuthError::JwksFetchError(format!(
+                "JWKS endpoint returned HTTP {}",
+                resp.status()
+            )));
+        }
+
+        let jwks: JwksResponse =
+            resp.json().await.map_err(|e| AuthError::JwksFetchError(e.to_string()))?;
+        Ok(jwks.keys)
+    }
+}
+
+impl Default for JwksCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Production token validator: tries HMAC (HS256) first, falls back to JWKS (RS256).
+///
+/// This replaces `HmacTokenValidator` for production use. When `hmac_secret` is set,
+/// it tries HS256 first (backward compatible with dev/test tokens). When that fails
+/// or no secret is configured, it fetches JWKS keys and validates with RS256.
+pub struct JwksTokenValidator {
+    config: OidcConfig,
+    jwks_cache: JwksCache,
+    /// JWKS URL — derived from issuer if not explicitly set.
+    jwks_url: String,
+}
+
+impl JwksTokenValidator {
+    pub fn new(config: OidcConfig, jwks_url: Option<String>) -> Self {
+        let url = jwks_url.unwrap_or_else(|| {
+            let issuer = config.issuer.trim_end_matches('/');
+            format!("{issuer}/.well-known/jwks.json")
+        });
+        Self { config, jwks_cache: JwksCache::new(), jwks_url: url }
+    }
+
+    pub fn with_jwks_cache(mut self, cache: JwksCache) -> Self {
+        self.jwks_cache = cache;
+        self
+    }
+
+    /// Validate token: HS256 first (if secret set), then RS256 via JWKS.
+    async fn validate_impl(&self, token: &str) -> Result<Identity, AuthError> {
+        // Try HS256 first if HMAC secret is available.
+        if self.config.hmac_secret.is_some() {
+            let hmac = HmacTokenValidator::new(self.config.clone());
+            match hmac.validate_sync(token) {
+                Ok(identity) => return Ok(identity),
+                Err(e) => {
+                    debug!(error = %e, "HS256 validation failed, trying RS256 with JWKS");
+                }
+            }
+        }
+
+        // RS256 with JWKS.
+        let keys = self.jwks_cache.fetch(&self.jwks_url).await?;
+        if keys.is_empty() {
+            return Err(AuthError::NoSigningKey);
+        }
+
+        let header = jsonwebtoken::decode_header(token)
+            .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
+        let token_kid = header.kid.as_deref();
+
+        let matching_keys: Vec<&Jwk> = keys
+            .iter()
+            .filter(|k| k.kty == "RSA" && k.n.is_some() && k.e.is_some())
+            .filter(|k| match (token_kid, k.kid.as_deref()) {
+                (Some(tk), Some(kk)) => tk == kk,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .collect();
+
+        if matching_keys.is_empty() {
+            return Err(AuthError::InvalidToken(format!(
+                "no matching JWKS key for kid {token_kid:?}"
+            )));
+        }
+
+        let mut last_err = AuthError::NoSigningKey;
+        for jwk in matching_keys {
+            let n = jwk.n.as_ref().unwrap();
+            let e = jwk.e.as_ref().unwrap();
+
+            let decoding_key = match DecodingKey::from_rsa_components(n, e) {
+                Ok(k) => k,
+                Err(err) => {
+                    debug!(error = %err, kid = ?jwk.kid, "Failed to build RSA key");
+                    last_err = AuthError::InvalidToken(err.to_string());
+                    continue;
+                }
+            };
+
+            let mut validation = Validation::new(Algorithm::RS256);
+            validation.set_audience(&[&self.config.audience]);
+            validation.set_issuer(&[&self.config.issuer]);
+            validation.validate_exp = true;
+
+            match decode::<TokenClaims>(token, &decoding_key, &validation) {
+                Ok(token_data) => return Ok(claims_to_identity(&token_data.claims)),
+                Err(e) => {
+                    debug!(error = %e, kid = ?jwk.kid, "RS256 validation failed with this key");
+                    last_err = match e.kind() {
+                        jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                            AuthError::TokenExpired
+                        }
+                        jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                            AuthError::InvalidAudience(self.config.audience.clone())
+                        }
+                        jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                            AuthError::InvalidIssuer(self.config.issuer.clone())
+                        }
+                        _ => AuthError::InvalidToken(e.to_string()),
+                    };
+                }
+            }
+        }
+
+        Err(last_err)
+    }
+}
+
+#[async_trait]
+impl TokenValidator for JwksTokenValidator {
+    async fn validate(&self, token: &str) -> Result<Identity, AuthError> {
+        self.validate_impl(token).await
+    }
+}
+
 /// Authentication errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum AuthError {
@@ -148,6 +406,8 @@ pub enum AuthError {
     InvalidToken(String),
     #[error("no signing key configured")]
     NoSigningKey,
+    #[error("JWKS fetch error: {0}")]
+    JwksFetchError(String),
 }
 
 #[cfg(test)]

@@ -152,17 +152,21 @@ async fn main() -> anyhow::Result<()> {
     let notifier = ConfigUpdateNotifier::default();
 
     // Token validator for authenticated endpoints (F9/F10 fix)
+    // Production: JWKS (RS256) from IdP. Dev/test: HMAC (HS256) via shared secret.
+    // JwksTokenValidator tries HMAC first when secret is set, falls back to JWKS.
     let oidc_issuer =
         std::env::var("PACT_OIDC_ISSUER").unwrap_or_else(|_| "https://auth.example.com".into());
     let oidc_audience =
         std::env::var("PACT_OIDC_AUDIENCE").unwrap_or_else(|_| "pact-journal".into());
     let oidc_secret = std::env::var("PACT_OIDC_HMAC_SECRET").ok().map(String::into_bytes);
+    let jwks_url = std::env::var("PACT_OIDC_JWKS_URL").ok();
     let oidc_config = pact_policy::iam::OidcConfig {
         issuer: oidc_issuer,
         audience: oidc_audience,
         hmac_secret: oidc_secret,
     };
-    let token_validator = Arc::new(pact_policy::iam::HmacTokenValidator::new(oidc_config));
+    let token_validator: Arc<dyn pact_policy::iam::TokenValidator> =
+        Arc::new(pact_policy::iam::JwksTokenValidator::new(oidc_config, jwks_url));
 
     // Optional: enrollment service (requires CA key configuration)
     let enrollment_ca_cert = std::env::var("PACT_CA_CERT").ok().map(PathBuf::from);

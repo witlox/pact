@@ -144,7 +144,13 @@ pub async fn dispatch_tool_connected(
 
 async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("local");
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
 
     match client
         .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node.to_string() }))
@@ -161,7 +167,13 @@ async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallR
 async fn handle_log(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
     let n = args.get("n").and_then(serde_json::Value::as_u64).unwrap_or(20) as u32;
     let scope = args.get("scope").and_then(|v| v.as_str());
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
 
     let scope_proto = scope.map(|s| {
         if let Some(node) = s.strip_prefix("node:") {
@@ -205,7 +217,13 @@ async fn handle_commit(args: &serde_json::Value, channel: &Channel) -> ToolCallR
     };
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -240,7 +258,13 @@ async fn handle_rollback(args: &serde_json::Value, channel: &Channel) -> ToolCal
     };
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -294,7 +318,13 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
 
     // Only "end" reaches here
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -460,7 +490,13 @@ async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallRe
     // Serialize config as the policy_ref for the entry
     let config_str = serde_json::to_string(config).unwrap_or_default();
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -497,7 +533,13 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
         Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) })
     };
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     match client
         .list_entries(tonic::Request::new(ListEntriesRequest {
             scope,
@@ -559,7 +601,13 @@ async fn handle_cluster_health(
     channel: &Channel,
     config: &DelegationConfig,
 ) -> ToolCallResult {
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     match pact_cli::commands::lattice::cluster_status(&mut client, config).await {
         Ok(output) => tool_result(output, false),
         Err(e) => tool_result(format!("Cluster health failed: {e}"), true),
@@ -571,7 +619,13 @@ async fn handle_system_health(
     channel: &Channel,
     config: &DelegationConfig,
 ) -> ToolCallResult {
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     match pact_cli::commands::lattice::health_check(&mut client, config).await {
         Ok(output) => tool_result(output, false),
         Err(e) => tool_result(format!("System health check failed: {e}"), true),
@@ -621,7 +675,13 @@ async fn handle_undrain(
         None => return tool_result("Error: node ID required".to_string(), true),
     };
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     let result = pact_cli::commands::delegate::undrain_node(
         &mut client,
         node,
@@ -685,7 +745,13 @@ async fn handle_backup_create(
         None => return tool_result("Error: path required".to_string(), true),
     };
 
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let mut client = {
+        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
+        ConfigServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor { token },
+        )
+    };
     match pact_cli::commands::lattice::backup_create(
         &mut client,
         config,

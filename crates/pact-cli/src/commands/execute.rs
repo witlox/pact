@@ -119,11 +119,82 @@ pub async fn connect_with_tls(
     Ok(channel)
 }
 
+/// Create a gRPC channel with Bearer token injected into all requests (P1).
+///
+/// Uses a tonic interceptor so ALL RPCs on this channel automatically
+/// carry the auth header. This prevents the error-prone pattern of
+/// manually injecting tokens per-request.
+pub async fn connect_authenticated(
+    config: &CliConfig,
+    token: String,
+) -> anyhow::Result<AuthenticatedChannel> {
+    let channel = connect(config).await?;
+    Ok(AuthenticatedChannel { channel, token })
+}
+
+/// A gRPC channel wrapper that injects Bearer token on every request.
+#[derive(Clone)]
+pub struct AuthenticatedChannel {
+    channel: Channel,
+    token: String,
+}
+
+impl AuthenticatedChannel {
+    /// Create a `ConfigServiceClient` with auth interceptor.
+    pub fn config_client(
+        &self,
+    ) -> ConfigServiceClient<
+        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+    > {
+        ConfigServiceClient::with_interceptor(
+            self.channel.clone(),
+            AuthInterceptor { token: self.token.clone() },
+        )
+    }
+
+    /// Get the raw channel (for services that handle auth themselves, e.g., agent shell).
+    pub fn channel(&self) -> &Channel {
+        &self.channel
+    }
+
+    /// Get the token.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+}
+
+/// gRPC interceptor that injects Bearer token into request metadata.
+#[derive(Clone)]
+pub struct AuthInterceptor {
+    pub token: String,
+}
+
+impl AuthInterceptor {
+    pub fn new(token: String) -> Self {
+        Self { token }
+    }
+}
+
+impl tonic::service::Interceptor for AuthInterceptor {
+    fn call(&mut self, mut req: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+        if !self.token.is_empty() {
+            req.metadata_mut().insert(
+                "authorization",
+                format!("Bearer {}", self.token)
+                    .parse()
+                    .map_err(|_| tonic::Status::internal("invalid token format"))?,
+            );
+        }
+        Ok(req)
+    }
+}
+
+/// Type alias for the authenticated config client.
+pub type AuthConfigClient =
+    ConfigServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>>;
+
 /// Execute `pact status` — query node state from journal.
-pub async fn status(
-    client: &mut ConfigServiceClient<Channel>,
-    node_id: &str,
-) -> anyhow::Result<String> {
+pub async fn status(client: &mut AuthConfigClient, node_id: &str) -> anyhow::Result<String> {
     let resp = client
         .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node_id.to_string() }))
         .await
@@ -135,7 +206,7 @@ pub async fn status(
 
 /// Execute `pact log` — list recent config entries from journal.
 pub async fn log(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     limit: u32,
     scope: Option<&str>,
 ) -> anyhow::Result<String> {
@@ -167,7 +238,7 @@ pub async fn log(
 
 /// Execute `pact commit` — append a Commit entry through Raft.
 pub async fn commit(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     message: &str,
     vcluster: &str,
     principal: &str,
@@ -201,7 +272,7 @@ pub async fn commit(
 
 /// Execute `pact rollback` — append a Rollback entry referencing a target sequence.
 pub async fn rollback(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     target_seq: u64,
     vcluster: &str,
     principal: &str,
@@ -358,7 +429,7 @@ pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
 
 /// Execute `pact apply` — parse a TOML spec and submit config entries.
 pub async fn apply(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     spec_path: &str,
     principal: &str,
     role: &str,
@@ -498,7 +569,7 @@ fn proto_to_state_delta(
 
 /// Execute `pact promote` — export committed node deltas as overlay TOML.
 pub async fn promote_node(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     node_id: &str,
     dry_run: bool,
 ) -> anyhow::Result<String> {
@@ -575,7 +646,7 @@ pub async fn promote_node(
 
 /// Execute `pact emergency start` — append EmergencyStart entry through Raft.
 pub async fn emergency_start(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     reason: &str,
     vcluster: &str,
     principal: &str,
@@ -609,7 +680,7 @@ pub async fn emergency_start(
 
 /// Execute `pact emergency end` — append EmergencyEnd entry through Raft.
 pub async fn emergency_end(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     vcluster: &str,
     principal: &str,
     role: &str,
@@ -841,7 +912,7 @@ pub async fn shell_interactive(channel: Channel, token: &str) -> anyhow::Result<
 
 /// Execute `pact blacklist add` — append a blacklist add entry through Raft.
 pub async fn blacklist_add(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     pattern: &str,
     vcluster: &str,
     principal: &str,
@@ -882,7 +953,7 @@ pub async fn blacklist_add(
 
 /// Execute `pact blacklist remove` — append a blacklist remove entry through Raft.
 pub async fn blacklist_remove(
-    client: &mut ConfigServiceClient<Channel>,
+    client: &mut AuthConfigClient,
     pattern: &str,
     vcluster: &str,
     principal: &str,

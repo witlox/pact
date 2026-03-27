@@ -37,7 +37,7 @@ pub struct EnrollmentServiceImpl {
     rate_limiter: Arc<RateLimiter>,
     domain_id: DomainId,
     /// Token validator for authenticated endpoints (F9/F10 fix).
-    token_validator: Arc<pact_policy::iam::HmacTokenValidator>,
+    token_validator: Arc<dyn pact_policy::iam::TokenValidator>,
 }
 
 impl EnrollmentServiceImpl {
@@ -47,14 +47,13 @@ impl EnrollmentServiceImpl {
         ca: Arc<CaKeyManager>,
         rate_limiter: Arc<RateLimiter>,
         domain_id: DomainId,
-        token_validator: Arc<pact_policy::iam::HmacTokenValidator>,
+        token_validator: Arc<dyn pact_policy::iam::TokenValidator>,
     ) -> Self {
         Self { raft, state, ca, rate_limiter, domain_id, token_validator }
     }
 
-    /// Extract and validate Bearer token from request metadata.
-    /// Returns the validated Identity or a gRPC error.
-    fn validate_token<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
+    /// Extract Bearer token string from request metadata.
+    fn extract_token<T>(&self, req: &Request<T>) -> Result<String, Status> {
         let metadata = req.metadata();
         let auth_header = metadata
             .get("authorization")
@@ -65,19 +64,26 @@ impl EnrollmentServiceImpl {
         let token = value
             .strip_prefix("Bearer ")
             .ok_or_else(|| Status::unauthenticated("expected Bearer token"))?;
+        Ok(token.to_string())
+    }
+
+    /// Extract and validate Bearer token from request metadata.
+    /// Returns the validated Identity or a gRPC error.
+    async fn validate_token<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
+        let token = self.extract_token(req)?;
 
         // Validate JWT signature, expiry, audience, and issuer
-        let claims = self.token_validator.validate_sync(token).map_err(|e| {
+        let identity = self.token_validator.validate(&token).await.map_err(|e| {
             warn!(error = %e, "Token validation failed");
             Status::unauthenticated(format!("invalid token: {e}"))
         })?;
 
-        Ok(claims)
+        Ok(identity)
     }
 
     /// Validate Bearer token and require platform-admin role (E10).
-    fn require_platform_admin<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
-        let identity = self.validate_token(req)?;
+    async fn require_platform_admin<T>(&self, req: &Request<T>) -> Result<Identity, Status> {
+        let identity = self.validate_token(req).await?;
         if identity.role != "pact-platform-admin" {
             return Err(Status::permission_denied(
                 "PERMISSION_DENIED: requires pact-platform-admin role",
@@ -87,12 +93,12 @@ impl EnrollmentServiceImpl {
     }
 
     /// Validate Bearer token and require ops role for the given vCluster, or platform-admin.
-    fn require_ops_or_admin<T>(
+    async fn require_ops_or_admin<T>(
         &self,
         req: &Request<T>,
         vcluster_id: &str,
     ) -> Result<Identity, Status> {
-        let identity = self.validate_token(req)?;
+        let identity = self.validate_token(req).await?;
         if identity.role == "pact-platform-admin" {
             return Ok(identity);
         }
@@ -257,7 +263,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<RegisterNodeRequest>,
     ) -> Result<Response<RegisterNodeResponse>, Status> {
-        let admin_identity = self.require_platform_admin(&request)?;
+        let admin_identity = self.require_platform_admin(&request).await?;
         let principal = admin_identity.principal.clone();
         let req = request.into_inner();
         let hw = req
@@ -306,7 +312,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<BatchRegisterNodesRequest>,
     ) -> Result<Response<BatchRegisterNodesResponse>, Status> {
-        let admin_identity = self.require_platform_admin(&request)?;
+        let admin_identity = self.require_platform_admin(&request).await?;
         let principal = admin_identity.principal.clone();
         let req = request.into_inner();
         let mut results = Vec::with_capacity(req.nodes.len());
@@ -394,7 +400,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<DecommissionNodeRequest>,
     ) -> Result<Response<DecommissionNodeResponse>, Status> {
-        self.require_platform_admin(&request)?;
+        self.require_platform_admin(&request).await?;
         let req = request.into_inner();
 
         // Check for active sessions
@@ -439,7 +445,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
     ) -> Result<Response<AssignNodeResponse>, Status> {
         // E10: platform-admin or ops for the target vCluster
         let vcluster_id = request.get_ref().vcluster_id.clone();
-        self.require_ops_or_admin(&request, &vcluster_id)?;
+        self.require_ops_or_admin(&request, &vcluster_id).await?;
         let req = request.into_inner();
 
         let cmd = JournalCommand::AssignNodeToVCluster {
@@ -466,7 +472,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<UnassignNodeRequest>,
     ) -> Result<Response<UnassignNodeResponse>, Status> {
-        self.validate_token(&request)?;
+        self.validate_token(&request).await?;
         let req = request.into_inner();
 
         let cmd = JournalCommand::UnassignNode { node_id: req.node_id.clone() };
@@ -487,7 +493,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<MoveNodeRequest>,
     ) -> Result<Response<MoveNodeResponse>, Status> {
-        self.validate_token(&request)?;
+        self.validate_token(&request).await?;
         let req = request.into_inner();
 
         // Get current vCluster assignment
@@ -526,7 +532,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         request: Request<RenewCertRequest>,
     ) -> Result<Response<RenewCertResponse>, Status> {
         // Authenticated — agent uses its existing mTLS cert
-        self.validate_token(&request)?;
+        self.validate_token(&request).await?;
         let req = request.into_inner();
 
         // Find node by current cert serial
@@ -569,7 +575,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<ListNodesRequest>,
     ) -> Result<Response<ListNodesResponse>, Status> {
-        let caller = self.validate_token(&request)?;
+        let caller = self.validate_token(&request).await?;
         let role = caller.role.clone();
         let req = request.into_inner();
         let state = self.state.read().await;
@@ -627,7 +633,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         &self,
         request: Request<InspectNodeRequest>,
     ) -> Result<Response<InspectNodeResponse>, Status> {
-        let caller = self.validate_token(&request)?;
+        let caller = self.validate_token(&request).await?;
         let role = caller.role.clone();
         let req = request.into_inner();
         let state = self.state.read().await;

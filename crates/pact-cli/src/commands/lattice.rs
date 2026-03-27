@@ -5,8 +5,6 @@
 //! health, audit) query both pact journal and lattice.
 
 use pact_common::config::DelegationConfig;
-use pact_common::proto::journal::config_service_client::ConfigServiceClient;
-use tonic::transport::Channel;
 
 /// Connect to the lattice scheduler, returning a client or an error.
 async fn connect_lattice(
@@ -188,7 +186,7 @@ pub async fn queue_status(
 
 /// Combined cluster status — query both pact journal Raft and lattice Raft.
 pub async fn cluster_status(
-    journal_client: &mut ConfigServiceClient<Channel>,
+    journal_client: &mut super::execute::AuthConfigClient,
     config: &DelegationConfig,
 ) -> anyhow::Result<String> {
     let mut out = String::new();
@@ -231,7 +229,7 @@ pub async fn cluster_status(
 
 /// Combined audit log — query pact journal and/or lattice audit.
 pub async fn audit_combined(
-    journal_client: &mut ConfigServiceClient<Channel>,
+    journal_client: &mut super::execute::AuthConfigClient,
     config: &DelegationConfig,
     source: &str,
     limit: u32,
@@ -313,7 +311,7 @@ pub async fn accounting(
 
 /// Combined health check — pact journal + lattice.
 pub async fn health_check(
-    journal_client: &mut ConfigServiceClient<Channel>,
+    journal_client: &mut super::execute::AuthConfigClient,
     config: &DelegationConfig,
 ) -> anyhow::Result<String> {
     let mut out = String::new();
@@ -613,7 +611,7 @@ pub async fn user_budget(
 
 /// Create a backup of lattice Raft state.
 pub async fn backup_create(
-    journal_client: &mut ConfigServiceClient<Channel>,
+    journal_client: &mut super::execute::AuthConfigClient,
     config: &DelegationConfig,
     path: &str,
     principal: &str,
@@ -688,7 +686,7 @@ pub async fn backup_verify(config: &DelegationConfig, path: &str) -> anyhow::Res
 
 /// Restore lattice state from a backup. Requires --confirm.
 pub async fn backup_restore(
-    journal_client: &mut ConfigServiceClient<Channel>,
+    journal_client: &mut super::execute::AuthConfigClient,
     config: &DelegationConfig,
     path: &str,
     principal: &str,
