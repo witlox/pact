@@ -35,6 +35,9 @@ pub struct HealthCheckResult {
 /// Trait for process lifecycle management.
 #[async_trait]
 pub trait ServiceManager: Send + Sync {
+    /// Downcast support for accessing concrete type (e.g., PactSupervisor).
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Start a service. If already running, returns Ok.
     async fn start(&self, service: &ServiceDecl) -> anyhow::Result<()>;
 

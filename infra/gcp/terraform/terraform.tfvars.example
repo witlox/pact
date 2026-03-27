@@ -1,0 +1,13 @@
+// Copy to terraform.tfvars and fill in values.
+
+project_id   = "your-gcp-project-id"
+region       = "europe-west1"
+zone         = "europe-west1-b"
+pact_version = "2026.1.42"
+
+// Variant: v1 (pact PID1), v2 (pact systemd), v3 (pact+lattice PID1), v4 (pact+lattice systemd)
+variant = "v1"
+
+// Sizing
+management_count = 3
+compute_count    = 2

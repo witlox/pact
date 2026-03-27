@@ -222,8 +222,9 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 | ID | Invariant | Enforcement Point | Mechanism | Violation Response |
 |----|-----------|-------------------|-----------|-------------------|
-| PB1 | Watchdog only as PID 1 | `boot::init_hardware()` | Check `getpid() == 1` AND `/dev/watchdog` exists. Skip otherwise. | No watchdog opened in non-PID-1 mode |
-| PB2 | Watchdog pet interval | `PactSupervisor::run_loop()` | Pet interval = min(loop_interval, watchdog_timeout / 2) | Coupled to PS2 |
+| PB0 | Pseudofs before /proc readers | `PlatformInit::mount_pseudofs()` | Called as first action in Phase 0, before `protect_from_oom()` or any /proc access. Uses devtmpfs for /dev (not tmpfs). Idempotent — checks /proc/mounts. | Phase 0 fails → PB3 blocks all subsequent phases |
+| PB1 | Watchdog only as PID 1 | `boot::init_hardware()` | Check `getpid() == 1` AND `/dev/watchdog` exists. EBUSY → `WatchdogBusy` (non-fatal, degraded). Skip otherwise. | No watchdog opened in non-PID-1 mode. EBUSY logged as warning. |
+| PB2 | Watchdog pet interval | `PactSupervisor::run_loop()` + `WatchdogHandle::spawn_boot_petter()` | During boot: dedicated petter task at T/2 interval. After boot: supervision loop pets via `as_pet_callback()`. Boot petter aborted when loop starts. | Coupled to PS2. Pet failure logged, never panics — failed pet = eventual BMC reboot (F23). |
 | PB3 | Strict boot phase ordering | `BootSequence::run()` | Sequential execution. Phase N+1 starts only after Phase N returns Ok. | `BootPhase::BootFailed` on error, blocks subsequent |
 | PB4 | Bootstrap identity temporary | `identity::on_svid_acquired()` | On SVID acquisition: clear bootstrap cert from memory, log discard | Structural — overwrite + drop |
 | PB5 | No hard SPIRE dependency | `IdentityCascade::get_identity()` | SPIRE is first in cascade. If unavailable, falls through to SelfSigned, then Bootstrap. | Automatic fallback (IdentityCascade) |

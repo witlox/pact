@@ -1,7 +1,7 @@
 # Fidelity Index
 
-Last scan: 2026-03-20 (sweep complete — checkpoint)
-Scanned by: auditor sweep (9 chunks, SWEEP.md: COMPLETE)
+Last scan: 2026-03-27 (incremental: PID 1 / WatchdogHandle / PlatformInit)
+Scanned by: auditor sweep (9 chunks, SWEEP.md: COMPLETE) + incremental 2026-03-27
 
 ## How to read this file
 
@@ -27,10 +27,11 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | Metric | Count |
 |--------|-------|
 | Feature files scanned | **31 of 31** |
-| Total scenarios | **555** (546 pass, 9 skipped) |
-| THOROUGH scenarios | ~160 (30%) |
-| MODERATE scenarios | ~200 (38%) |
-| SHALLOW or worse | ~166 (32%) |
+| Total scenarios | **567** (555 pass, 12 skipped) |
+| THOROUGH scenarios | ~167 (30%) |
+| MODERATE scenarios | ~205 (37%) |
+| SHALLOW or worse | ~166 (30%) |
+| Unit tests | 756 pass |
 | Mock traits assessed | 12 |
 | FAITHFUL mocks | 5 (+ 2 wired via trait, 3 partial, 2 N/A) |
 | ADRs total | 17 |
@@ -57,7 +58,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 |---------|-----------|----------|----------|---------|---------|------------|-------|
 | [cross-context](features/cross-context.md) | 24 | 3 | 12 | 0 | 9 | **MODERATE** | 9 skipped = step wording mismatches |
 
-### Tier 2: MODERATE confidence (14 features) — was 12
+### Tier 2: MODERATE confidence (15 features) — was 14
 
 | Feature | Scenarios | Thorough | Moderate | Shallow | Stub | Confidence | Delta |
 |---------|-----------|----------|----------|---------|------|------------|-------|
@@ -75,12 +76,12 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | [boot-sequence](features/boot-sequence.md) | 12 | 2 | 5 | 2 | 3 | **MODERATE** | ↑ was LOW |
 | [overlay_management](features/remaining-25-summary.md) | 15 | 7 | 6 | 2 | 0 | **MODERATE** | ↑ was LOW |
 | [partition_resilience](features/remaining-25-summary.md) | 15 | 6 | 7 | 2 | 0 | **MODERATE** | ↑ was LOW |
+| [platform_bootstrap](features/remaining-25-summary.md) | 19 | 9 | 7 | 3 | 0 | **MODERATE** | ↑ was LOW. WatchdogHandle + PlatformInit unit tests raise THOROUGH count. Supervision loop coupling verified via real code (PS2). BDD watchdog scenarios remain SHALLOW (hardware-dependent). |
 
-### Tier 3: LOW confidence (8 features) — was 11
+### Tier 3: LOW confidence (7 features) — was 8
 
 | Feature | Scenarios | Thorough | Moderate | Shallow | Stub | Confidence | Delta |
 |---------|-----------|----------|----------|---------|------|------------|-------|
-| [platform_bootstrap](features/remaining-25-summary.md) | 19 | 7 | 7 | 5 | 0 | **LOW** | — |
 | [cli_authentication](features/remaining-25-summary.md) | 26 | 0 | 8 | 18 | 0 | **LOW** | — |
 | [agentic_api](features/remaining-25-summary.md) | 18 | 0 | 6 | 12 | 0 | **LOW** | — |
 | [diag_retrieval](features/remaining-25-summary.md) | 24 | 7 | 9 | 8 | 0 | **LOW** | ↑ improved |
@@ -107,6 +108,8 @@ Detail files: `specs/fidelity/features/`
 | NetworkBackend | LinuxNetworkBackend | FAITHFUL | LOW |
 | StorageBackend | LinuxStorageBackend | FAITHFUL | LOW |
 | FederationSync | (none yet) | FAITHFUL | LOW |
+| WatchdogHandle | Linux ioctl impl | FAITHFUL (non-Linux stub returns None) | LOW |
+| PlatformInit | Linux mount/reaper impl | FAITHFUL (non-Linux stubs are no-op) | LOW |
 
 Detail file: `specs/fidelity/mocks/mock-fidelity.md`
 
@@ -156,7 +159,7 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 
 **Other remaining:**
 4. **Overlay compression** — zstd in deps but not used in code yet
-5. **Platform bootstrap resource budgets** — 3 stubs, need integration-level tests
+5. **Platform bootstrap resource budgets** — WatchdogHandle + PlatformInit implemented; boot petter (F33) and zombie reaper tested. Remaining: coldplug, boot time measurement under real load
 6. **Agentic API response validation** — tool response content not inspected
 
 ## Changelog
@@ -169,3 +172,4 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 | 2026-03-20 | Pass 3: implementer hardening | 14 files, ~50 edits, 3 traits wired |
 | 2026-03-20 | Rescan post-hardening | **8 HIGH (+1), 14 MODERATE (+2), 8 LOW (-3)**. ADR-012 enforced. ServiceManager wired. |
 | 2026-03-20 | Sweep checkpoint | 31 features, 555 scenarios, 12 traits, 17 ADRs, gaps.md populated. SWEEP.md: COMPLETE. |
+| 2026-03-27 | PID 1 feature audit | platform_bootstrap LOW→MODERATE. WatchdogHandle + PlatformInit implemented. 756 unit tests, 567 BDD (555 pass). PB0-PB2, PS2 enforced via real code. |

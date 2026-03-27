@@ -74,7 +74,7 @@ aya = "0.13"
 aya-log = "0.2"
 
 # Linux system
-nix = { version = "0.31", features = ["inotify", "net", "mount", "socket", "process", "signal", "term", "hostname"] }
+nix = { version = "0.31", features = ["inotify", "ioctl", "net", "mount", "socket", "process", "signal", "term", "hostname"] }
 libc = "0.2"
 
 # TLS

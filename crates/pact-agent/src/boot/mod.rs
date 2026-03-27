@@ -1,6 +1,8 @@
 //! Boot sequence orchestration — wires all agent subsystems together.
 //!
 //! Boot phases (target: <2s from agent start to node ready):
+//! 0. PID 1 init: mount pseudofs, console, zombie reaper (PB0, PB3)
+//! 0.5. Hardware watchdog: open + boot petter (PB1, PB2, F33)
 //! 1. Authenticate to journal (mTLS)
 //! 2. Stream vCluster overlay + node delta
 //! 3. Apply config: kernel params, modules, mounts, uenv
@@ -8,6 +10,9 @@
 //! 5. Write CapabilityReport to tmpfs manifest
 //! 6. Start config subscription for live updates
 //! 7. Enter steady state: observer active, shell server listening
+
+pub mod init;
+pub mod watchdog;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -44,6 +49,14 @@ pub struct BootResult {
     pub enforcement_mode: String,
     /// Cached vCluster policy from journal (None if not yet received).
     pub cached_policy: Arc<RwLock<Option<VClusterPolicy>>>,
+    /// Hardware watchdog handle (Some only when PID 1 + /dev/watchdog exists).
+    /// Caller should wire `as_pet_callback()` into the supervision loop
+    /// and abort the boot petter.
+    pub watchdog: Option<Arc<watchdog::WatchdogHandle>>,
+    /// Boot petter abort handle — abort when supervision loop takes over petting.
+    pub watchdog_boot_petter: Option<tokio::task::AbortHandle>,
+    /// Zombie reaper abort handle — abort on shutdown.
+    pub zombie_reaper: Option<tokio::task::AbortHandle>,
 }
 
 /// Execute the agent boot sequence.
@@ -58,11 +71,44 @@ pub async fn boot(
     journal_client: Option<&JournalClient>,
 ) -> anyhow::Result<BootResult> {
     let start = std::time::Instant::now();
+    let is_pid1 = init::PlatformInit::is_pid1();
 
-    // Phase 0: InitHardware — OOM protection + cgroup hierarchy (PactSupervisor only)
-    let cgroup_manager: Option<Arc<dyn hpc_node::CgroupManager>> =
-        if config.supervisor.backend == SupervisorBackend::Pact {
-            info!("Boot phase 0: InitHardware — OOM protection + cgroup hierarchy");
+    // Phase 0 prerequisite: PID 1 early init (PB0, PB3)
+    // Must run before anything reads /proc (OOM protection, sysctl).
+    let zombie_reaper = if is_pid1 {
+        info!("PID 1 detected — running early init");
+
+        // Mount pseudofilesystems (devtmpfs for /dev, not tmpfs)
+        if let Err(e) = init::PlatformInit::mount_pseudofs() {
+            // Fatal in PID 1 mode — /proc is needed for everything
+            return Err(anyhow::anyhow!("PID 1 early init failed: mount_pseudofs: {e}"));
+        }
+
+        // Set up /dev/console for logging
+        if let Err(e) = init::PlatformInit::setup_console() {
+            warn!("console setup failed (non-fatal): {e}");
+        }
+
+        // Spawn async zombie reaper (cooperates with tokio's SIGCHLD)
+        match init::PlatformInit::spawn_zombie_reaper() {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                warn!("zombie reaper setup failed (non-fatal): {e}");
+                None
+            }
+        }
+    } else {
+        debug!("not PID 1 — skipping early init (OS handles pseudofs)");
+        None
+    };
+
+    // Phase 0: InitHardware — OOM protection + cgroup hierarchy + watchdog (PactSupervisor only)
+    let (cgroup_manager, watchdog_handle, watchdog_boot_petter): (
+        Option<Arc<dyn hpc_node::CgroupManager>>,
+        Option<Arc<watchdog::WatchdogHandle>>,
+        Option<tokio::task::AbortHandle>,
+    ) = if config.supervisor.backend == SupervisorBackend::Pact {
+            info!("Boot phase 0: InitHardware — OOM protection + cgroup hierarchy + watchdog");
 
             // RI4: protect pact-agent from OOM killer
             if let Err(e) = isolation::protect_from_oom() {
@@ -74,11 +120,35 @@ pub async fn boot(
             if let Err(e) = mgr.create_hierarchy() {
                 warn!("cgroup hierarchy creation failed (non-fatal on macOS dev): {e}");
             }
+
+            // PB1: Open hardware watchdog (only when PID 1 + device exists)
+            let (wdog, boot_petter) = if is_pid1 {
+                match watchdog::WatchdogHandle::open() {
+                    Ok(Some(handle)) => {
+                        let arc = Arc::new(handle);
+                        // F33: spawn boot petter so watchdog is petted during boot phases
+                        let petter = arc.spawn_boot_petter();
+                        (Some(arc), Some(petter))
+                    }
+                    Ok(None) => {
+                        debug!("no /dev/watchdog — continuing without hardware watchdog");
+                        (None, None)
+                    }
+                    Err(e) => {
+                        // Non-fatal: continue without watchdog (degraded mode)
+                        warn!(error = %e, "watchdog open failed — continuing without hardware watchdog");
+                        (None, None)
+                    }
+                }
+            } else {
+                (None, None)
+            };
+
             debug!(elapsed_ms = start.elapsed().as_millis(), "InitHardware complete");
-            Some(Arc::from(mgr))
+            (Some(Arc::from(mgr)), wdog, boot_petter)
         } else {
             info!("Boot phase 0: skipping InitHardware (systemd mode)");
-            None
+            (None, None, None)
         };
 
     // Phase 0.5: Identity acquisition (PB3: LoadIdentity before services)
@@ -279,6 +349,9 @@ pub async fn boot(
         config_state,
         enforcement_mode: config.enforcement_mode.clone(),
         cached_policy,
+        watchdog: watchdog_handle,
+        watchdog_boot_petter,
+        zombie_reaper,
     })
 }
 

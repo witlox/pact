@@ -96,6 +96,9 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - `identity/` — UidMap cache, NSS .db writer, identity cascade (implements hpc-identity traits)
 - `network/` — netlink interface configuration
 - `boot/` — BootSequence phases, WatchdogHandle, coldplug, readiness signal
+  - `mod.rs` — `boot()` orchestrator, `BootResult`, config streaming, state delta application
+  - `watchdog.rs` — `WatchdogHandle` struct (open /dev/watchdog, pet, set_timeout, magic close on Drop). `#[cfg(target_os = "linux")]` + non-Linux stub returning `Ok(None)`.
+  - `init.rs` — `PlatformInit` (mount pseudofs, console setup, SIGCHLD handler, hostname). Only active when PID 1. `#[cfg(target_os = "linux")]` + non-Linux no-op stubs.
 - `handoff/` — namespace handoff unix socket server (implements hpc-node NamespaceProvider)
 - `observer/` — eBPF, inotify, netlink observers
 - `drift/` — DriftEvaluator, blacklist filtering

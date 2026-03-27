@@ -1,0 +1,25 @@
+# Default agent config for systemd variant.
+# Overwritten by install-compute.sh at deploy time.
+
+[agent]
+node_id = "unset"
+enforcement_mode = "observe"
+
+[agent.supervisor]
+backend = "systemd"
+
+[agent.journal]
+endpoints = ["journal-1:9443"]
+tls_enabled = false
+
+[agent.shell]
+listen = "0.0.0.0:9445"
+whitelist_mode = "learning"
+
+[agent.commit_window]
+base_window_seconds = 900
+drift_sensitivity = 2.0
+emergency_window_seconds = 14400
+
+[agent.blacklist]
+patterns = ["/tmp/**", "/proc/**", "/sys/**", "/dev/**", "/run/user/**", "/run/pact/**"]

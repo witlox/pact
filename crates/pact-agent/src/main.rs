@@ -76,6 +76,42 @@ async fn main() -> anyhow::Result<()> {
     // Execute boot sequence — initializes all subsystems
     let boot_result = boot::boot(&agent_config, journal_client.as_ref()).await?;
 
+    // Start supervision loop (PS1, PS2)
+    // Wire watchdog pet callback if hardware watchdog is available.
+    let watchdog_pet = boot_result
+        .watchdog
+        .as_ref()
+        .map(boot::watchdog::WatchdogHandle::as_pet_callback);
+    let _supervision_handle = {
+        use hpc_audit::NullAuditSink;
+        use pact_agent::supervisor::PactSupervisor;
+
+        // Downcast to PactSupervisor to start the supervision loop.
+        // In systemd mode, the supervision loop is not started (systemd handles it).
+        if let Some(sup) = boot_result
+            .supervisor
+            .as_any()
+            .downcast_ref::<PactSupervisor>()
+        {
+            let handle = sup.start_supervision_loop(
+                Arc::new(NullAuditSink),
+                agent_config.node_id.clone(),
+                watchdog_pet,
+                Arc::new(|| false), // TODO: wire to real workload state detection
+            );
+
+            // Abort boot petter — supervision loop now owns watchdog petting (PB2)
+            if let Some(boot_petter) = boot_result.watchdog_boot_petter {
+                boot_petter.abort();
+                info!("boot petter stopped — supervision loop now pets watchdog");
+            }
+
+            Some(handle)
+        } else {
+            None
+        }
+    };
+
     // Start config subscription for live updates from journal
     let (subscription, mut action_rx) = boot::start_subscription(&agent_config);
 
@@ -156,11 +192,23 @@ async fn main() -> anyhow::Result<()> {
     // Run until interrupted
     tokio::signal::ctrl_c().await?;
 
-    // Graceful shutdown — stop all supervised services
+    // Graceful shutdown
     info!("Shutting down — stopping supervised services");
     if let Err(e) = boot_result.supervisor.stop_all(&[]).await {
         error!(error = %e, "Error stopping services during shutdown");
     }
+
+    // Abort supervision loop
+    if let Some(handle) = _supervision_handle {
+        handle.abort();
+    }
+
+    // Abort zombie reaper
+    if let Some(reaper) = boot_result.zombie_reaper {
+        reaper.abort();
+    }
+
+    // Watchdog handle drops here — writes magic close 'V' to disarm (PB2)
 
     info!("Shutdown complete");
     Ok(())

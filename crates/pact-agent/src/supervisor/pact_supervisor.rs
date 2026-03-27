@@ -377,6 +377,10 @@ impl Default for PactSupervisor {
 
 #[async_trait]
 impl ServiceManager for PactSupervisor {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn start(&self, service: &ServiceDecl) -> anyhow::Result<()> {
         let mut processes = self.processes.write().await;
 

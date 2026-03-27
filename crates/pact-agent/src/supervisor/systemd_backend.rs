@@ -94,6 +94,10 @@ impl Default for SystemdBackend {
 
 #[async_trait]
 impl ServiceManager for SystemdBackend {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn start(&self, service: &ServiceDecl) -> anyhow::Result<()> {
         info!(service = %service.name, "systemd: starting service");
         Self::systemctl(&["start", &format!("pact-{}.service", service.name)])?;
