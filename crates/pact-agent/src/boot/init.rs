@@ -135,20 +135,10 @@ mod linux {
                     continue;
                 }
 
-                mount(
-                    Some(pm.source),
-                    pm.target,
-                    Some(pm.fstype),
-                    pm.flags,
-                    Some(pm.data),
-                )
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "failed to mount {} on {}: {e}",
-                        pm.fstype,
-                        pm.target
-                    )
-                })?;
+                mount(Some(pm.source), pm.target, Some(pm.fstype), pm.flags, Some(pm.data))
+                    .map_err(|e| {
+                        anyhow::anyhow!("failed to mount {} on {}: {e}", pm.fstype, pm.target)
+                    })?;
 
                 info!(target = pm.target, fstype = pm.fstype, "mounted");
             }
@@ -254,9 +244,7 @@ mod linux {
 
         // Read /proc/mounts and check if target appears as a mount point.
         match std::fs::read_to_string("/proc/mounts") {
-            Ok(mounts) => mounts
-                .lines()
-                .any(|line| line.split_whitespace().nth(1) == Some(target)),
+            Ok(mounts) => mounts.lines().any(|line| line.split_whitespace().nth(1) == Some(target)),
             Err(_) => false, // /proc not mounted yet? Not a mountpoint.
         }
     }

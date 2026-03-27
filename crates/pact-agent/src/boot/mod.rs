@@ -108,48 +108,48 @@ pub async fn boot(
         Option<Arc<watchdog::WatchdogHandle>>,
         Option<tokio::task::AbortHandle>,
     ) = if config.supervisor.backend == SupervisorBackend::Pact {
-            info!("Boot phase 0: InitHardware — OOM protection + cgroup hierarchy + watchdog");
+        info!("Boot phase 0: InitHardware — OOM protection + cgroup hierarchy + watchdog");
 
-            // RI4: protect pact-agent from OOM killer
-            if let Err(e) = isolation::protect_from_oom() {
-                warn!("OOM protection failed (non-fatal on macOS dev): {e}");
-            }
+        // RI4: protect pact-agent from OOM killer
+        if let Err(e) = isolation::protect_from_oom() {
+            warn!("OOM protection failed (non-fatal on macOS dev): {e}");
+        }
 
-            // Create cgroup hierarchy
-            let mgr = isolation::create_cgroup_manager("/sys/fs/cgroup");
-            if let Err(e) = mgr.create_hierarchy() {
-                warn!("cgroup hierarchy creation failed (non-fatal on macOS dev): {e}");
-            }
+        // Create cgroup hierarchy
+        let mgr = isolation::create_cgroup_manager("/sys/fs/cgroup");
+        if let Err(e) = mgr.create_hierarchy() {
+            warn!("cgroup hierarchy creation failed (non-fatal on macOS dev): {e}");
+        }
 
-            // PB1: Open hardware watchdog (only when PID 1 + device exists)
-            let (wdog, boot_petter) = if is_pid1 {
-                match watchdog::WatchdogHandle::open() {
-                    Ok(Some(handle)) => {
-                        let arc = Arc::new(handle);
-                        // F33: spawn boot petter so watchdog is petted during boot phases
-                        let petter = arc.spawn_boot_petter();
-                        (Some(arc), Some(petter))
-                    }
-                    Ok(None) => {
-                        debug!("no /dev/watchdog — continuing without hardware watchdog");
-                        (None, None)
-                    }
-                    Err(e) => {
-                        // Non-fatal: continue without watchdog (degraded mode)
-                        warn!(error = %e, "watchdog open failed — continuing without hardware watchdog");
-                        (None, None)
-                    }
+        // PB1: Open hardware watchdog (only when PID 1 + device exists)
+        let (wdog, boot_petter) = if is_pid1 {
+            match watchdog::WatchdogHandle::open() {
+                Ok(Some(handle)) => {
+                    let arc = Arc::new(handle);
+                    // F33: spawn boot petter so watchdog is petted during boot phases
+                    let petter = arc.spawn_boot_petter();
+                    (Some(arc), Some(petter))
                 }
-            } else {
-                (None, None)
-            };
-
-            debug!(elapsed_ms = start.elapsed().as_millis(), "InitHardware complete");
-            (Some(Arc::from(mgr)), wdog, boot_petter)
+                Ok(None) => {
+                    debug!("no /dev/watchdog — continuing without hardware watchdog");
+                    (None, None)
+                }
+                Err(e) => {
+                    // Non-fatal: continue without watchdog (degraded mode)
+                    warn!(error = %e, "watchdog open failed — continuing without hardware watchdog");
+                    (None, None)
+                }
+            }
         } else {
-            info!("Boot phase 0: skipping InitHardware (systemd mode)");
-            (None, None, None)
+            (None, None)
         };
+
+        debug!(elapsed_ms = start.elapsed().as_millis(), "InitHardware complete");
+        (Some(Arc::from(mgr)), wdog, boot_petter)
+    } else {
+        info!("Boot phase 0: skipping InitHardware (systemd mode)");
+        (None, None, None)
+    };
 
     // Phase 0.5: Identity acquisition (PB3: LoadIdentity before services)
     info!("Boot phase 0.5: acquiring workload identity");

@@ -63,18 +63,13 @@ mod linux {
                 return Ok(None);
             }
 
-            let file = OpenOptions::new()
-                .write(true)
-                .open(WATCHDOG_PATH)
-                .map_err(|e| {
-                    if e.raw_os_error() == Some(libc::EBUSY) {
-                        anyhow::anyhow!(
-                            "watchdog device busy — another process holds /dev/watchdog"
-                        )
-                    } else {
-                        anyhow::anyhow!("failed to open /dev/watchdog: {e}")
-                    }
-                })?;
+            let file = OpenOptions::new().write(true).open(WATCHDOG_PATH).map_err(|e| {
+                if e.raw_os_error() == Some(libc::EBUSY) {
+                    anyhow::anyhow!("watchdog device busy — another process holds /dev/watchdog")
+                } else {
+                    anyhow::anyhow!("failed to open /dev/watchdog: {e}")
+                }
+            })?;
 
             // SAFETY: OwnedFd takes ownership of the fd, which we obtained from a
             // valid File. The File is consumed (into_raw_fd) so no double-close.
@@ -83,9 +78,8 @@ mod linux {
             let mut timeout: libc::c_int = 0;
             // SAFETY: fd is a valid watchdog device fd, timeout is a valid pointer.
             unsafe {
-                wdioc_gettimeout(fd.as_raw_fd(), &mut timeout).map_err(|e| {
-                    anyhow::anyhow!("WDIOC_GETTIMEOUT ioctl failed: {e}")
-                })?;
+                wdioc_gettimeout(fd.as_raw_fd(), &mut timeout)
+                    .map_err(|e| anyhow::anyhow!("WDIOC_GETTIMEOUT ioctl failed: {e}"))?;
             }
 
             let timeout_secs = timeout.max(1) as u32;
@@ -98,9 +92,8 @@ mod linux {
         pub fn set_timeout(&self, seconds: u32) -> anyhow::Result<()> {
             // SAFETY: fd is a valid watchdog fd, seconds fits in c_int.
             unsafe {
-                wdioc_settimeout(self.fd.as_raw_fd(), seconds as libc::c_int).map_err(|e| {
-                    anyhow::anyhow!("WDIOC_SETTIMEOUT failed: {e}")
-                })?;
+                wdioc_settimeout(self.fd.as_raw_fd(), seconds as libc::c_int)
+                    .map_err(|e| anyhow::anyhow!("WDIOC_SETTIMEOUT failed: {e}"))?;
             }
             info!(seconds, "watchdog timeout set");
             Ok(())
@@ -128,8 +121,7 @@ mod linux {
 
             // SAFETY: from_raw_fd borrows the fd for writing. We do NOT consume it;
             // OwnedFd still owns and will close it after drop completes.
-            let mut file =
-                unsafe { std::fs::File::from_raw_fd(self.fd.as_raw_fd()) };
+            let mut file = unsafe { std::fs::File::from_raw_fd(self.fd.as_raw_fd()) };
             if let Err(e) = file.write_all(b"V") {
                 error!(error = %e, "failed to write magic close to watchdog");
             } else {

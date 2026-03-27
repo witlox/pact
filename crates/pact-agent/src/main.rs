@@ -78,21 +78,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Start supervision loop (PS1, PS2)
     // Wire watchdog pet callback if hardware watchdog is available.
-    let watchdog_pet = boot_result
-        .watchdog
-        .as_ref()
-        .map(boot::watchdog::WatchdogHandle::as_pet_callback);
+    let watchdog_pet =
+        boot_result.watchdog.as_ref().map(boot::watchdog::WatchdogHandle::as_pet_callback);
     let _supervision_handle = {
         use hpc_audit::NullAuditSink;
         use pact_agent::supervisor::PactSupervisor;
 
         // Downcast to PactSupervisor to start the supervision loop.
         // In systemd mode, the supervision loop is not started (systemd handles it).
-        if let Some(sup) = boot_result
-            .supervisor
-            .as_any()
-            .downcast_ref::<PactSupervisor>()
-        {
+        if let Some(sup) = boot_result.supervisor.as_any().downcast_ref::<PactSupervisor>() {
             let handle = sup.start_supervision_loop(
                 Arc::new(NullAuditSink),
                 agent_config.node_id.clone(),
