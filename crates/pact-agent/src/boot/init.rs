@@ -31,6 +31,7 @@ impl PlatformInit {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 mod linux {
     use std::path::Path;
 

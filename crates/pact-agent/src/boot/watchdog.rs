@@ -12,9 +12,9 @@
 
 use std::sync::Arc;
 
-use tracing::{debug, error, warn};
-#[cfg(target_os = "linux")]
-use tracing::info;
+#[cfg(not(target_os = "linux"))]
+use tracing::debug;
+use tracing::{error, warn};
 
 /// Hardware watchdog handle.
 ///
@@ -34,9 +34,12 @@ pub struct WatchdogHandle {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 mod linux {
     use std::fs::OpenOptions;
     use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+
+    use tracing::{debug, info};
 
     use super::WatchdogHandle;
 
