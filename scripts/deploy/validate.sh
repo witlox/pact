@@ -8,7 +8,8 @@
 #
 # Exits 0 if all tests pass, 1 if any fail.
 
-set -euo pipefail
+set -uo pipefail
+# Note: NOT set -e — test failures should be counted, not abort the script.
 
 VARIANT="${1:?Usage: validate.sh <variant> <journal-endpoint> <compute-nodes>}"
 ENDPOINT="${2:?}"
@@ -56,8 +57,9 @@ echo ""
 
 # --- Raft quorum ---
 echo "Raft quorum:"
+JOURNAL_HOST="${ENDPOINT%%:*}"
 run_test 1 "Journal quorum elects leader" "C" \
-    "$PACT status"
+    "curl -sf http://$JOURNAL_HOST:9091/health | grep -q healthy"
 run_test 2 "Write survives 1-node loss" "C" \
     "echo 'manual: stop 1 journal, pact commit'" # manual step
 run_test 3 "Write blocked on 2-node loss" "C" \
