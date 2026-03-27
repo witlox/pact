@@ -61,7 +61,15 @@ fn make_commit_entry_with_ttl(vcluster: &str, message: &str, ttl_seconds: i64) -
 async fn three_node_replication_consistency() {
     let cluster = RaftCluster::bootstrap(3).await.expect("cluster started");
     let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel);
+    let mut client = ConfigServiceClient::with_interceptor(
+        channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // Write 10 entries through the leader
     for i in 0..10 {
@@ -98,7 +106,15 @@ async fn three_node_replication_consistency() {
 async fn follower_serves_reads() {
     let cluster = RaftCluster::bootstrap(3).await.expect("cluster started");
     let leader_channel = connect_to_leader(&cluster).await;
-    let mut leader_client = ConfigServiceClient::new(leader_channel);
+    let mut leader_client = ConfigServiceClient::with_interceptor(
+        leader_channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // Write entries through leader
     for i in 0..3 {
@@ -123,7 +139,15 @@ async fn follower_serves_reads() {
     // Connect a NEW client to the follower's gRPC address
     let follower_uri = format!("http://{}", follower.grpc_addr);
     let follower_channel = Channel::from_shared(follower_uri).unwrap().connect().await.unwrap();
-    let mut follower_client = ConfigServiceClient::new(follower_channel);
+    let mut follower_client = ConfigServiceClient::with_interceptor(
+        follower_channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // List entries through the follower — reads should be served from local state
     let resp = follower_client
@@ -167,7 +191,15 @@ async fn write_through_follower() {
     // Connect to the follower
     let follower_uri = format!("http://{}", follower.grpc_addr);
     let follower_channel = Channel::from_shared(follower_uri).unwrap().connect().await.unwrap();
-    let mut follower_client = ConfigServiceClient::new(follower_channel);
+    let mut follower_client = ConfigServiceClient::with_interceptor(
+        follower_channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // Attempt a write through the follower
     let entry = make_commit_entry("ml-training", "follower-write-test");
@@ -232,7 +264,15 @@ async fn journal_unreachable_returns_error() {
 async fn policy_set_and_retrieve() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let channel = connect_to_leader(&cluster).await;
-    let mut policy_client = PolicyServiceClient::new(channel);
+    let mut policy_client = PolicyServiceClient::with_interceptor(
+        channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // Set a policy with specific fields
     let policy = pact_common::proto::policy::VClusterPolicy {
@@ -326,7 +366,15 @@ async fn overlay_set_and_retrieve() {
 
     // Read back via gRPC
     let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel);
+    let mut client = ConfigServiceClient::with_interceptor(
+        channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
     let resp = client
         .get_overlay(tonic::Request::new(GetOverlayRequest { vcluster_id: "gpu-cluster".into() }))
         .await
@@ -357,7 +405,15 @@ async fn concurrent_writes() {
         let uri = uri.clone();
         let handle = tokio::spawn(async move {
             let channel = Channel::from_shared(uri).unwrap().connect().await.unwrap();
-            let mut client = ConfigServiceClient::new(channel);
+            let mut client = ConfigServiceClient::with_interceptor(
+                channel,
+                pact_cli::commands::execute::AuthInterceptor::new(
+                    pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                        "admin@test",
+                        "pact-platform-admin",
+                    ),
+                ),
+            );
             let entry = make_commit_entry("ml-training", &format!("concurrent-{i}"));
             let resp = client
                 .append_entry(tonic::Request::new(AppendEntryRequest { entry: Some(entry) }))
@@ -401,7 +457,15 @@ async fn concurrent_writes() {
 async fn ttl_validation_rejects_invalid() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel);
+    let mut client = ConfigServiceClient::with_interceptor(
+        channel,
+        pact_cli::commands::execute::AuthInterceptor::new(
+            pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                "admin@test",
+                "pact-platform-admin",
+            ),
+        ),
+    );
 
     // TTL too low (100s < 900s minimum)
     let entry = make_commit_entry_with_ttl("ml-training", "low-ttl", 100);

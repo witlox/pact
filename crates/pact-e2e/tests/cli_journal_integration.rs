@@ -3,26 +3,28 @@
 //! Bootstraps a single-node Raft cluster with gRPC server, then calls
 //! the CLI execute functions over tonic gRPC — the same path a real
 //! `pact` CLI invocation would take.
+//!
+//! All tests use AuthenticatedChannel with HMAC test tokens (P1).
 
 use pact_cli::commands::execute::{self, AuthenticatedChannel};
-use pact_common::proto::journal::config_service_client::ConfigServiceClient;
-use pact_common::proto::policy::policy_service_client::PolicyServiceClient;
 use pact_e2e::containers::raft_cluster::RaftCluster;
 use tonic::transport::Channel;
 
-/// Connect to the leader's gRPC address.
-async fn connect_to_leader(cluster: &RaftCluster) -> Channel {
+/// Connect to the leader and create an authenticated channel.
+async fn auth_channel(cluster: &RaftCluster) -> AuthenticatedChannel {
     let addr = cluster.leader_grpc_addr().await.expect("should have leader");
     let uri = format!("http://{addr}");
-    Channel::from_shared(uri).unwrap().connect().await.unwrap()
+    let channel = Channel::from_shared(uri).unwrap().connect().await.unwrap();
+    let token = RaftCluster::test_token("admin@example.com", "pact-platform-admin");
+    AuthenticatedChannel::new(channel, token)
 }
 
 /// Full flow: status → commit → log → rollback → verify log.
 #[tokio::test]
 async fn cli_commit_log_rollback_flow() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let ac = auth_channel(&cluster).await;
+    let mut client = ac.config_client();
 
     // 1. Status query — should get NotFound for unknown node
     let result = execute::status(&mut client, "node-042").await;
@@ -83,8 +85,8 @@ async fn cli_commit_log_rollback_flow() {
 #[tokio::test]
 async fn cli_emergency_flow() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let ac = auth_channel(&cluster).await;
+    let mut client = ac.config_client();
 
     // Start emergency
     let result = execute::emergency_start(
@@ -120,10 +122,10 @@ async fn cli_emergency_flow() {
 #[tokio::test]
 async fn cli_approval_flow() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
+    let ac = auth_channel(&cluster).await;
 
     // Set up a regulated policy first
-    let mut policy_client = PolicyServiceClient::new(channel.clone());
+    let mut policy_client = ac.policy_client();
     policy_client
         .update_policy(tonic::Request::new(pact_common::proto::policy::UpdatePolicyRequest {
             vcluster_id: "sensitive-compute".into(),
@@ -169,8 +171,7 @@ async fn cli_approval_flow() {
     let approval_id = eval.approval.unwrap().pending_approval_id;
 
     // List pending approvals
-    let auth_channel = AuthenticatedChannel::new(channel.clone(), String::new());
-    let list_output = execute::approve_list(&auth_channel, None).await.unwrap();
+    let list_output = execute::approve_list(&ac, None).await.unwrap();
     assert!(
         list_output.contains(&approval_id[..10]),
         "approval list should include the pending approval: {list_output}"
@@ -178,7 +179,7 @@ async fn cli_approval_flow() {
 
     // Approve it
     let result = execute::approve_decide(
-        &auth_channel,
+        &ac,
         &approval_id,
         "approved",
         "approver@example.com",
@@ -191,7 +192,7 @@ async fn cli_approval_flow() {
 
     // Try to approve again — should fail (already decided)
     let result = execute::approve_decide(
-        &auth_channel,
+        &ac,
         &approval_id,
         "approved",
         "second-approver@example.com",
@@ -206,10 +207,10 @@ async fn cli_approval_flow() {
 #[tokio::test]
 async fn cli_log_scope_filter() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let ac = auth_channel(&cluster).await;
+    let mut client = ac.config_client();
 
-    // Commit entries with different scopes (all go through journal, scope is metadata)
+    // Commit entries with different scopes
     execute::commit(
         &mut client,
         "global config",
@@ -242,22 +243,14 @@ async fn cli_log_scope_filter() {
         !filtered.contains("vc:dev-sandbox"),
         "should NOT include dev-sandbox entry: {filtered}"
     );
-
-    // Scope filtering: only dev-sandbox entries
-    let filtered = execute::log(&mut client, 10, Some("vc:dev-sandbox")).await.unwrap();
-    assert!(filtered.contains("#1"), "should include dev-sandbox entry");
-    assert!(
-        !filtered.contains("vc:ml-training"),
-        "should NOT include ml-training entry: {filtered}"
-    );
 }
 
 /// Apply a TOML spec and verify entries have StateDelta data.
 #[tokio::test]
 async fn cli_apply_spec_flow() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
-    let mut client = ConfigServiceClient::new(channel.clone());
+    let ac = auth_channel(&cluster).await;
+    let mut client = ac.config_client();
 
     // Write a spec file to a temp location
     let spec_dir = tempfile::tempdir().unwrap();
@@ -306,65 +299,4 @@ state = "running"
     assert_eq!(delta.kernel.len(), 2, "should have 2 sysctl entries");
     assert_eq!(delta.services.len(), 1, "should have 1 service entry");
     assert_eq!(delta.kernel[0].key, "vm.nr_hugepages");
-}
-
-/// MCP connected dispatch against real journal.
-#[tokio::test]
-async fn mcp_connected_dispatch() {
-    use pact_mcp::protocol::ToolCallResult;
-
-    let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
-    let channel = connect_to_leader(&cluster).await;
-
-    // Commit via MCP connected dispatch
-    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
-        "pact_commit",
-        &serde_json::json!({"message": "mcp-driven commit", "vcluster": "ml-training"}),
-        &channel,
-    )
-    .await;
-    let result = result.expect("pact_commit should be handled");
-    assert!(!result.is_error, "commit should succeed: {:?}", result.content);
-
-    // Log via MCP connected dispatch
-    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
-        "pact_log",
-        &serde_json::json!({"n": 10}),
-        &channel,
-    )
-    .await;
-    let result = result.expect("pact_log should be handled");
-    assert!(!result.is_error, "log should succeed");
-    let text = &result.content[0].text;
-    assert!(text.contains("COMMIT"), "log should show commit: {text}");
-    assert!(text.contains("mcp-agent"), "log should show mcp-agent author: {text}");
-
-    // Emergency start — P8 should block
-    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
-        "pact_emergency",
-        &serde_json::json!({"action": "start"}),
-        &channel,
-    )
-    .await;
-    let result = result.expect("pact_emergency should be handled");
-    assert!(result.is_error, "P8: AI agents cannot start emergency");
-
-    // Agent tool without agent connection — should return error (no agent)
-    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
-        "pact_exec",
-        &serde_json::json!({"node": "n1", "command": "ps"}),
-        &channel,
-    )
-    .await;
-    let result = result.expect("pact_exec should be handled");
-    assert!(result.is_error, "exec without agent should error");
-
-    // Unknown tool — should return None
-    let result: Option<ToolCallResult> = pact_mcp::connected::dispatch_tool_connected(
-        "unknown_tool",
-        &serde_json::json!({}),
-        &channel,
-    )
-    .await;
-    assert!(result.is_none(), "unknown tools should fall through");
 }

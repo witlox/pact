@@ -132,9 +132,19 @@ impl RaftCluster {
                     .add_service(raft_hpc_core::proto::raft_service_server::RaftServiceServer::new(
                         raft_server,
                     ))
-                    .add_service(ConfigServiceServer::new(cs))
-                    .add_service(PolicyServiceServer::new(ps))
-                    .add_service(BootConfigServiceServer::new(bs))
+                    // P1: all services behind auth interceptor (matches production wiring)
+                    .add_service(ConfigServiceServer::with_interceptor(
+                        cs,
+                        pact_journal::auth::auth_interceptor,
+                    ))
+                    .add_service(PolicyServiceServer::with_interceptor(
+                        ps,
+                        pact_journal::auth::auth_interceptor,
+                    ))
+                    .add_service(BootConfigServiceServer::with_interceptor(
+                        bs,
+                        pact_journal::auth::auth_interceptor,
+                    ))
                     .serve_with_incoming(incoming)
                     .await
                     .ok();
@@ -197,5 +207,77 @@ impl RaftCluster {
     /// Get the gRPC address of the leader, for client connections.
     pub async fn leader_grpc_addr(&self) -> Option<String> {
         self.leader().await.map(|n| n.grpc_addr.clone())
+    }
+
+    /// HMAC secret used by the test cluster for token validation.
+    /// All e2e tests that need auth should use this to sign test JWTs.
+    pub const TEST_HMAC_SECRET: &'static str = "pact-e2e-test-secret";
+    pub const TEST_ISSUER: &'static str = "pact-e2e-test";
+    pub const TEST_AUDIENCE: &'static str = "pact-journal";
+
+    /// Generate a valid test JWT signed with the cluster's HMAC secret.
+    pub fn test_token(sub: &str, role: &str) -> String {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        let claims = json!({
+            "sub": sub,
+            "iss": Self::TEST_ISSUER,
+            "aud": Self::TEST_AUDIENCE,
+            "exp": chrono::Utc::now().timestamp() + 3600,
+            "iat": chrono::Utc::now().timestamp(),
+            "pact_role": role,
+        });
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(Self::TEST_HMAC_SECRET.as_bytes()),
+        )
+        .expect("test token creation should not fail")
+    }
+
+    /// Generate an expired test JWT.
+    pub fn expired_token(sub: &str, role: &str) -> String {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        let claims = json!({
+            "sub": sub,
+            "iss": Self::TEST_ISSUER,
+            "aud": Self::TEST_AUDIENCE,
+            "exp": chrono::Utc::now().timestamp() - 3600, // expired 1h ago
+            "iat": chrono::Utc::now().timestamp() - 7200,
+            "pact_role": role,
+        });
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(Self::TEST_HMAC_SECRET.as_bytes()),
+        )
+        .expect("test token creation should not fail")
+    }
+
+    /// Generate a JWT with wrong audience.
+    pub fn wrong_audience_token(sub: &str, role: &str) -> String {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        let claims = json!({
+            "sub": sub,
+            "iss": Self::TEST_ISSUER,
+            "aud": "wrong-audience",
+            "exp": chrono::Utc::now().timestamp() + 3600,
+            "iat": chrono::Utc::now().timestamp(),
+            "pact_role": role,
+        });
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(Self::TEST_HMAC_SECRET.as_bytes()),
+        )
+        .expect("test token creation should not fail")
     }
 }

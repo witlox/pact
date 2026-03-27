@@ -398,7 +398,15 @@ state = "running"
     // 10. approve — set up regulated policy, evaluate, list, approve
     // =========================================================================
     {
-        let mut policy_client = PolicyServiceClient::new(channel.clone());
+        let mut policy_client = PolicyServiceClient::with_interceptor(
+            channel.clone(),
+            pact_cli::commands::execute::AuthInterceptor::new(
+                pact_e2e::containers::raft_cluster::RaftCluster::test_token(
+                    "admin@test",
+                    "pact-platform-admin",
+                ),
+            ),
+        );
 
         // Set up regulated policy
         let setup_result = policy_client
