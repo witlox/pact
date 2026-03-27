@@ -51,6 +51,7 @@ impl RaftCluster {
     ///
     /// Each node gets its own tempdir, Raft instance, gRPC server, and
     /// telemetry HTTP server on ephemeral ports.
+    #[allow(clippy::too_many_lines)]
     pub async fn bootstrap(node_count: u64) -> anyhow::Result<Self> {
         assert!((1..=5).contains(&node_count), "cluster size must be 1-5");
 

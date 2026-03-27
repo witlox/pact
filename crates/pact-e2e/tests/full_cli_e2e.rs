@@ -108,10 +108,9 @@ async fn full_cli_e2e_all_commands() {
     // === Bootstrap infrastructure ===
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let channel = connect_to_leader(&cluster).await;
-    let mut config_client =
-        pact_common::proto::journal::config_service_client::ConfigServiceClient::new(
-            channel.clone(),
-        );
+    let auth_token = RaftCluster::test_token("admin@example.com", "pact-platform-admin");
+    let auth_channel = AuthenticatedChannel::new(channel.clone(), auth_token);
+    let mut config_client = auth_channel.config_client();
 
     // --- Agent setup ---
     let shell_server = Arc::new(ShellServer::new(

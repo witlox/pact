@@ -22,7 +22,6 @@ use tonic::transport::Channel;
 /// This is the test that would have caught the deployment failure.
 /// If the interceptor isn't wired, this test fails (request succeeds when it shouldn't).
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn unauthenticated_request_rejected() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
@@ -60,7 +59,6 @@ async fn unauthenticated_request_rejected() {
 ///
 /// Proves the full client→interceptor→service pipeline works.
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn authenticated_request_accepted() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
@@ -103,7 +101,6 @@ async fn authenticated_request_accepted() {
 /// The interceptor only checks format (Bearer prefix), but this verifies
 /// that random strings don't bypass auth at the service level.
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn garbage_token_passes_interceptor_but_format_ok() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
@@ -148,7 +145,6 @@ async fn garbage_token_passes_interceptor_but_format_ok() {
 
 /// P1: Request without Bearer prefix is rejected even if token is present.
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn non_bearer_scheme_rejected() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
@@ -175,7 +171,6 @@ async fn non_bearer_scheme_rejected() {
 
 /// P1: ListEntries (read) also requires auth — no read-without-auth bypass.
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn list_entries_requires_auth() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
@@ -202,7 +197,6 @@ async fn list_entries_requires_auth() {
 
 /// AuthenticatedChannel helper creates properly intercepted clients.
 #[tokio::test]
-#[ignore] // Requires Docker
 async fn authenticated_channel_helper_works() {
     let cluster = RaftCluster::bootstrap(1).await.expect("cluster started");
     let node = cluster.node(1);
