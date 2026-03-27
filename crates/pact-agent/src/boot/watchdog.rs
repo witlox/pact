@@ -13,6 +13,8 @@
 use std::sync::Arc;
 
 use tracing::{debug, error, warn};
+#[cfg(target_os = "linux")]
+use tracing::info;
 
 /// Hardware watchdog handle.
 ///
@@ -34,7 +36,7 @@ pub struct WatchdogHandle {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::fs::OpenOptions;
-    use std::os::unix::io::{AsRawFd, IntoRawFd, OwnedFd};
+    use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 
     use super::WatchdogHandle;
 
@@ -92,7 +94,7 @@ mod linux {
         pub fn set_timeout(&self, seconds: u32) -> anyhow::Result<()> {
             // SAFETY: fd is a valid watchdog fd, seconds fits in c_int.
             unsafe {
-                wdioc_settimeout(self.fd.as_raw_fd(), seconds as libc::c_int)
+                wdioc_settimeout(self.fd.as_raw_fd(), u64::from(seconds))
                     .map_err(|e| anyhow::anyhow!("WDIOC_SETTIMEOUT failed: {e}"))?;
             }
             info!(seconds, "watchdog timeout set");
@@ -117,7 +119,7 @@ mod linux {
             // Write magic close character 'V' to disarm the watchdog.
             // This prevents BMC reboot on graceful shutdown.
             use std::io::Write;
-            use std::os::unix::io::AsRawFd;
+            use std::os::unix::io::{AsRawFd, FromRawFd};
 
             // SAFETY: from_raw_fd borrows the fd for writing. We do NOT consume it;
             // OwnedFd still owns and will close it after drop completes.
