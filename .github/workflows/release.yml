@@ -59,7 +59,7 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
-          dnf install -y gcc gcc-c++ openssl-devel pkgconf-pkg-config \
+          dnf install -y --allowerasing gcc gcc-c++ openssl-devel pkgconf-pkg-config \
             perl-IPC-Cmd git curl unzip tar gzip make findutils
 
       - uses: actions/checkout@v6
@@ -135,7 +135,7 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
-          dnf install -y gcc gcc-c++ openssl-devel pkgconf-pkg-config \
+          dnf install -y --allowerasing gcc gcc-c++ openssl-devel pkgconf-pkg-config \
             perl-IPC-Cmd git curl unzip tar gzip make findutils
 
       - uses: actions/checkout@v6
