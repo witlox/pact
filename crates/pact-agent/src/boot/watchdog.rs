@@ -39,7 +39,7 @@ mod linux {
     use std::fs::OpenOptions;
     use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 
-    use tracing::{debug, info};
+    use tracing::{debug, error, info};
 
     use super::WatchdogHandle;
 

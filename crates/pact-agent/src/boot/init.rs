@@ -8,6 +8,7 @@
 //! - PB3: Phase 0 prerequisite — mount failure blocks all subsequent phases
 //! - PS3: Zombie reaping for processes reparented to PID 1
 
+#[cfg(not(target_os = "linux"))]
 use tracing::debug;
 
 /// Early init for PID 1 mode.
