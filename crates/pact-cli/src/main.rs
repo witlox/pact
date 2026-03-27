@@ -669,25 +669,24 @@ async fn main() {
     // Priority: --token CLI arg > PACT_TOKEN env > hpc-auth cache.
     // Unauthenticated commands (login, logout, version, help) skip this.
     let token = if needs_journal {
-        match config.resolve_token() {
-            Ok(t) => t,
-            Err(_) => {
-                // No manual token — try hpc-auth cache
-                let auth = hpc_auth::AuthClient::new(hpc_auth::AuthClientConfig {
-                    server_url: config.endpoint.clone(),
-                    app_name: "pact".to_string(),
-                    permission_mode: hpc_auth::PermissionMode::Strict,
-                    idp_override: None,
-                    flow_override: None,
-                    timeout: std::time::Duration::from_secs(30),
-                });
-                match auth.get_token().await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("Error: not authenticated. Run `pact login` first.");
-                        eprintln!("  Detail: {e}");
-                        std::process::exit(2);
-                    }
+        if let Ok(t) = config.resolve_token() {
+            t
+        } else {
+            // No manual token — try hpc-auth cache
+            let auth = hpc_auth::AuthClient::new(hpc_auth::AuthClientConfig {
+                server_url: config.endpoint.clone(),
+                app_name: "pact".to_string(),
+                permission_mode: hpc_auth::PermissionMode::Strict,
+                idp_override: None,
+                flow_override: None,
+                timeout: std::time::Duration::from_secs(30),
+            });
+            match auth.get_token().await {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("Error: not authenticated. Run `pact login` first.");
+                    eprintln!("  Detail: {e}");
+                    std::process::exit(2);
                 }
             }
         }
@@ -707,7 +706,8 @@ async fn main() {
     } else {
         None
     };
-    let mut journal_client = auth_channel.as_ref().map(|ch| ch.config_client());
+    let mut journal_client =
+        auth_channel.as_ref().map(pact_cli::commands::execute::AuthenticatedChannel::config_client);
 
     // Load delegation config from env vars (lattice + OpenCHAMI endpoints)
     let delegation_config = DelegationConfig {
@@ -748,11 +748,8 @@ async fn main() {
         Commands::Exec { node, command } => {
             match pact_cli::commands::exec::parse_exec_command(&command) {
                 Ok((cmd, args)) => {
-                    match execute::resolve_agent_address(
-                        &node,
-                        auth_channel.as_ref().unwrap().channel(),
-                    )
-                    .await
+                    match execute::resolve_agent_address(&node, auth_channel.as_ref().unwrap())
+                        .await
                     {
                         Ok(agent_addr) => match execute::connect_agent(&agent_addr).await {
                             Ok(channel) => execute::exec_remote(channel, &token, &cmd, &args).await,
@@ -765,18 +762,14 @@ async fn main() {
             }
         }
         Commands::Shell { node } => {
-            let agent_addr = match execute::resolve_agent_address(
-                &node,
-                auth_channel.as_ref().unwrap().channel(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address(&node, auth_channel.as_ref().unwrap()).await {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => execute::shell_interactive(channel, &token).await,
                 Err(e) => Err(e),
@@ -807,12 +800,12 @@ async fn main() {
             }
         }
         Commands::Approve { action } => {
-            let channel = auth_channel.as_ref().unwrap().channel();
+            let ac = auth_channel.as_ref().unwrap();
             match action {
-                ApproveSubcommand::List => execute::approve_list(channel, None).await,
+                ApproveSubcommand::List => execute::approve_list(ac, None).await,
                 ApproveSubcommand::Accept { id } => {
                     execute::approve_decide(
-                        channel,
+                        ac,
                         &id,
                         "approved",
                         "cli-user",
@@ -823,7 +816,7 @@ async fn main() {
                 }
                 ApproveSubcommand::Deny { id, m } => {
                     execute::approve_decide(
-                        channel,
+                        ac,
                         &id,
                         "rejected",
                         "cli-user",
@@ -836,18 +829,15 @@ async fn main() {
         }
         Commands::Service { action } => {
             // Service commands delegate to agent exec with systemctl/journalctl
-            let agent_addr = match execute::resolve_agent_address(
-                "local",
-                auth_channel.as_ref().unwrap().channel(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address("local", auth_channel.as_ref().unwrap()).await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
                 Ok(channel) => match action {
                     ServiceSubcommand::Status { name } => {
@@ -885,79 +875,65 @@ async fn main() {
         Commands::Cap { node } => {
             // Cap queries agent's list of capabilities via ListCommands
             let node_id = node.as_deref().unwrap_or("local");
-            let agent_addr = match execute::resolve_agent_address(
-                node_id,
-                auth_channel.as_ref().unwrap().channel(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address(node_id, auth_channel.as_ref().unwrap()).await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
-                Ok(channel) => execute::list_agent_commands(channel).await,
+                Ok(channel) => execute::list_agent_commands(channel, &token).await,
                 Err(e) => Err(e),
             }
         }
         Commands::Watch { vcluster } => {
             let vc =
                 vcluster.as_deref().or(config.default_vcluster.as_deref()).unwrap_or("default");
-            execute::watch(auth_channel.as_ref().unwrap().channel(), vc).await
+            execute::watch(auth_channel.as_ref().unwrap(), vc).await
         }
         Commands::Apply { spec } => {
             execute::apply(journal_client.as_mut().unwrap(), &spec, &principal, &role).await
         }
         Commands::Extend { mins } => {
-            let agent_addr = match execute::resolve_agent_address(
-                "local",
-                auth_channel.as_ref().unwrap().channel(),
-            )
-            .await
-            {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
+            let agent_addr =
+                match execute::resolve_agent_address("local", auth_channel.as_ref().unwrap()).await
+                {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                };
             match execute::connect_agent(&agent_addr).await {
-                Ok(channel) => execute::extend(channel, mins).await,
+                Ok(channel) => execute::extend(channel, &token, mins).await,
                 Err(e) => Err(e),
             }
         }
         Commands::Node { action } => {
-            let channel = auth_channel.as_ref().unwrap().channel();
+            let ac = auth_channel.as_ref().unwrap();
             match action {
                 NodeSubcommand::Enroll { node_id, mac, bmc_serial } => {
-                    pact_cli::commands::node::enroll(
-                        channel,
-                        &token,
-                        &node_id,
-                        &mac,
-                        bmc_serial.as_deref(),
-                    )
-                    .await
+                    pact_cli::commands::node::enroll(ac, &node_id, &mac, bmc_serial.as_deref())
+                        .await
                 }
                 NodeSubcommand::Decommission { node_id, force } => {
-                    pact_cli::commands::node::decommission(channel, &token, &node_id, force).await
+                    pact_cli::commands::node::decommission(ac, &node_id, force).await
                 }
                 NodeSubcommand::Assign { node_id, vcluster } => {
-                    pact_cli::commands::node::assign(channel, &token, &node_id, &vcluster).await
+                    pact_cli::commands::node::assign(ac, &node_id, &vcluster).await
                 }
                 NodeSubcommand::Unassign { node_id } => {
-                    pact_cli::commands::node::unassign(channel, &token, &node_id).await
+                    pact_cli::commands::node::unassign(ac, &node_id).await
                 }
                 NodeSubcommand::Move { node_id, to_vcluster } => {
-                    pact_cli::commands::node::move_node(channel, &token, &node_id, &to_vcluster)
-                        .await
+                    pact_cli::commands::node::move_node(ac, &node_id, &to_vcluster).await
                 }
                 NodeSubcommand::List { state, vcluster, unassigned } => {
                     pact_cli::commands::node::list(
-                        channel,
-                        &token,
+                        ac,
                         state.as_deref(),
                         vcluster.as_deref(),
                         unassigned,
@@ -965,7 +941,7 @@ async fn main() {
                     .await
                 }
                 NodeSubcommand::Inspect { node_id } => {
-                    pact_cli::commands::node::inspect(channel, &token, &node_id).await
+                    pact_cli::commands::node::inspect(ac, &node_id).await
                 }
                 NodeSubcommand::Import { group } => {
                     let Some(ref smd_url) = delegation_config.openchami_smd_url else {
@@ -973,8 +949,7 @@ async fn main() {
                         std::process::exit(1);
                     };
                     pact_cli::commands::node::import_from_smd(
-                        channel,
-                        &token,
+                        ac,
                         smd_url,
                         delegation_config.openchami_token.as_deref(),
                         group.as_deref(),
@@ -1083,30 +1058,28 @@ async fn main() {
             Ok(String::new())
         }
         Commands::Group { action } => {
-            let channel = auth_channel.as_ref().unwrap().channel();
+            let ac = auth_channel.as_ref().unwrap();
             match action {
-                GroupSubcommand::List => execute::group_list(channel).await,
-                GroupSubcommand::Show { name } => execute::group_show(channel, &name).await,
+                GroupSubcommand::List => execute::group_list(ac).await,
+                GroupSubcommand::Show { name } => execute::group_show(ac, &name).await,
                 GroupSubcommand::SetPolicy { name, policy } => {
-                    execute::group_set_policy(channel, &name, &policy, &principal, &role).await
+                    execute::group_set_policy(ac, &name, &policy, &principal, &role).await
                 }
             }
         }
         Commands::Diag { node, lines, source, service, grep, vcluster } => {
             if let Some(node_id) = node {
                 // Single-node diag
-                let agent_addr = match execute::resolve_agent_address(
-                    &node_id,
-                    auth_channel.as_ref().unwrap().channel(),
-                )
-                .await
-                {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        std::process::exit(1);
-                    }
-                };
+                let agent_addr =
+                    match execute::resolve_agent_address(&node_id, auth_channel.as_ref().unwrap())
+                        .await
+                    {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            eprintln!("Error: {e}");
+                            std::process::exit(1);
+                        }
+                    };
                 match execute::connect_agent(&agent_addr).await {
                     Ok(channel) => {
                         pact_cli::commands::diag::diag_node(

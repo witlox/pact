@@ -140,19 +140,70 @@ pub struct AuthenticatedChannel {
 }
 
 impl AuthenticatedChannel {
+    /// Create from a raw channel + token.
+    pub fn new(channel: Channel, token: String) -> Self {
+        Self { channel, token }
+    }
+
     /// Create a `ConfigServiceClient` with auth interceptor.
-    pub fn config_client(
-        &self,
-    ) -> ConfigServiceClient<
-        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
-    > {
+    pub fn config_client(&self) -> AuthConfigClient {
         ConfigServiceClient::with_interceptor(
             self.channel.clone(),
-            AuthInterceptor { token: self.token.clone() },
+            AuthInterceptor::new(self.token.clone()),
         )
     }
 
-    /// Get the raw channel (for services that handle auth themselves, e.g., agent shell).
+    /// Create a `PolicyServiceClient` with auth interceptor.
+    pub fn policy_client(
+        &self,
+    ) -> pact_common::proto::policy::policy_service_client::PolicyServiceClient<
+        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+    > {
+        pact_common::proto::policy::policy_service_client::PolicyServiceClient::with_interceptor(
+            self.channel.clone(),
+            AuthInterceptor::new(self.token.clone()),
+        )
+    }
+
+    /// Create a `BootConfigServiceClient` with auth interceptor.
+    pub fn boot_config_client(
+        &self,
+    ) -> pact_common::proto::stream::boot_config_service_client::BootConfigServiceClient<
+        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+    > {
+        pact_common::proto::stream::boot_config_service_client::BootConfigServiceClient::with_interceptor(
+            self.channel.clone(),
+            AuthInterceptor::new(self.token.clone()),
+        )
+    }
+
+    /// Create an `EnrollmentServiceClient` with auth interceptor.
+    pub fn enrollment_client(
+        &self,
+    ) -> pact_common::proto::enrollment::enrollment_service_client::EnrollmentServiceClient<
+        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+    > {
+        pact_common::proto::enrollment::enrollment_service_client::EnrollmentServiceClient::with_interceptor(
+            self.channel.clone(),
+            AuthInterceptor::new(self.token.clone()),
+        )
+    }
+
+    /// Create an authenticated `ShellServiceClient` for agent calls.
+    /// Agent is a different endpoint but uses the same token.
+    pub fn shell_client_for(
+        channel: Channel,
+        token: &str,
+    ) -> pact_common::proto::shell::shell_service_client::ShellServiceClient<
+        tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+    > {
+        pact_common::proto::shell::shell_service_client::ShellServiceClient::with_interceptor(
+            channel,
+            AuthInterceptor::new(token.to_string()),
+        )
+    }
+
+    /// Get the raw channel.
     pub fn channel(&self) -> &Channel {
         &self.channel
     }
@@ -329,14 +380,14 @@ const AGENT_DEFAULT_PORT: u16 = 9445;
 /// Falls back to `http://127.0.0.1:9445` for the "local" node ID.
 pub async fn resolve_agent_address(
     node_id: &str,
-    journal_channel: &Channel,
+    auth_channel: &AuthenticatedChannel,
 ) -> anyhow::Result<String> {
     if node_id == "local" || node_id == "localhost" {
         return Ok(format!("http://127.0.0.1:{AGENT_DEFAULT_PORT}"));
     }
 
     // Verify the node exists by querying journal
-    let mut client = ConfigServiceClient::new(journal_channel.clone());
+    let mut client = auth_channel.config_client();
     let _resp = client
         .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node_id.to_string() }))
         .await
@@ -352,18 +403,12 @@ pub async fn exec_remote(
     command: &str,
     args: &[String],
 ) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{
-        exec_output, shell_service_client::ShellServiceClient, ExecRequest,
-    };
+    use pact_common::proto::shell::{exec_output, ExecRequest};
 
-    let mut client = ShellServiceClient::new(channel);
+    let mut client = AuthenticatedChannel::shell_client_for(channel, token);
 
-    let mut request =
+    let request =
         tonic::Request::new(ExecRequest { command: command.to_string(), args: args.to_vec() });
-    request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {token}").parse().map_err(|_| anyhow::anyhow!("invalid token format"))?,
-    );
 
     let resp = client.exec(request).await.map_err(|e| anyhow::anyhow!("exec failed: {e}"))?;
 
@@ -403,12 +448,10 @@ pub async fn exec_remote(
 }
 
 /// Execute `pact service status` — list commands via ShellService.
-pub async fn list_agent_commands(channel: Channel) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{
-        shell_service_client::ShellServiceClient, ListCommandsRequest,
-    };
+pub async fn list_agent_commands(channel: Channel, token: &str) -> anyhow::Result<String> {
+    use pact_common::proto::shell::ListCommandsRequest;
 
-    let mut client = ShellServiceClient::new(channel);
+    let mut client = AuthenticatedChannel::shell_client_for(channel, token);
     let resp = client
         .list_commands(tonic::Request::new(ListCommandsRequest {}))
         .await
@@ -712,12 +755,13 @@ pub async fn emergency_end(
 }
 
 /// Execute `pact approve list` — list pending approvals from PolicyService.
-pub async fn approve_list(channel: &Channel, scope: Option<&str>) -> anyhow::Result<String> {
-    use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, ListApprovalsRequest,
-    };
+pub async fn approve_list(
+    auth_channel: &AuthenticatedChannel,
+    scope: Option<&str>,
+) -> anyhow::Result<String> {
+    use pact_common::proto::policy::ListApprovalsRequest;
 
-    let mut client = PolicyServiceClient::new(channel.clone());
+    let mut client = auth_channel.policy_client();
     let resp = client
         .list_pending_approvals(tonic::Request::new(ListApprovalsRequest {
             scope_filter: scope.map(str::to_string),
@@ -744,18 +788,16 @@ pub async fn approve_list(channel: &Channel, scope: Option<&str>) -> anyhow::Res
 
 /// Execute `pact approve accept/deny` — decide on a pending approval.
 pub async fn approve_decide(
-    channel: &Channel,
+    auth_channel: &AuthenticatedChannel,
     approval_id: &str,
     decision: &str,
     principal: &str,
     role: &str,
     reason: Option<&str>,
 ) -> anyhow::Result<String> {
-    use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, DecideApprovalRequest,
-    };
+    use pact_common::proto::policy::DecideApprovalRequest;
 
-    let mut client = PolicyServiceClient::new(channel.clone());
+    let mut client = auth_channel.policy_client();
     let resp = client
         .decide_approval(tonic::Request::new(DecideApprovalRequest {
             approval_id: approval_id.to_string(),
@@ -782,12 +824,10 @@ pub async fn approve_decide(
 }
 
 /// Execute `pact watch` — live event stream from journal.
-pub async fn watch(channel: &Channel, vcluster: &str) -> anyhow::Result<String> {
-    use pact_common::proto::stream::{
-        boot_config_service_client::BootConfigServiceClient, config_update, SubscribeRequest,
-    };
+pub async fn watch(auth_channel: &AuthenticatedChannel, vcluster: &str) -> anyhow::Result<String> {
+    use pact_common::proto::stream::{config_update, SubscribeRequest};
 
-    let mut client = BootConfigServiceClient::new(channel.clone());
+    let mut client = auth_channel.boot_config_client();
     let resp = client
         .subscribe_config_updates(tonic::Request::new(SubscribeRequest {
             node_id: String::new(), // watch all nodes
@@ -832,12 +872,10 @@ pub async fn watch(channel: &Channel, vcluster: &str) -> anyhow::Result<String> 
 }
 
 /// Execute `pact extend` — extend commit window on agent.
-pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{
-        shell_service_client::ShellServiceClient, ExtendWindowRequest,
-    };
+pub async fn extend(channel: Channel, token: &str, mins: u32) -> anyhow::Result<String> {
+    use pact_common::proto::shell::ExtendWindowRequest;
 
-    let mut client = ShellServiceClient::new(channel);
+    let mut client = AuthenticatedChannel::shell_client_for(channel, token);
     let resp = client
         .extend_commit_window(tonic::Request::new(ExtendWindowRequest { additional_minutes: mins }))
         .await
@@ -858,12 +896,10 @@ pub async fn extend(channel: Channel, mins: u32) -> anyhow::Result<String> {
 
 /// Execute `pact shell` — open interactive shell session on a node.
 pub async fn shell_interactive(channel: Channel, token: &str) -> anyhow::Result<String> {
-    use pact_common::proto::shell::{
-        shell_input, shell_output, shell_service_client::ShellServiceClient, ShellInput, ShellOpen,
-    };
+    use pact_common::proto::shell::{shell_input, shell_output, ShellInput, ShellOpen};
     use tokio_stream::StreamExt;
 
-    let mut client = ShellServiceClient::new(channel);
+    let mut client = AuthenticatedChannel::shell_client_for(channel, token);
     let (tx, rx) = tokio::sync::mpsc::channel(64);
 
     // Send ShellOpen as first message
@@ -877,11 +913,7 @@ pub async fn shell_interactive(channel: Channel, token: &str) -> anyhow::Result<
     tx.send(open_msg).await.ok();
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    let mut request = tonic::Request::new(stream);
-    request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {token}").parse().map_err(|_| anyhow::anyhow!("invalid token"))?,
-    );
+    let request = tonic::Request::new(stream);
 
     let response =
         client.shell(request).await.map_err(|e| anyhow::anyhow!("shell connection failed: {e}"))?;
@@ -993,15 +1025,13 @@ pub async fn blacklist_remove(
 }
 
 /// Execute `pact group list` — discover vClusters via journal entries and query their policies.
-pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
+pub async fn group_list(auth_channel: &AuthenticatedChannel) -> anyhow::Result<String> {
     use super::group::{format_group_list, GroupSummary};
-    use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, GetPolicyRequest,
-    };
+    use pact_common::proto::policy::GetPolicyRequest;
     use std::collections::BTreeSet;
 
     // List all journal entries (no scope filter) and collect unique vCluster IDs.
-    let mut config_client = ConfigServiceClient::new(channel.clone());
+    let mut config_client = auth_channel.config_client();
     let resp = config_client
         .list_entries(tonic::Request::new(ListEntriesRequest {
             scope: None,
@@ -1033,7 +1063,7 @@ pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
     }
 
     // Query effective policy for each discovered vCluster
-    let mut policy_client = PolicyServiceClient::new(channel.clone());
+    let mut policy_client = auth_channel.policy_client();
     let mut summaries = Vec::new();
 
     for vc_id in &vcluster_ids {
@@ -1072,14 +1102,12 @@ pub async fn group_list(channel: &Channel) -> anyhow::Result<String> {
 }
 
 /// Execute `pact group show` — show details for a specific vCluster.
-pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String> {
+pub async fn group_show(auth_channel: &AuthenticatedChannel, name: &str) -> anyhow::Result<String> {
     use super::group::{format_group_detail, GroupDetail};
-    use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, GetPolicyRequest,
-    };
+    use pact_common::proto::policy::GetPolicyRequest;
     use pact_common::types::VClusterPolicy;
 
-    let mut client = PolicyServiceClient::new(channel.clone());
+    let mut client = auth_channel.policy_client();
     let resp = client
         .get_effective_policy(tonic::Request::new(GetPolicyRequest {
             vcluster_id: name.to_string(),
@@ -1137,15 +1165,14 @@ pub async fn group_show(channel: &Channel, name: &str) -> anyhow::Result<String>
 
 /// Execute `pact group set-policy` — update a vCluster's policy from a TOML file.
 pub async fn group_set_policy(
-    channel: &Channel,
+    auth_channel: &AuthenticatedChannel,
     name: &str,
     policy_path: &str,
     principal: &str,
     role: &str,
 ) -> anyhow::Result<String> {
     use pact_common::proto::policy::{
-        policy_service_client::PolicyServiceClient, RoleBinding as ProtoRoleBinding,
-        UpdatePolicyRequest, VClusterPolicy as ProtoVClusterPolicy,
+        RoleBinding as ProtoRoleBinding, UpdatePolicyRequest, VClusterPolicy as ProtoVClusterPolicy,
     };
     use pact_common::types::VClusterPolicy;
 
@@ -1185,7 +1212,7 @@ pub async fn group_set_policy(
         ai_exec_allowed: policy.ai_exec_allowed,
     };
 
-    let mut client = PolicyServiceClient::new(channel.clone());
+    let mut client = auth_channel.policy_client();
     let resp = client
         .update_policy(tonic::Request::new(UpdatePolicyRequest {
             vcluster_id: name.to_string(),
@@ -1417,12 +1444,11 @@ mod tests {
     fn resolve_agent_address_local_returns_localhost() {
         // resolve_agent_address is async but for "local" it doesn't use the channel
         let rt = tokio::runtime::Runtime::new().unwrap();
-        // We need a dummy channel — but for "local" it short-circuits
-        // Use a simple blocking check
+        // We need a dummy AuthenticatedChannel — but for "local" it short-circuits
         rt.block_on(async {
-            // Create a dummy channel (won't be used for "local")
             let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
-            let addr = resolve_agent_address("local", &channel).await.unwrap();
+            let auth = AuthenticatedChannel::new(channel, String::new());
+            let addr = resolve_agent_address("local", &auth).await.unwrap();
             assert_eq!(addr, "http://127.0.0.1:9445");
         });
     }
@@ -1432,7 +1458,8 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
-            let addr = resolve_agent_address("localhost", &channel).await.unwrap();
+            let auth = AuthenticatedChannel::new(channel, String::new());
+            let addr = resolve_agent_address("localhost", &auth).await.unwrap();
             assert_eq!(addr, "http://127.0.0.1:9445");
         });
     }

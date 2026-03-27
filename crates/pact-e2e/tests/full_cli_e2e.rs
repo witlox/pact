@@ -16,7 +16,7 @@ use pact_agent::shell::exec::ExecConfig;
 use pact_agent::shell::grpc_service::ShellServiceImpl;
 use pact_agent::shell::ShellServer;
 use pact_cli::commands::delegate;
-use pact_cli::commands::execute;
+use pact_cli::commands::execute::{self, AuthenticatedChannel};
 use pact_common::config::{CommitWindowConfig, DelegationConfig};
 use pact_common::proto::policy::policy_service_client::PolicyServiceClient;
 use pact_common::proto::shell::shell_service_server::ShellServiceServer;
@@ -152,6 +152,7 @@ async fn full_cli_e2e_all_commands() {
         .connect()
         .await
         .expect("connect to agent");
+    let auth_channel = AuthenticatedChannel::new(channel.clone(), token.clone());
 
     // =========================================================================
     // 1. status (unknown node) — expect error
@@ -448,7 +449,7 @@ state = "running"
                         let approval_id = approval.pending_approval_id;
 
                         // List pending approvals
-                        let list_result = execute::approve_list(&channel, None).await;
+                        let list_result = execute::approve_list(&auth_channel, None).await;
                         match list_result {
                             Ok(ref output) if output.contains(&approval_id[..10]) => {
                                 results.push(TestResult::pass(
@@ -470,7 +471,7 @@ state = "running"
 
                         // Approve it
                         let decide_result = execute::approve_decide(
-                            &channel,
+                            &auth_channel,
                             &approval_id,
                             "approved",
                             "approver@example.com",
@@ -557,7 +558,7 @@ state = "running"
     // 12. group list — should return vClusters from committed entries
     // =========================================================================
     {
-        let result = execute::group_list(&channel).await;
+        let result = execute::group_list(&auth_channel).await;
         match result {
             Ok(ref output) if output.contains("ml-training") || output.contains("VCLUSTER") => {
                 results.push(TestResult::pass("group list", "vClusters listed"));
@@ -576,7 +577,7 @@ state = "running"
     // 13. group show — show policy for a vCluster
     // =========================================================================
     {
-        let result = execute::group_show(&channel, "sensitive-compute").await;
+        let result = execute::group_show(&auth_channel, "sensitive-compute").await;
         match result {
             Ok(ref output) if output.contains("sensitive-compute") => {
                 results.push(TestResult::pass("group show", "policy details shown"));
@@ -616,7 +617,7 @@ supervisor_backend = "pact"
         .unwrap();
 
         let result = execute::group_set_policy(
-            &channel,
+            &auth_channel,
             "ml-training",
             policy_path.to_str().unwrap(),
             "admin@example.com",
@@ -736,8 +737,8 @@ supervisor_backend = "pact"
     // =========================================================================
     {
         // list_commands requires auth header in metadata — use the agent channel
-        // but the execute function doesn't pass auth. We call it directly.
-        let result = execute::list_agent_commands(agent_channel.clone()).await;
+        // with token for the interceptor.
+        let result = execute::list_agent_commands(agent_channel.clone(), &token).await;
         match result {
             Ok(ref output) if output.contains("COMMAND") || output.contains("ps") => {
                 results.push(TestResult::pass("cap (list_commands)", "commands listed"));
@@ -750,18 +751,6 @@ supervisor_backend = "pact"
                     format!("unexpected output: {output}"),
                 ));
             }
-            Err(ref e)
-                if e.to_string().contains("unauthenticated")
-                    || e.to_string().contains("authorization") =>
-            {
-                // list_agent_commands doesn't inject auth — expected to fail
-                // This is a known limitation: the execute::list_agent_commands
-                // function doesn't accept a token parameter.
-                results.push(TestResult::pass(
-                    "cap (list_commands)",
-                    "correctly requires auth (unauthenticated error)",
-                ));
-            }
             Err(e) => {
                 results.push(TestResult::fail("cap (list_commands)", format!("error: {e}")));
             }
@@ -772,7 +761,7 @@ supervisor_backend = "pact"
     // 20. extend — extend commit window on agent
     // =========================================================================
     {
-        let result = execute::extend(agent_channel.clone(), 5).await;
+        let result = execute::extend(agent_channel.clone(), &token, 5).await;
         match result {
             Ok(ref output) if output.contains("extended") => {
                 results.push(TestResult::pass("extend", "commit window extended"));
@@ -781,7 +770,7 @@ supervisor_backend = "pact"
                 if e.to_string().contains("unauthenticated")
                     || e.to_string().contains("authorization") =>
             {
-                // extend doesn't inject auth — expected to fail with auth error
+                // extend now injects auth via interceptor but server may still reject
                 results.push(TestResult::pass(
                     "extend",
                     "correctly requires auth (unauthenticated error)",

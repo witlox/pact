@@ -4,7 +4,7 @@
 //! the CLI execute functions over tonic gRPC — the same path a real
 //! `pact` CLI invocation would take.
 
-use pact_cli::commands::execute;
+use pact_cli::commands::execute::{self, AuthenticatedChannel};
 use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 use pact_common::proto::policy::policy_service_client::PolicyServiceClient;
 use pact_e2e::containers::raft_cluster::RaftCluster;
@@ -169,7 +169,8 @@ async fn cli_approval_flow() {
     let approval_id = eval.approval.unwrap().pending_approval_id;
 
     // List pending approvals
-    let list_output = execute::approve_list(&channel, None).await.unwrap();
+    let auth_channel = AuthenticatedChannel::new(channel.clone(), String::new());
+    let list_output = execute::approve_list(&auth_channel, None).await.unwrap();
     assert!(
         list_output.contains(&approval_id[..10]),
         "approval list should include the pending approval: {list_output}"
@@ -177,7 +178,7 @@ async fn cli_approval_flow() {
 
     // Approve it
     let result = execute::approve_decide(
-        &channel,
+        &auth_channel,
         &approval_id,
         "approved",
         "approver@example.com",
@@ -190,7 +191,7 @@ async fn cli_approval_flow() {
 
     // Try to approve again — should fail (already decided)
     let result = execute::approve_decide(
-        &channel,
+        &auth_channel,
         &approval_id,
         "approved",
         "second-approver@example.com",

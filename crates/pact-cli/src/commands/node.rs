@@ -1,12 +1,13 @@
 //! CLI commands for node enrollment, assignment, and management.
 //!
 //! Maps to EnrollmentService gRPC RPCs.
+//! All calls use AuthenticatedChannel — token injected via interceptor (P1).
 
 use serde::Deserialize;
-use tonic::transport::Channel;
 use tonic::Request;
 
-use pact_common::proto::enrollment::enrollment_service_client::EnrollmentServiceClient;
+use super::execute::AuthenticatedChannel;
+
 use pact_common::proto::enrollment::{
     AssignNodeRequest, DecommissionNodeRequest, HardwareIdentity, InspectNodeRequest,
     ListNodesRequest, MoveNodeRequest, RegisterNodeRequest, UnassignNodeRequest,
@@ -60,14 +61,13 @@ pub struct SmdEthernetInterfacesResponse(pub Vec<SmdEthernetInterface>);
 
 /// Enroll (register) a node by ID with hardware identity.
 pub async fn enroll(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     node_id: &str,
     mac: &str,
     bmc_serial: Option<&str>,
 ) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(RegisterNodeRequest {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(RegisterNodeRequest {
         node_id: node_id.to_string(),
         hardware_identity: Some(HardwareIdentity {
             mac_address: mac.to_string(),
@@ -75,7 +75,6 @@ pub async fn enroll(
             extra: std::collections::HashMap::new(),
         }),
     });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
     let resp = client.register_node(request).await?.into_inner();
     Ok(format!("Enrolled node {} — state: {}", resp.node_id, resp.enrollment_state))
@@ -83,14 +82,12 @@ pub async fn enroll(
 
 /// Decommission a node.
 pub async fn decommission(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     node_id: &str,
     force: bool,
 ) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(DecommissionNodeRequest { node_id: node_id.to_string(), force });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(DecommissionNodeRequest { node_id: node_id.to_string(), force });
 
     let resp = client.decommission_node(request).await?.into_inner();
     let mut output =
@@ -106,27 +103,27 @@ pub async fn decommission(
 
 /// Assign a node to a vCluster.
 pub async fn assign(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     node_id: &str,
     vcluster_id: &str,
 ) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(AssignNodeRequest {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(AssignNodeRequest {
         node_id: node_id.to_string(),
         vcluster_id: vcluster_id.to_string(),
     });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
     let resp = client.assign_node(request).await?.into_inner();
     Ok(format!("Assigned node {} to vCluster {}", resp.node_id, resp.vcluster_id))
 }
 
 /// Unassign a node from its vCluster.
-pub async fn unassign(channel: &Channel, token: &str, node_id: &str) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(UnassignNodeRequest { node_id: node_id.to_string() });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
+pub async fn unassign(
+    auth_channel: &AuthenticatedChannel,
+    node_id: &str,
+) -> anyhow::Result<String> {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(UnassignNodeRequest { node_id: node_id.to_string() });
 
     let resp = client.unassign_node(request).await?.into_inner();
     Ok(format!("Unassigned node {} from vCluster", resp.node_id))
@@ -134,17 +131,15 @@ pub async fn unassign(channel: &Channel, token: &str, node_id: &str) -> anyhow::
 
 /// Move a node between vClusters.
 pub async fn move_node(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     node_id: &str,
     to_vcluster: &str,
 ) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(MoveNodeRequest {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(MoveNodeRequest {
         node_id: node_id.to_string(),
         to_vcluster_id: to_vcluster.to_string(),
     });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
     let resp = client.move_node(request).await?.into_inner();
     Ok(format!(
@@ -155,19 +150,17 @@ pub async fn move_node(
 
 /// List enrolled nodes.
 pub async fn list(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     state_filter: Option<&str>,
     vcluster_filter: Option<&str>,
     unassigned_only: bool,
 ) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(ListNodesRequest {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(ListNodesRequest {
         state_filter: state_filter.unwrap_or_default().to_string(),
         vcluster_filter: vcluster_filter.unwrap_or_default().to_string(),
         unassigned_only,
     });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
     let resp = client.list_nodes(request).await?.into_inner();
     if resp.nodes.is_empty() {
@@ -195,10 +188,9 @@ pub async fn list(
 }
 
 /// Inspect a single node's enrollment details.
-pub async fn inspect(channel: &Channel, token: &str, node_id: &str) -> anyhow::Result<String> {
-    let mut client = EnrollmentServiceClient::new(channel.clone());
-    let mut request = Request::new(InspectNodeRequest { node_id: node_id.to_string() });
-    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
+pub async fn inspect(auth_channel: &AuthenticatedChannel, node_id: &str) -> anyhow::Result<String> {
+    let mut client = auth_channel.enrollment_client();
+    let request = Request::new(InspectNodeRequest { node_id: node_id.to_string() });
 
     let resp = client.inspect_node(request).await?.into_inner();
     let hw = resp.hardware_identity.as_ref();
@@ -315,8 +307,7 @@ pub fn parse_smd_enrollment_data(
 
 /// Discover nodes from OpenCHAMI SMD and batch-enroll them.
 pub async fn import_from_smd(
-    channel: &Channel,
-    token: &str,
+    auth_channel: &AuthenticatedChannel,
     smd_url: &str,
     smd_token: Option<&str>,
     group: Option<&str>,
@@ -339,16 +330,16 @@ pub async fn import_from_smd(
     // 3. Parse into enrollment data
     let enrollment_data = parse_smd_enrollment_data(&components, &all_interfaces);
 
-    // 4. Enroll each node via gRPC
+    // 4. Enroll each node via gRPC (interceptor handles auth)
     let mut enrolled = 0u32;
     let mut already_enrolled = 0u32;
     let mut failed = 0u32;
     let mut errors = Vec::new();
 
-    let mut client = EnrollmentServiceClient::new(channel.clone());
+    let mut client = auth_channel.enrollment_client();
 
     for (node_id, mac) in &enrollment_data {
-        let mut request = Request::new(RegisterNodeRequest {
+        let request = Request::new(RegisterNodeRequest {
             node_id: node_id.clone(),
             hardware_identity: Some(HardwareIdentity {
                 mac_address: mac.clone(),
@@ -356,7 +347,6 @@ pub async fn import_from_smd(
                 extra: std::collections::HashMap::new(),
             }),
         });
-        request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
 
         match client.register_node(request).await {
             Ok(_) => enrolled += 1,

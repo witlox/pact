@@ -4,7 +4,8 @@
 //! Supports per-node and fleet-wide (vCluster) queries with server-side
 //! grep filtering (LOG2) and line limiting (LOG3).
 
-use pact_common::proto::shell::{shell_service_client::ShellServiceClient, DiagRequest};
+use super::execute::AuthenticatedChannel;
+use pact_common::proto::shell::DiagRequest;
 
 /// Execute single-node diagnostic collection.
 pub async fn diag_node(
@@ -15,17 +16,13 @@ pub async fn diag_node(
     grep: Option<&str>,
     lines: u32,
 ) -> anyhow::Result<String> {
-    let mut client = ShellServiceClient::new(channel);
-    let mut request = tonic::Request::new(DiagRequest {
+    let mut client = AuthenticatedChannel::shell_client_for(channel, token);
+    let request = tonic::Request::new(DiagRequest {
         source_filter: source.to_string(),
         service_name: service.unwrap_or("").to_string(),
         grep_pattern: grep.unwrap_or("").to_string(),
         line_limit: lines,
     });
-    request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {token}").parse().map_err(|_| anyhow::anyhow!("invalid token"))?,
-    );
 
     let resp =
         client.collect_diag(request).await.map_err(|e| anyhow::anyhow!("diag failed: {e}"))?;

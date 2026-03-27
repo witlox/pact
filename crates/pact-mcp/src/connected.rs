@@ -11,11 +11,12 @@ use pact_common::proto::config::{
     scope::Scope as ProtoScope, ConfigEntry as ProtoConfigEntry, Identity as ProtoIdentity,
     Scope as ProtoScopeMsg,
 };
-use pact_common::proto::journal::config_service_client::ConfigServiceClient;
 use pact_common::proto::journal::{AppendEntryRequest, GetNodeStateRequest, ListEntriesRequest};
 use pact_common::proto::shell::{
     exec_output, shell_service_client::ShellServiceClient, ExecRequest, ListCommandsRequest,
 };
+
+use pact_cli::commands::execute::AuthInterceptor;
 
 use crate::protocol::{tool_result, ToolCallResult};
 
@@ -24,8 +25,60 @@ pub struct Connections {
     pub journal: Option<Channel>,
     pub agent: Option<Channel>,
     pub delegation: DelegationConfig,
-    /// Bearer token for MCP→agent authentication (from PACT_MCP_TOKEN env var).
+    /// Bearer token for MCP→journal+agent authentication (from PACT_MCP_TOKEN env var).
     pub mcp_token: Option<String>,
+}
+
+impl Connections {
+    /// Create an authenticated journal config client.
+    fn journal_config_client(
+        &self,
+    ) -> Option<
+        pact_common::proto::journal::config_service_client::ConfigServiceClient<
+            tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+        >,
+    > {
+        let channel = self.journal.as_ref()?;
+        let token = self.mcp_token.clone().unwrap_or_default();
+        Some(
+            pact_common::proto::journal::config_service_client::ConfigServiceClient::with_interceptor(
+                channel.clone(),
+                AuthInterceptor::new(token),
+            ),
+        )
+    }
+
+    /// Create an authenticated journal policy client.
+    #[allow(dead_code)] // Will be used when policy MCP tools are added
+    fn journal_policy_client(
+        &self,
+    ) -> Option<
+        pact_common::proto::policy::policy_service_client::PolicyServiceClient<
+            tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+        >,
+    > {
+        let channel = self.journal.as_ref()?;
+        let token = self.mcp_token.clone().unwrap_or_default();
+        Some(
+            pact_common::proto::policy::policy_service_client::PolicyServiceClient::with_interceptor(
+                channel.clone(),
+                AuthInterceptor::new(token),
+            ),
+        )
+    }
+
+    /// Create an authenticated agent shell client.
+    fn agent_shell_client(
+        &self,
+    ) -> Option<
+        ShellServiceClient<
+            tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>,
+        >,
+    > {
+        let channel = self.agent.as_ref()?;
+        let token = self.mcp_token.clone().unwrap_or_default();
+        Some(ShellServiceClient::with_interceptor(channel.clone(), AuthInterceptor::new(token)))
+    }
 }
 
 /// Dispatch a tool call using available gRPC connections.
@@ -42,61 +95,59 @@ pub async fn dispatch_connected(
     match name {
         // Journal-targeted tools
         "pact_status" => Some(match &connections.journal {
-            Some(ch) => handle_status(arguments, ch).await,
+            Some(_ch) => handle_status(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_log" => Some(match &connections.journal {
-            Some(ch) => handle_log(arguments, ch).await,
+            Some(_ch) => handle_log(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_commit" => Some(match &connections.journal {
-            Some(ch) => handle_commit(arguments, ch).await,
+            Some(_ch) => handle_commit(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_rollback" => Some(match &connections.journal {
-            Some(ch) => handle_rollback(arguments, ch).await,
+            Some(_ch) => handle_rollback(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_diff" => Some(match &connections.journal {
-            Some(ch) => handle_diff(arguments, ch).await,
+            Some(_ch) => handle_diff(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_emergency" => Some(match &connections.journal {
-            Some(ch) => handle_emergency(arguments, ch).await,
+            Some(_ch) => handle_emergency(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_apply" => Some(match &connections.journal {
-            Some(ch) => handle_apply(arguments, ch).await,
+            Some(_ch) => handle_apply(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_query_fleet" => Some(match &connections.journal {
-            Some(ch) => handle_query_fleet(arguments, ch).await,
+            Some(_ch) => handle_query_fleet(arguments, connections).await,
             None => no_journal(),
         }),
         // Agent-targeted tools
         "pact_exec" => Some(match &connections.agent {
-            Some(ch) => handle_exec(arguments, ch, connections.mcp_token.as_deref()).await,
+            Some(_ch) => handle_exec(arguments, connections).await,
             None => no_agent(),
         }),
         "pact_cap" => Some(match &connections.agent {
-            Some(ch) => handle_cap(arguments, ch).await,
+            Some(_ch) => handle_cap(arguments, connections).await,
             None => no_agent(),
         }),
         "pact_service_status" => Some(match &connections.agent {
-            Some(ch) => {
-                handle_service_status(arguments, ch, connections.mcp_token.as_deref()).await
-            }
+            Some(_ch) => handle_service_status(arguments, connections).await,
             None => no_agent(),
         }),
         // Supercharged commands — delegated to lattice via DelegationConfig
         "pact_jobs_list" => Some(handle_jobs_list(arguments, &connections.delegation).await),
         "pact_queue_status" => Some(handle_queue_status(arguments, &connections.delegation).await),
         "pact_cluster_health" => Some(match &connections.journal {
-            Some(ch) => handle_cluster_health(arguments, ch, &connections.delegation).await,
+            Some(_ch) => handle_cluster_health(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_system_health" => Some(match &connections.journal {
-            Some(ch) => handle_system_health(arguments, ch, &connections.delegation).await,
+            Some(_ch) => handle_system_health(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_accounting" => Some(handle_accounting(arguments, &connections.delegation).await),
@@ -108,14 +159,14 @@ pub async fn dispatch_connected(
         }
         // New lattice delegation tools
         "pact_undrain" => Some(match &connections.journal {
-            Some(ch) => handle_undrain(arguments, ch, &connections.delegation).await,
+            Some(_ch) => handle_undrain(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_dag_list" => Some(handle_dag_list(arguments, &connections.delegation).await),
         "pact_dag_inspect" => Some(handle_dag_inspect(arguments, &connections.delegation).await),
         "pact_budget" => Some(handle_budget(arguments, &connections.delegation).await),
         "pact_backup_create" => Some(match &connections.journal {
-            Some(ch) => handle_backup_create(arguments, ch, &connections.delegation).await,
+            Some(_ch) => handle_backup_create(arguments, connections).await,
             None => no_journal(),
         }),
         "pact_backup_verify" => {
@@ -142,15 +193,9 @@ pub async fn dispatch_tool_connected(
     dispatch_connected(name, arguments, &connections).await
 }
 
-async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_status(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("local");
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
 
     match client
         .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node.to_string() }))
@@ -164,16 +209,10 @@ async fn handle_status(args: &serde_json::Value, channel: &Channel) -> ToolCallR
     }
 }
 
-async fn handle_log(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_log(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let n = args.get("n").and_then(serde_json::Value::as_u64).unwrap_or(20) as u32;
     let scope = args.get("scope").and_then(|v| v.as_str());
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
 
     let scope_proto = scope.map(|s| {
         if let Some(node) = s.strip_prefix("node:") {
@@ -210,20 +249,14 @@ async fn handle_log(args: &serde_json::Value, channel: &Channel) -> ToolCallResu
     }
 }
 
-async fn handle_commit(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_commit(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let message = match args.get("message").and_then(|v| v.as_str()) {
         Some(m) => m,
         None => return tool_result("Error: commit message required", true),
     };
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -251,20 +284,14 @@ async fn handle_commit(args: &serde_json::Value, channel: &Channel) -> ToolCallR
     }
 }
 
-async fn handle_rollback(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_rollback(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let seq = match args.get("sequence").and_then(serde_json::Value::as_u64) {
         Some(s) => s,
         None => return tool_result("Error: sequence number required", true),
     };
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -292,16 +319,16 @@ async fn handle_rollback(args: &serde_json::Value, channel: &Channel) -> ToolCal
     }
 }
 
-async fn handle_diff(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_diff(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     // Diff uses log with node scope filter
     let node = args.get("node").and_then(|v| v.as_str()).unwrap_or("current");
     let mut modified_args = args.clone();
     modified_args["scope"] = serde_json::json!(format!("node:{node}"));
     modified_args["n"] = serde_json::json!(50);
-    handle_log(&modified_args, channel).await
+    handle_log(&modified_args, connections).await
 }
 
-async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_emergency(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let action = match args.get("action").and_then(|v| v.as_str()) {
         Some(a) => a,
         None => return tool_result("Error: action required (start/end)", true),
@@ -318,13 +345,7 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
 
     // Only "end" reaches here
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("default");
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -354,11 +375,7 @@ async fn handle_emergency(args: &serde_json::Value, channel: &Channel) -> ToolCa
 
 // --- Agent-targeted tool handlers ---
 
-async fn handle_exec(
-    args: &serde_json::Value,
-    channel: &Channel,
-    mcp_token: Option<&str>,
-) -> ToolCallResult {
+async fn handle_exec(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let node = match args.get("node").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => return tool_result("Error: node ID required".to_string(), true),
@@ -375,14 +392,8 @@ async fn handle_exec(
         None => return tool_result("Error: empty command".to_string(), true),
     };
 
-    let mut client = ShellServiceClient::new(channel.clone());
-    let mut request = tonic::Request::new(ExecRequest { command: cmd.to_string(), args: cmd_args });
-    if let Some(token) = mcp_token {
-        if let Ok(val) = format!("Bearer {token}").parse() {
-            request.metadata_mut().insert("authorization", val);
-        }
-    }
-
+    let mut client = connections.agent_shell_client().unwrap();
+    let request = tonic::Request::new(ExecRequest { command: cmd.to_string(), args: cmd_args });
     match client.exec(request).await {
         Ok(resp) => {
             let mut stream = resp.into_inner();
@@ -418,8 +429,8 @@ async fn handle_exec(
     }
 }
 
-async fn handle_cap(_args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
-    let mut client = ShellServiceClient::new(channel.clone());
+async fn handle_cap(_args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
+    let mut client = connections.agent_shell_client().unwrap();
     match client.list_commands(tonic::Request::new(ListCommandsRequest {})).await {
         Ok(resp) => {
             let commands = resp.into_inner().commands;
@@ -439,22 +450,15 @@ async fn handle_cap(_args: &serde_json::Value, channel: &Channel) -> ToolCallRes
 
 async fn handle_service_status(
     args: &serde_json::Value,
-    channel: &Channel,
-    mcp_token: Option<&str>,
+    connections: &Connections,
 ) -> ToolCallResult {
     let service = args.get("service").and_then(|v| v.as_str()).unwrap_or("--all");
-    let mut client = ShellServiceClient::new(channel.clone());
+    let mut client = connections.agent_shell_client().unwrap();
 
-    let mut request = tonic::Request::new(ExecRequest {
+    let request = tonic::Request::new(ExecRequest {
         command: "systemctl".to_string(),
         args: vec!["status".to_string(), service.to_string()],
     });
-    if let Some(token) = mcp_token {
-        if let Ok(val) = format!("Bearer {token}").parse() {
-            request.metadata_mut().insert("authorization", val);
-        }
-    }
-
     match client.exec(request).await {
         Ok(resp) => {
             let mut stream = resp.into_inner();
@@ -476,7 +480,7 @@ async fn handle_service_status(
     }
 }
 
-async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_apply(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let scope = match args.get("scope").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => return tool_result("Error: scope required".to_string(), true),
@@ -490,13 +494,7 @@ async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallRe
     // Serialize config as the policy_ref for the entry
     let config_str = serde_json::to_string(config).unwrap_or_default();
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     let entry = ProtoConfigEntry {
         sequence: 0,
         timestamp: None,
@@ -524,7 +522,7 @@ async fn handle_apply(args: &serde_json::Value, channel: &Channel) -> ToolCallRe
     }
 }
 
-async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> ToolCallResult {
+async fn handle_query_fleet(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     // Query fleet by listing all entries and filtering by vCluster
     let vcluster = args.get("vcluster").and_then(|v| v.as_str()).unwrap_or("all");
     let scope = if vcluster == "all" {
@@ -533,13 +531,7 @@ async fn handle_query_fleet(args: &serde_json::Value, channel: &Channel) -> Tool
         Some(ProtoScopeMsg { scope: Some(ProtoScope::VclusterId(vcluster.to_string())) })
     };
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     match client
         .list_entries(tonic::Request::new(ListEntriesRequest {
             scope,
@@ -598,17 +590,10 @@ async fn handle_queue_status(
 
 async fn handle_cluster_health(
     _args: &serde_json::Value,
-    channel: &Channel,
-    config: &DelegationConfig,
+    connections: &Connections,
 ) -> ToolCallResult {
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
-    match pact_cli::commands::lattice::cluster_status(&mut client, config).await {
+    let mut client = connections.journal_config_client().unwrap();
+    match pact_cli::commands::lattice::cluster_status(&mut client, &connections.delegation).await {
         Ok(output) => tool_result(output, false),
         Err(e) => tool_result(format!("Cluster health failed: {e}"), true),
     }
@@ -616,17 +601,10 @@ async fn handle_cluster_health(
 
 async fn handle_system_health(
     _args: &serde_json::Value,
-    channel: &Channel,
-    config: &DelegationConfig,
+    connections: &Connections,
 ) -> ToolCallResult {
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
-    match pact_cli::commands::lattice::health_check(&mut client, config).await {
+    let mut client = connections.journal_config_client().unwrap();
+    match pact_cli::commands::lattice::health_check(&mut client, &connections.delegation).await {
         Ok(output) => tool_result(output, false),
         Err(e) => tool_result(format!("System health check failed: {e}"), true),
     }
@@ -665,29 +643,19 @@ async fn handle_services_lookup(
 
 // --- New lattice delegation handlers ---
 
-async fn handle_undrain(
-    args: &serde_json::Value,
-    channel: &Channel,
-    config: &DelegationConfig,
-) -> ToolCallResult {
+async fn handle_undrain(args: &serde_json::Value, connections: &Connections) -> ToolCallResult {
     let node = match args.get("node").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => return tool_result("Error: node ID required".to_string(), true),
     };
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     let result = pact_cli::commands::delegate::undrain_node(
         &mut client,
         node,
         "mcp-agent",
         "pact-service-ai",
-        config,
+        &connections.delegation,
     )
     .await;
 
@@ -737,24 +705,17 @@ async fn handle_budget(args: &serde_json::Value, config: &DelegationConfig) -> T
 
 async fn handle_backup_create(
     args: &serde_json::Value,
-    channel: &Channel,
-    config: &DelegationConfig,
+    connections: &Connections,
 ) -> ToolCallResult {
     let path = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return tool_result("Error: path required".to_string(), true),
     };
 
-    let mut client = {
-        let token = std::env::var("PACT_MCP_TOKEN").unwrap_or_default();
-        ConfigServiceClient::with_interceptor(
-            channel.clone(),
-            pact_cli::commands::execute::AuthInterceptor { token },
-        )
-    };
+    let mut client = connections.journal_config_client().unwrap();
     match pact_cli::commands::lattice::backup_create(
         &mut client,
-        config,
+        &connections.delegation,
         path,
         "mcp-agent",
         "pact-service-ai",
