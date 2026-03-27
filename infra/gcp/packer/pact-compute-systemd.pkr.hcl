@@ -66,16 +66,18 @@ build {
     ]
   }
 
-  // Upload pact-agent binary
+  // Upload pact-agent release archive (from GitHub release)
   provisioner "file" {
-    source      = "artifacts/pact-agent"
-    destination = "/tmp/pact-agent"
+    source      = "artifacts/pact-agent-x86_64-systemd.tar.gz"
+    destination = "/tmp/pact-agent.tar.gz"
   }
 
   provisioner "shell" {
     inline = [
-      "sudo mv /tmp/pact-agent /usr/local/bin/pact-agent",
-      "sudo chmod +x /usr/local/bin/pact-agent",
+      "cd /tmp && tar xzf pact-agent.tar.gz",
+      "sudo mv /tmp/pact-agent /opt/pact/bin/pact-agent",
+      "sudo chmod +x /opt/pact/bin/pact-agent",
+      "sudo ln -sf /opt/pact/bin/pact-agent /usr/local/bin/pact-agent",
     ]
   }
 

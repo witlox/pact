@@ -72,23 +72,20 @@ build {
     ]
   }
 
-  // Upload pact binaries (built externally, passed as artifacts)
+  // Upload platform release archive (from GitHub release)
   provisioner "file" {
-    source      = "artifacts/pact-journal"
-    destination = "/tmp/pact-journal"
-  }
-
-  provisioner "file" {
-    source      = "artifacts/pact-cli"
-    destination = "/tmp/pact-cli"
+    source      = "artifacts/pact-platform-x86_64.tar.gz"
+    destination = "/tmp/pact-platform.tar.gz"
   }
 
   provisioner "shell" {
     inline = [
-      "sudo mv /tmp/pact-journal /opt/pact/bin/",
-      "sudo mv /tmp/pact-cli /opt/pact/bin/",
+      "cd /tmp && tar xzf pact-platform.tar.gz",
+      "sudo mv /tmp/pact /tmp/pact-journal /tmp/pact-mcp /opt/pact/bin/",
       "sudo chmod +x /opt/pact/bin/*",
-      "sudo ln -sf /opt/pact/bin/pact-cli /usr/local/bin/pact",
+      "sudo ln -sf /opt/pact/bin/pact /usr/local/bin/pact",
+      "sudo ln -sf /opt/pact/bin/pact-journal /usr/local/bin/pact-journal",
+      "sudo ln -sf /opt/pact/bin/pact-mcp /usr/local/bin/pact-mcp",
     ]
   }
 

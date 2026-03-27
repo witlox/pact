@@ -15,12 +15,20 @@ cloud-agnostic and reusable on bare metal. For GCP-specific infrastructure
 
 ### OS Requirements
 
-Release binaries require **glibc ≥ 2.35**. Compatible distributions:
-- Ubuntu 22.04+ (recommended for GCP)
-- Debian 12+ (bookworm)
+Release binaries are built on Rocky Linux 9 (glibc 2.34). Compatible distributions:
 - RHEL 9+ / Rocky 9+ / Alma 9+
+- Ubuntu 22.04+
+- Debian 12+ (bookworm)
+- SLES 15 SP4+
 
 Debian 11 and Ubuntu 20.04 are **not supported** (glibc too old).
+
+Release artifacts per architecture (x86_64 and aarch64):
+- `pact-platform-{arch}.tar.gz` — pact (CLI), pact-journal, pact-mcp
+- `pact-agent-{arch}-pact.tar.gz` — agent with PactSupervisor (PID 1 mode)
+- `pact-agent-{arch}-systemd.tar.gz` — agent with systemd backend
+
+All agent variants include GPU support (NVIDIA + AMD) — no separate per-GPU builds.
 
 ### Prerequisites
 
@@ -235,19 +243,23 @@ directories. pact is the incumbent: journal quorum starts before lattice.
 
 ### Install the binary
 
-Download the agent variant matching your hardware from the
+Download the agent variant for your architecture and supervisor mode from the
 [latest release](https://github.com/witlox/pact/releases/latest):
 
 ```bash
-# Example: x86_64 NVIDIA node with PactSupervisor (diskless HPC)
-curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-nvidia-pact.tar.gz
-tar xzf pact-agent-x86_64-nvidia-pact.tar.gz -C /usr/local/bin/
+# PactSupervisor mode (PID 1 / diskless HPC) — includes NVIDIA + AMD GPU support
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-pact.tar.gz
+tar xzf pact-agent-x86_64-pact.tar.gz
+sudo mv pact-agent /usr/local/bin/
+
+# Or systemd mode (traditional service)
+curl -LO https://github.com/witlox/pact/releases/latest/download/pact-agent-x86_64-systemd.tar.gz
+tar xzf pact-agent-x86_64-systemd.tar.gz
+sudo mv pact-agent /usr/local/bin/
 ```
 
 For diskless nodes, include the `pact-agent` binary in the base SquashFS image
-provisioned by OpenCHAMI. See [getting-started.md](getting-started.md) for the
-full list of agent variants and [ochami-image.md](ochami-image.md) for the
-complete image build guide.
+provisioned by OpenCHAMI.
 
 ### Create the config
 
