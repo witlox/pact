@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/bin/mkdir -p /var/lib/pact /run/pact
 ExecStart=/usr/local/bin/pact-agent --config /etc/pact/agent.toml
 Restart=on-failure
 RestartSec=5
@@ -16,13 +17,10 @@ Group=pact
 
 # Security hardening
 ProtectSystem=strict
-ReadWritePaths=/var/lib/pact
+ReadWritePaths=/var/lib/pact /run/pact
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target

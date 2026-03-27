@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/bin/mkdir -p /var/lib/pact/journal
 ExecStart=/usr/local/bin/pact-journal \
     --node-id ${PACT_JOURNAL_NODE_ID} \
     --listen ${PACT_JOURNAL_LISTEN} \

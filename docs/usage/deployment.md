@@ -13,9 +13,36 @@ Deploy scripts in `scripts/deploy/` automate the full deployment. They are
 cloud-agnostic and reusable on bare metal. For GCP-specific infrastructure
 (VMs, networking), see `infra/gcp/`.
 
+### OS Requirements
+
+Release binaries require **glibc ≥ 2.35**. Compatible distributions:
+- Ubuntu 22.04+ (recommended for GCP)
+- Debian 12+ (bookworm)
+- RHEL 9+ / Rocky 9+ / Alma 9+
+
+Debian 11 and Ubuntu 20.04 are **not supported** (glibc too old).
+
 ### Prerequisites
 
-- Download release artifacts from [GitHub releases](https://github.com/witlox/pact/releases/latest)
+Download release artifacts from [GitHub releases](https://github.com/witlox/pact/releases/latest).
+You can create a provisioning bundle for easy distribution:
+
+```bash
+# Download release artifacts
+mkdir -p /tmp/pact-release
+gh release download v2026.1.196 --dir /tmp/pact-release \
+    --pattern "pact-platform-x86_64.tar.gz" \
+    --pattern "pact-agent-x86_64-pact.tar.gz"
+
+# Create provisioning bundle (includes scripts + systemd units)
+scripts/deploy/make-provision-bundle.sh /tmp/pact-release /tmp/pact-provision.tar.gz
+
+# Upload to all nodes (single file, no scp --recurse issues)
+scp /tmp/pact-provision.tar.gz node:/tmp/
+ssh node 'cd /tmp && tar xzf pact-provision.tar.gz'
+```
+
+Or manually:
 - Unpack binaries to `/opt/pact/bin/` on all nodes
 - Copy `infra/systemd/` to `/opt/pact/systemd/` on all nodes
 - Copy `scripts/deploy/` to `/opt/pact/deploy/` on all nodes
