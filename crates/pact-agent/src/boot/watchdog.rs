@@ -83,7 +83,7 @@ mod linux {
             let mut timeout: libc::c_int = 0;
             // SAFETY: fd is a valid watchdog device fd, timeout is a valid pointer.
             unsafe {
-                wdioc_gettimeout(fd.as_raw_fd(), &mut timeout)
+                wdioc_gettimeout(fd.as_raw_fd(), &raw mut timeout)
                     .map_err(|e| anyhow::anyhow!("WDIOC_GETTIMEOUT ioctl failed: {e}"))?;
             }
 
