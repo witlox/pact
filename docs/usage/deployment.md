@@ -7,6 +7,75 @@ that need to be deployed:
 2. **pact-agent** -- every compute node
 3. **pact CLI** -- admin workstations
 
+## Automated Deployment (recommended)
+
+Deploy scripts in `scripts/deploy/` automate the full deployment. They are
+cloud-agnostic and reusable on bare metal. For GCP-specific infrastructure
+(VMs, networking), see `infra/gcp/`.
+
+### Prerequisites
+
+- Download release artifacts from [GitHub releases](https://github.com/witlox/pact/releases/latest)
+- Unpack binaries to `/opt/pact/bin/` on all nodes
+- Copy `infra/systemd/` to `/opt/pact/systemd/` on all nodes
+- Copy `scripts/deploy/` to `/opt/pact/deploy/` on all nodes
+
+### Step 1: Create CA and distribute to all nodes
+
+```bash
+# On the first management node:
+/opt/pact/deploy/setup-ca.sh /etc/pact/certs mgmt-1
+
+# Then copy /etc/pact/ca/ to ALL other nodes (management + compute):
+scp -r /etc/pact/ca/ mgmt-2:/etc/pact/ca/
+scp -r /etc/pact/ca/ mgmt-3:/etc/pact/ca/
+scp -r /etc/pact/ca/ compute-1:/etc/pact/ca/
+# ...etc
+```
+
+### Step 2: Install journal on management nodes
+
+```bash
+# Peer format: id=addr (id matches node-id argument)
+PEERS="1=mgmt-1:9443,2=mgmt-2:9443,3=mgmt-3:9443"
+
+# Node 1 — with --bootstrap to initialize the Raft cluster
+/opt/pact/deploy/install-management.sh 1 mgmt-1 "$PEERS" --bootstrap
+
+# Nodes 2 and 3 — without --bootstrap (join existing cluster)
+/opt/pact/deploy/install-management.sh 2 mgmt-2 "$PEERS"
+/opt/pact/deploy/install-management.sh 3 mgmt-3 "$PEERS"
+
+# Wait ~10 seconds for Raft membership replication, then verify:
+/opt/pact/deploy/bootstrap-quorum.sh mgmt-1:9443
+```
+
+### Step 3: Install agent on compute nodes
+
+```bash
+JOURNALS="mgmt-1:9443,mgmt-2:9443,mgmt-3:9443"
+
+/opt/pact/deploy/install-compute.sh compute-1 ml-training "$JOURNALS"
+/opt/pact/deploy/install-compute.sh compute-2 ml-training "$JOURNALS"
+```
+
+### Step 4: Install monitoring (optional)
+
+```bash
+/opt/pact/deploy/install-monitoring.sh mgmt-1,mgmt-2,mgmt-3
+```
+
+### Step 5: Validate
+
+```bash
+# Run test matrix (v1=pact-only, v2=systemd, v3=pact+lattice, v4=systemd+lattice)
+/opt/pact/deploy/validate.sh v1 mgmt-1:9443 compute-1,compute-2
+```
+
+---
+
+## Manual Deployment (step-by-step)
+
 ## Journal Quorum Setup
 
 The journal is pact's distributed immutable log, backed by a Raft consensus group.
@@ -35,6 +104,7 @@ Create `/etc/pact/journal.env` on each journal node:
 PACT_JOURNAL_NODE_ID=1
 PACT_JOURNAL_LISTEN=0.0.0.0:9443
 PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
+PACT_JOURNAL_PEERS=1=journal-1:9443,2=journal-2:9443,3=journal-3:9443
 ```
 
 **journal-2:**
@@ -42,6 +112,7 @@ PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
 PACT_JOURNAL_NODE_ID=2
 PACT_JOURNAL_LISTEN=0.0.0.0:9443
 PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
+PACT_JOURNAL_PEERS=1=journal-1:9443,2=journal-2:9443,3=journal-3:9443
 ```
 
 **journal-3:**
@@ -49,7 +120,13 @@ PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
 PACT_JOURNAL_NODE_ID=3
 PACT_JOURNAL_LISTEN=0.0.0.0:9443
 PACT_JOURNAL_DATA_DIR=/var/lib/pact/journal
+PACT_JOURNAL_PEERS=1=journal-1:9443,2=journal-2:9443,3=journal-3:9443
 ```
+
+**Bootstrap:** On the first deploy, run `pact-journal --bootstrap` on node 1 to
+initialize the Raft membership. The membership replicates to nodes 2 and 3
+automatically within seconds. Do NOT use `--bootstrap` on subsequent restarts or
+on nodes 2/3.
 
 Create `/etc/pact/journal.toml` (same on all nodes, node ID comes from env):
 

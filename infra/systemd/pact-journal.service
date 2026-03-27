@@ -8,7 +8,8 @@ Type=simple
 ExecStart=/usr/local/bin/pact-journal \
     --node-id ${PACT_JOURNAL_NODE_ID} \
     --listen ${PACT_JOURNAL_LISTEN} \
-    --data-dir ${PACT_JOURNAL_DATA_DIR}
+    --data-dir ${PACT_JOURNAL_DATA_DIR} \
+    --peers ${PACT_JOURNAL_PEERS}
 Restart=on-failure
 RestartSec=5
 
@@ -23,9 +24,6 @@ ReadWritePaths=/var/lib/pact/journal
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target
