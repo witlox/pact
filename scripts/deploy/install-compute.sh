@@ -81,7 +81,7 @@ vcluster = "$VCLUSTER"
 enforcement_mode = "observe"
 
 [agent.supervisor]
-backend = "pact"
+backend = "Pact"
 
 [agent.journal]
 endpoints = $ENDPOINT_TOML

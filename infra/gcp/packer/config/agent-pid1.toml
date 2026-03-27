@@ -6,7 +6,7 @@ node_id = "unset"
 enforcement_mode = "observe"
 
 [agent.supervisor]
-backend = "pact"
+backend = "Pact"
 
 [agent.journal]
 endpoints = ["journal-1:9443"]

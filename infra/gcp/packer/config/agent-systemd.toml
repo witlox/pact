@@ -6,7 +6,7 @@ node_id = "unset"
 enforcement_mode = "observe"
 
 [agent.supervisor]
-backend = "systemd"
+backend = "Systemd"
 
 [agent.journal]
 endpoints = ["journal-1:9443"]
