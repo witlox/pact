@@ -14,6 +14,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::ImageExt;
 
 use pact_e2e::containers::dex::{dex_test_config, Dex, DEX_PORT};
+use pact_policy::iam::TokenValidator;
 use testcontainers::core::CopyDataSource;
 
 #[derive(Debug, Deserialize)]
@@ -171,7 +172,6 @@ async fn dex_oidc_lifecycle() {
         Some(jwks_url),
     );
 
-    use pact_policy::iam::TokenValidator;
     let identity = validator
         .validate(&pw.access_token)
         .await
