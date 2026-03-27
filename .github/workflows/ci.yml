@@ -8,6 +8,8 @@ on:
       - "specs/**"
       - "*.md"
       - "config/**"
+      - "scripts/deploy/**"
+      - "infra/**"
   pull_request:
     branches: [main]
     paths-ignore:
@@ -15,6 +17,8 @@ on:
       - "specs/**"
       - "*.md"
       - "config/**"
+      - "scripts/deploy/**"
+      - "infra/**"
 
 env:
   CARGO_TERM_COLOR: always
