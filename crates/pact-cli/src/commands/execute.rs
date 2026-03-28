@@ -386,12 +386,21 @@ pub async fn resolve_agent_address(
         return Ok(format!("http://127.0.0.1:{AGENT_DEFAULT_PORT}"));
     }
 
-    // Verify the node exists by querying journal
+    // Try to verify the node exists via journal. If the journal doesn't know
+    // the node (e.g., enrolled but no config state yet), fall back to DNS.
     let mut client = auth_channel.config_client();
-    let _resp = client
+    match client
         .get_node_state(tonic::Request::new(GetNodeStateRequest { node_id: node_id.to_string() }))
         .await
-        .map_err(|e| anyhow::anyhow!("cannot resolve node '{node_id}': {e}"))?;
+    {
+        Ok(_) => {}
+        Err(e) if e.code() == tonic::Code::NotFound => {
+            debug!(node_id, "node not in config state, falling back to DNS resolution");
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("cannot resolve node '{node_id}': {e}"));
+        }
+    }
 
     Ok(format!("http://{node_id}:{AGENT_DEFAULT_PORT}"))
 }
