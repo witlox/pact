@@ -55,7 +55,7 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
           - arch: aarch64
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Install system dependencies
         run: |
@@ -129,10 +129,10 @@ jobs:
             runner: ubuntu-latest
           - name: aarch64-pact
             features: ebpf,spire,nvidia
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-24.04-arm
           - name: aarch64-systemd
             features: ebpf,spire,nvidia,systemd
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Install system dependencies
