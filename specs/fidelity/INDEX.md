@@ -97,7 +97,7 @@ Detail files: `specs/fidelity/features/`
 | Trait | Real Impls | Mock Rating | Impact |
 |-------|------------|-------------|--------|
 | ServiceManager | PactSupervisor, SystemdBackend | **WIRED** | ~~HIGH~~ resolved |
-| TokenValidator | HmacTokenValidator | **BYPASSED** | **HIGH** — identity set directly |
+| TokenValidator | JwksTokenValidator (HMAC+JWKS) | **WIRED** (e2e: Dex+interceptor) | ~~HIGH~~ resolved |
 | Observer | Inotify, Netlink, eBPF | **BYPASSED** | MEDIUM — events constructed directly |
 | NetworkManager | LinuxNetworkManager | PARTIAL | MEDIUM — stub never errors |
 | PolicyEngine | DefaultPolicyEngine | PARTIAL | LOW — BDD uses real engine |
@@ -152,8 +152,8 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 
 ### Remaining
 
-**Resolved via e2e containers (pact-e2e infrastructure exists):**
-1. **Auth flow (TokenValidator, login/logout/refresh)** → add Keycloak/Dex container to pact-e2e, test real OAuth2 flows. Container image: `quay.io/keycloak/keycloak` or `ghcr.io/dexidp/dex`.
+**Resolved via e2e containers:**
+1. ~~**Auth flow (TokenValidator, login/logout/refresh)**~~ → RESOLVED: Dex container in pact-e2e (auth_oidc.rs), 6 auth interceptor tests (auth_interceptor.rs), JwksTokenValidator validated against real RS256 tokens. Raft cluster wires auth_interceptor matching production.
 2. **Observability Loki/metrics** → `pact-e2e/tests/loki_events.rs` + `prometheus_metrics.rs` already exist (fail due to no Docker in CI). Fix CI or run locally.
 3. **Federation** → needs Sovra container (not yet available). Defer until Sovra exists.
 
@@ -173,3 +173,5 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 | 2026-03-20 | Rescan post-hardening | **8 HIGH (+1), 14 MODERATE (+2), 8 LOW (-3)**. ADR-012 enforced. ServiceManager wired. |
 | 2026-03-20 | Sweep checkpoint | 31 features, 555 scenarios, 12 traits, 17 ADRs, gaps.md populated. SWEEP.md: COMPLETE. |
 | 2026-03-27 | PID 1 feature audit | platform_bootstrap LOW→MODERATE. WatchdogHandle + PlatformInit implemented. 756 unit tests, 567 BDD (555 pass). PB0-PB2, PS2 enforced via real code. |
+| 2026-03-28 | Auth end-to-end fix + GCP deployment | TokenValidator BYPASSED→WIRED. JwksTokenValidator (HMAC+JWKS), CLI AuthInterceptor on all RPCs, Dex e2e test, 6 auth interceptor tests. Raft cluster matches production wiring. Auth flow #1 RESOLVED. |
+| 2026-03-28 | GCP V2+V4 validated | V2: 21/23 pass. V4: 26/29 pass. Full pact+lattice stack: quorum, auth, enrollment, exec, drain, workloads. lattice-client bumped to 2026.1.130. |
