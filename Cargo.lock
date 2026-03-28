@@ -2267,9 +2267,9 @@ dependencies = [
 
 [[package]]
 name = "lattice-client"
-version = "2026.1.124"
+version = "2026.1.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e064c057de3e69c15f7c86d606c490221937e069c133d739fc81e4dd1e8e9a"
+checksum = "654edc0035d38d63ac325c5f96426c233e64da14c9bef4d737ba1d5c3eba047b"
 dependencies = [
  "lattice-common",
  "prost",
@@ -2283,11 +2283,12 @@ dependencies = [
 
 [[package]]
 name = "lattice-common"
-version = "2026.1.124"
+version = "2026.1.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2d67395dc0a073d92ba46900bdd53e13f77f14254bdd597d622d8ac4db1d54d"
+checksum = "727386153a7c9b9ecbe8eda4991d8f183d920df935acaaa5139953f2483969d3"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "config",
  "hpc-audit",
@@ -2303,6 +2304,7 @@ dependencies = [
  "tonic-prost-build",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -3856,7 +3858,9 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",

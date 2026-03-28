@@ -709,10 +709,19 @@ async fn main() {
     let mut journal_client =
         auth_channel.as_ref().map(pact_cli::commands::execute::AuthenticatedChannel::config_client);
 
-    // Load delegation config from env vars (lattice + OpenCHAMI endpoints)
+    // Load delegation config from env vars (lattice + OpenCHAMI endpoints).
+    // Lattice token falls back to the pact auth token — in production, the admin
+    // logs in once via `pact login` and the same OIDC token is reused for lattice
+    // delegation (both systems share the same IdP).
     let delegation_config = DelegationConfig {
         lattice_endpoint: std::env::var("PACT_LATTICE_ENDPOINT").ok(),
-        lattice_token: std::env::var("PACT_LATTICE_TOKEN").ok(),
+        lattice_token: std::env::var("PACT_LATTICE_TOKEN").ok().or_else(|| {
+            if token.is_empty() {
+                None
+            } else {
+                Some(token.clone())
+            }
+        }),
         openchami_smd_url: std::env::var("PACT_OPENCHAMI_SMD_URL").ok(),
         openchami_token: std::env::var("PACT_OPENCHAMI_TOKEN").ok(),
         timeout_secs: 30,
