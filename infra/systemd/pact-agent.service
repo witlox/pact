@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/bin/mkdir -p /var/lib/pact /run/pact
+ExecStartPre=+/bin/bash -c 'mkdir -p /var/lib/pact /run/pact && chown pact:pact /var/lib/pact /run/pact'
 ExecStart=/usr/local/bin/pact-agent --config /etc/pact/agent.toml
 Restart=on-failure
 RestartSec=5
