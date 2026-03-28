@@ -254,6 +254,30 @@ directories. pact is the incumbent: journal quorum starts before lattice.
 | pact-journal | 9444 | 9443 | `/var/lib/pact/journal` |
 | lattice-server | 9000 | 50051 | `/var/lib/lattice/raft` |
 
+**Lattice bootstrap:** Like pact-journal, lattice-server requires `--bootstrap` on first
+start of node 1 to initialize the Raft cluster. Subsequent restarts must NOT use
+`--bootstrap`. See lattice deployment guide for details.
+
+**Lattice agent:** Deploy `lattice-agent` on compute nodes. It registers with the
+lattice scheduler via heartbeats. Pact's supercharged commands (`drain`, `cordon`,
+`uncordon`) delegate to lattice — they require the node to be registered in both
+pact (enrollment) and lattice (agent heartbeat).
+
+```bash
+# Set delegation endpoint so pact CLI can reach lattice
+export PACT_LATTICE_ENDPOINT=http://mgmt-1:50051
+pact drain compute-1    # → delegates to lattice
+```
+
+**Known limitations (pending lattice fixes):**
+- Drain state machine: node may stay in `Draining` instead of transitioning to
+  `Drained` when allocations reach 0. Undrain only works from `Drained` state.
+- Auth: lattice REST/gRPC does not enforce authentication when `oidc_issuer` is
+  empty. Configure lattice with the same IdP as pact for production.
+- Process reattach: lattice-agent restart kills running workloads. Use
+  `KillMode=process` in systemd to avoid killing children, but the agent
+  cannot yet reattach to orphaned processes after restart.
+
 ### Port Summary
 
 | Port | Service | Protocol |
