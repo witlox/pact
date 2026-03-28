@@ -18,6 +18,7 @@ NODES="${3:?}"
 PACT="pact --endpoint $ENDPOINT"
 IFS=',' read -ra NODE_LIST <<< "$NODES"
 FIRST_NODE="${NODE_LIST[0]}"
+JOURNAL_HOST="${ENDPOINT%%:*}"
 
 PASS=0
 FAIL=0
@@ -57,7 +58,6 @@ echo ""
 
 # --- Raft quorum ---
 echo "Raft quorum:"
-JOURNAL_HOST="${ENDPOINT%%:*}"
 run_test 1 "Journal quorum elects leader" "C" \
     "curl -sf http://$JOURNAL_HOST:9091/health | grep -q healthy"
 run_test 2 "Write survives 1-node loss" "C" \
@@ -75,7 +75,7 @@ run_test 5 "Pseudofs mounted by agent" "I" \
 run_test 6 "Watchdog status (skip if no device)" "I" \
     "$PACT exec $FIRST_NODE -- test -f /run/pact/ready"
 run_test 7 "Boot petter active during boot" "I" \
-    "$PACT exec $FIRST_NODE -- grep -q 'boot petter\\|supervision loop' /var/log/pact-agent.log"
+    "$PACT exec $FIRST_NODE -- journalctl -u pact-agent --no-pager -n 50 | grep -q 'boot petter\|supervision loop'"
 run_test 8 "Agent under systemd" "SYSTEMD" \
     "$PACT exec $FIRST_NODE -- systemctl is-active pact-agent"
 run_test 9 "Systemd restarts on crash" "SYSTEMD" \
@@ -87,11 +87,11 @@ echo "Config management:"
 run_test 10 "Boot config streamed" "C" \
     "$PACT exec $FIRST_NODE -- test -f /run/pact/ready"
 run_test 11 "Config commit" "C" \
-    "$PACT commit --vcluster test --message 'validation test' --dry-run"
+    "$PACT commit -m 'validation test'"
 run_test 13 "Drift detection" "C" \
-    "$PACT status --node $FIRST_NODE"
+    "$PACT status $FIRST_NODE"
 run_test 15 "Overlay sysctl application" "C" \
-    "$PACT exec $FIRST_NODE -- sysctl vm.swappiness"
+    "$PACT exec $FIRST_NODE -- cat /proc/sys/vm/swappiness"
 
 # --- Shell + exec ---
 echo ""
@@ -101,7 +101,7 @@ run_test 16 "pact shell to compute" "C" \
 run_test 17 "pact exec returns output" "C" \
     "$PACT exec $FIRST_NODE -- hostname"
 run_test 19 "Audit trail has entries" "C" \
-    "$PACT audit --limit 1"
+    "$PACT audit -n 1"
 
 # --- Process supervision ---
 echo ""
@@ -116,26 +116,26 @@ run_test 23 "Graceful shutdown stops all" "C" \
 # --- Identity + auth ---
 echo ""
 echo "Identity + auth:"
-run_test 24 "mTLS connection" "C" \
-    "$PACT status"
+run_test 24 "Authenticated gRPC connection" "C" \
+    "$PACT log -n 1"
 
 # --- Monitoring ---
 echo ""
 echo "Monitoring:"
 run_test 27 "Journal metrics available" "C" \
-    "curl -sf http://${ENDPOINT%%:*}:9091/metrics | grep -q pact"
+    "curl -sf http://$JOURNAL_HOST:9091/metrics | grep -q pact"
 
 # --- Supercharged (delegation available) ---
 echo ""
 echo "Supercharged (delegation):"
 run_test 30 "pact drain" "S" \
-    "$PACT drain $FIRST_NODE --dry-run"
+    "$PACT drain $FIRST_NODE"
 run_test 31 "pact cordon" "S" \
-    "$PACT cordon $FIRST_NODE --dry-run"
+    "$PACT cordon $FIRST_NODE"
 run_test 32 "pact uncordon" "S" \
-    "$PACT uncordon $FIRST_NODE --dry-run"
+    "$PACT uncordon $FIRST_NODE"
 run_test 33 "pact promote" "S" \
-    "$PACT promote --from test --dry-run"
+    "$PACT promote --from test"
 run_test 34 "pact group list" "S" \
     "$PACT group list"
 run_test 35 "pact blacklist add" "S" \

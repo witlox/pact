@@ -89,7 +89,7 @@ tls_enabled = $TLS_ENABLED
 $TLS_SECTION
 
 [agent.observer]
-ebpf = false
+ebpf = true
 inotify = true
 netlink = true
 
