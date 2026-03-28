@@ -27,15 +27,18 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | Metric | Count |
 |--------|-------|
 | Feature files scanned | **31 of 31** |
-| Total scenarios | **567** (555 pass, 12 skipped) |
+| Total BDD scenarios | **567** (555 pass, 12 skipped) |
 | THOROUGH scenarios | ~167 (30%) |
 | MODERATE scenarios | ~205 (37%) |
 | SHALLOW or worse | ~166 (30%) |
-| Unit tests | 756 pass |
-| Mock traits assessed | 12 |
-| FAITHFUL mocks | 5 (+ 2 wired via trait, 3 partial, 2 N/A) |
+| Unit tests | **756** pass (1 ignored) |
+| E2E integration tests | **42** pass (auth, Raft, OPA, Loki, Prometheus, Dex, SPIRE, CLI) |
+| Mock traits assessed | 14 |
+| FAITHFUL/WIRED mocks | 7 (ServiceManager, TokenValidator, WatchdogHandle, PlatformInit + 3 capability backends) |
+| PARTIAL mocks | 3 (NetworkManager, PolicyEngine, OpaClient) |
 | ADRs total | 17 |
 | ADRs ENFORCED | 9 (+ 1 partial, 6 documented, 1 unenforced) |
+| GCP deployment validated | V2 (21/23), V4 (26/29) |
 
 ## Feature Fidelity
 
@@ -154,7 +157,7 @@ Detail file: `specs/fidelity/adrs/enforcement.md`
 
 **Resolved via e2e containers:**
 1. ~~**Auth flow (TokenValidator, login/logout/refresh)**~~ → RESOLVED: Dex container in pact-e2e (auth_oidc.rs), 6 auth interceptor tests (auth_interceptor.rs), JwksTokenValidator validated against real RS256 tokens. Raft cluster wires auth_interceptor matching production.
-2. **Observability Loki/metrics** → `pact-e2e/tests/loki_events.rs` + `prometheus_metrics.rs` already exist (fail due to no Docker in CI). Fix CI or run locally.
+2. ~~**Observability Loki/metrics**~~ → PARTIALLY RESOLVED: `loki_events.rs` (2 tests) and `prometheus_metrics.rs` (1 test) pass locally with Docker. CI needs Docker-in-Docker or a runner with Docker access.
 3. **Federation** → needs Sovra container (not yet available). Defer until Sovra exists.
 
 **Other remaining:**
