@@ -30,6 +30,30 @@ Release artifacts per architecture (x86_64 and aarch64):
 
 All agent variants include GPU support (NVIDIA + AMD) — no separate per-GPU builds.
 
+**Important:** When building from source, use `--features ebpf` for the agent to enable
+eBPF-based state observation. Without this feature, eBPF probes are compiled out.
+
+### Node Name Resolution
+
+Pact uses DNS-based agent discovery: `pact exec <node-id>` resolves the node ID
+to `http://<node-id>:9445`. Ensure node IDs are resolvable via DNS or `/etc/hosts`.
+
+### Agent Auth Configuration
+
+The agent shell server validates incoming OIDC tokens independently from the journal.
+Configure `[agent.shell.auth]` in the agent TOML:
+
+```toml
+[agent.shell.auth]
+issuer = "https://your-idp/realm"
+audience = "pact-cli"
+jwks_url = "https://your-idp/realm/protocol/openid-connect/certs"
+# Optional: HMAC secret for dev/test (production uses JWKS only)
+# hmac_secret = "shared-secret"
+```
+
+Without this section, the agent falls back to fail-closed (JWKS required, no secret).
+
 ### Prerequisites
 
 Download release artifacts from [GitHub releases](https://github.com/witlox/pact/releases/latest).
