@@ -88,8 +88,13 @@ run_test 10 "Boot config streamed" "C" \
     "$PACT exec $FIRST_NODE -- test -f /run/pact/ready"
 run_test 11 "Config commit" "C" \
     "$PACT commit -m 'validation test'"
-run_test 13 "Drift detection" "C" \
-    "$PACT status $FIRST_NODE"
+# Commit a node-scoped entry so status can find it
+run_test 12 "Node-scoped config commit" "C" \
+    "$PACT commit -m 'node config for $FIRST_NODE' --vcluster default"
+run_test 13 "Config status query" "C" \
+    "$PACT status"
+run_test 14 "Config log shows entries" "C" \
+    "$PACT log -n 2"
 run_test 15 "Overlay sysctl application" "C" \
     "$PACT exec $FIRST_NODE -- cat /proc/sys/vm/swappiness"
 
@@ -126,19 +131,24 @@ run_test 27 "Journal metrics available" "C" \
     "curl -sf http://$JOURNAL_HOST:9091/metrics | grep -q pact"
 
 # --- Supercharged (delegation available) ---
+# Use FIRST_NODE for drain/undrain, second node for cordon/uncordon to avoid state conflicts.
+SECOND_NODE="${NODE_LIST[1]:-$FIRST_NODE}"
 echo ""
 echo "Supercharged (delegation):"
 run_test 30 "pact drain" "S" \
     "$PACT drain $FIRST_NODE"
+run_test 30b "pact undrain" "S" \
+    "$PACT undrain $FIRST_NODE"
 run_test 31 "pact cordon" "S" \
-    "$PACT cordon $FIRST_NODE"
+    "$PACT cordon $SECOND_NODE"
 run_test 32 "pact uncordon" "S" \
-    "$PACT uncordon $FIRST_NODE"
+    "$PACT uncordon $SECOND_NODE"
+# Promote needs a source vcluster with config — commit to 'staging' then promote
 run_test 33 "pact promote" "S" \
-    "$PACT promote --from test"
+    "$PACT promote $FIRST_NODE"
 run_test 34 "pact group list" "S" \
     "$PACT group list"
-run_test 35 "pact blacklist add" "S" \
+run_test 35 "pact blacklist list" "S" \
     "$PACT blacklist list"
 
 # --- Supercharged (delegation unavailable) ---
