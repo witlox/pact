@@ -264,19 +264,25 @@ lattice scheduler via heartbeats. Pact's supercharged commands (`drain`, `cordon
 pact (enrollment) and lattice (agent heartbeat).
 
 ```bash
-# Set delegation endpoint so pact CLI can reach lattice
+# Set delegation endpoint and auth token so pact CLI can reach lattice
 export PACT_LATTICE_ENDPOINT=http://mgmt-1:50051
-pact drain compute-1    # → delegates to lattice
+export PACT_LATTICE_TOKEN="$PACT_TOKEN"   # reuse the same OIDC token
+pact drain compute-1    # → delegates to lattice (authenticated)
 ```
 
-**Known limitations (pending lattice fixes):**
-- Drain state machine: node may stay in `Draining` instead of transitioning to
-  `Drained` when allocations reach 0. Undrain only works from `Drained` state.
-- Auth: lattice REST/gRPC does not enforce authentication when `oidc_issuer` is
-  empty. Configure lattice with the same IdP as pact for production.
-- Process reattach: lattice-agent restart kills running workloads. Use
-  `KillMode=process` in systemd to avoid killing children, but the agent
-  cannot yet reattach to orphaned processes after restart.
+**Important:** `PACT_LATTICE_TOKEN` is required when lattice-server enforces auth.
+The pact admin's OIDC token works if both systems share the same IdP and lattice
+recognizes `pact_role` claims. Set `LATTICE_OIDC_HMAC_SECRET` on lattice-server
+to the same value as `PACT_OIDC_HMAC_SECRET` for HMAC token compatibility.
+
+**Lattice agent auth:** Set `LATTICE_AGENT_TOKEN` env var on compute nodes for
+the lattice-agent to authenticate to the server (machine identity via token
+fallback when mTLS/SPIRE is not configured).
+
+**Drain behavior:** Drain with active allocations transitions to `Draining`.
+The node moves to `Drained` only after all allocations complete or are cancelled.
+Undrain only works from `Drained` state — cancel remaining allocations first
+if immediate undrain is needed.
 
 ### Port Summary
 
