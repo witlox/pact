@@ -870,7 +870,9 @@ async fn then_delegate_lattice(world: &mut PactWorld) {
 async fn then_delegate_node_mgmt(world: &mut PactWorld) {
     let output = world.cli_output.as_ref().expect("no output");
     assert!(
-        output.contains("node management backend") || output.contains("OpenCHAMI") || output.contains("CSM"),
+        output.contains("node management backend")
+            || output.contains("OpenCHAMI")
+            || output.contains("CSM"),
         "should delegate to node management backend"
     );
 }

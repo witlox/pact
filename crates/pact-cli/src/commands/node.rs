@@ -237,12 +237,9 @@ pub async fn query_smd_components(
 
     // HSM path differs: CSM uses /smd/hsm/v2, OpenCHAMI uses /hsm/v2.
     // Default to /hsm/v2 for backward compat with existing callers.
-    let hsm_prefix = std::env::var("PACT_HSM_PATH_PREFIX").unwrap_or_else(|_| "/hsm/v2".to_string());
-    let url = format!(
-        "{}{}/State/Components?type=Node",
-        smd_url.trim_end_matches('/'),
-        hsm_prefix
-    );
+    let hsm_prefix =
+        std::env::var("PACT_HSM_PATH_PREFIX").unwrap_or_else(|_| "/hsm/v2".to_string());
+    let url = format!("{}{}/State/Components?type=Node", smd_url.trim_end_matches('/'), hsm_prefix);
     let mut req = client.get(&url);
     if let Some(token) = smd_token {
         req = req.header("Authorization", format!("Bearer {token}"));
@@ -273,7 +270,8 @@ pub async fn query_smd_ethernet(
     let client =
         reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs)).build()?;
 
-    let hsm_prefix = std::env::var("PACT_HSM_PATH_PREFIX").unwrap_or_else(|_| "/hsm/v2".to_string());
+    let hsm_prefix =
+        std::env::var("PACT_HSM_PATH_PREFIX").unwrap_or_else(|_| "/hsm/v2".to_string());
     let url = format!(
         "{}{}/Inventory/EthernetInterfaces?ComponentID={}",
         smd_url.trim_end_matches('/'),

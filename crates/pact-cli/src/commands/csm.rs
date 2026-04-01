@@ -114,10 +114,8 @@ impl NodeManagementBackend for CsmBackend {
         async move {
             // BOS reboot session — BOS uses the node's existing boot template (NM-I5).
             let url = format!("{base_url}/bos/v2/sessions");
-            let body = BosSessionRequest {
-                operation: "reboot".to_string(),
-                limit: node_id.clone(),
-            };
+            let body =
+                BosSessionRequest { operation: "reboot".to_string(), limit: node_id.clone() };
 
             let resp = client
                 .build_request(reqwest::Method::POST, &url)

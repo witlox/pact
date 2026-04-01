@@ -67,18 +67,14 @@ fn create_node_mgmt_backend(config: &DelegationConfig) -> Result<NodeMgmtDispatc
 
     // NM-ADV-1: backward compat fallback only for Ochami, not Csm.
     let base_url = match backend_type {
-        NodeMgmtBackendType::Ochami => config
-            .node_mgmt_base_url
-            .as_deref()
-            .or(config.openchami_smd_url.as_deref()),
+        NodeMgmtBackendType::Ochami => {
+            config.node_mgmt_base_url.as_deref().or(config.openchami_smd_url.as_deref())
+        }
         NodeMgmtBackendType::Csm => config.node_mgmt_base_url.as_deref(),
     }
     .ok_or(NodeMgmtError::NotConfigured)?;
 
-    let token = config
-        .node_mgmt_token
-        .as_deref()
-        .or(config.openchami_token.as_deref());
+    let token = config.node_mgmt_token.as_deref().or(config.openchami_token.as_deref());
 
     match backend_type {
         NodeMgmtBackendType::Csm => {
@@ -567,14 +563,19 @@ mod tests {
 
     #[test]
     fn factory_csm_explicit() {
-        let config = config_with(Some(NodeMgmtBackendType::Csm), Some("https://csm.example.com"), None);
+        let config =
+            config_with(Some(NodeMgmtBackendType::Csm), Some("https://csm.example.com"), None);
         let backend = create_node_mgmt_backend(&config).unwrap();
         assert_eq!(backend.backend_name(), "CSM");
     }
 
     #[test]
     fn factory_ochami_explicit() {
-        let config = config_with(Some(NodeMgmtBackendType::Ochami), Some("https://ochami.example.com"), None);
+        let config = config_with(
+            Some(NodeMgmtBackendType::Ochami),
+            Some("https://ochami.example.com"),
+            None,
+        );
         let backend = create_node_mgmt_backend(&config).unwrap();
         assert_eq!(backend.backend_name(), "OpenCHAMI");
     }
@@ -623,7 +624,8 @@ mod tests {
 
     #[test]
     fn dispatch_routes_reboot_to_ochami() {
-        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("https://ochami.example.com", None, 5));
+        let dispatch =
+            NodeMgmtDispatch::Ochami(OpenChamiBackend::new("https://ochami.example.com", None, 5));
         assert_eq!(dispatch.backend_name(), "OpenCHAMI");
     }
 
@@ -638,7 +640,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_ochami_reboot_attempts_http() {
         // OpenChamiBackend.reboot() should attempt POST to Redfish — will fail (no server) with Unreachable
-        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
+        let dispatch =
+            NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
         let err = dispatch.reboot("x1000c0s0b0n0").await.unwrap_err();
         assert!(matches!(err, NodeMgmtError::Unreachable(_)));
     }
@@ -654,7 +657,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_ochami_reimage_attempts_redfish() {
         // OpenChamiBackend.reimage() should attempt Redfish PowerCycle — will fail with Unreachable
-        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
+        let dispatch =
+            NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
         let err = dispatch.reimage("x1000c0s0b0n0").await.unwrap_err();
         assert!(matches!(err, NodeMgmtError::Unreachable(_)));
     }

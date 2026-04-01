@@ -34,6 +34,15 @@ docker-compose.override.yml
 *.swp
 *.swo
 
+# Packer artifacts (release binaries downloaded for image builds)
+infra/gcp/packer/artifacts/
+
+# Terraform state and providers (local state, not shared)
+infra/gcp/terraform/.terraform/
+infra/gcp/terraform/terraform.tfstate
+infra/gcp/terraform/terraform.tfstate.backup
+infra/gcp/terraform/terraform.tfvars
+
 # Environment
 .env
 .env.*

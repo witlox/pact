@@ -45,10 +45,8 @@ impl OpenChamiBackend {
 
     /// Power cycle via Redfish.
     async fn power_cycle(&self, node_id: &str) -> Result<String, NodeMgmtError> {
-        let url = format!(
-            "{}/hsm/v2/State/Components/{}/Actions/PowerCycle",
-            self.base_url, node_id
-        );
+        let url =
+            format!("{}/hsm/v2/State/Components/{}/Actions/PowerCycle", self.base_url, node_id);
         let body = PowerAction { reset_type: "ForceRestart".to_string() };
 
         let resp = self
@@ -88,9 +86,9 @@ impl NodeManagementBackend for OpenChamiBackend {
         // OpenCHAMI: reimage = reboot. BSS serves the new image on next boot (NM-I5).
         let node_id = node_id.to_string();
         async move {
-            self.power_cycle(&node_id)
-                .await
-                .map(|_| format!("reimage initiated for {node_id} (power cycle + BSS re-provision)"))
+            self.power_cycle(&node_id).await.map(|_| {
+                format!("reimage initiated for {node_id} (power cycle + BSS re-provision)")
+            })
         }
     }
 
