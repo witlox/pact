@@ -36,7 +36,7 @@ pact-agent ──tmpfs──▶ lattice-node-agent (CapabilityReport manifest)
 pact-agent ──unix socket──▶ lattice-node-agent (namespace handoff, SCM_RIGHTS — N7)
 pact-agent ──unix socket──▶ SPIRE agent (SVID acquisition — N10)
 pact-cli   ──gRPC──▶ lattice        (drain/cordon delegation)
-pact-cli   ──REST──▶ OpenCHAMI      (reboot/reimage delegation, stubbed)
+pact-cli   ──REST──▶ CSM/OpenCHAMI  (reboot/reimage delegation via NodeManagementBackend trait)
 ```
 
 ## Justification Table

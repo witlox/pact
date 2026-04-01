@@ -169,7 +169,9 @@ Precise definitions for all terms used across pact documentation, code, and spec
 
 | Term | Definition |
 |------|-----------|
-| **OpenCHAMI** | Hardware discovery, boot provisioning, DHCP, BMC management. Below pact in the stack. Handles reboot, re-image, firmware. |
+| **Node management backend** | Pluggable system below pact for hardware discovery, boot provisioning, DHCP, BMC management. Two implementations: CSM (CAPMC + BOS + HSM) and OpenCHAMI (SMD Redfish + BSS + HSM). One per deployment (NM-I1). |
+| **OpenCHAMI** | Open-source node management backend (forked from CSM). Uses SMD Redfish for power, BSS for boot, HSM for inventory. Future strategic direction. |
+| **CSM** | Cray System Management — HPE's proprietary node management stack. Uses CAPMC for power, BOS for boot, HSM for inventory. Currently deployed. |
 | **Lattice** | Workload scheduler. Beside pact. Handles drain, cordon, job management. pact starts lattice-node-agent as a supervised service. Integration via hpc-core shared contracts (cgroup, namespace handoff, mount conventions). Lattice works independently of pact but gains capabilities ("supercharged") when pact is init. |
 | **Sovra** | Federated key management and cross-org trust. Above pact. Federates policy templates, not config state. |
 | **BMC console** | Out-of-band fallback when pact-agent is down. Unrestricted bash via Redfish. Changes detected as unattributed drift. |

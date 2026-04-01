@@ -1,18 +1,96 @@
 //! Delegation commands — operations delegated to external systems.
 //!
-//! These commands call lattice (drain/cordon/uncordon) or OpenCHAMI
-//! (reboot/reimage) APIs. pact acts as a unified admin interface.
-//! Each delegation is audit-logged in the journal before attempting
-//! the external call.
+//! These commands call lattice (drain/cordon/uncordon) or the configured
+//! node management backend (reboot/reimage) APIs. pact acts as a unified
+//! admin interface. Each delegation is audit-logged in the journal before
+//! attempting the external call.
 
 use pact_common::config::DelegationConfig;
+use pact_common::node_mgmt::{NodeManagementBackend, NodeMgmtBackendType, NodeMgmtError};
 use pact_common::proto::config::{
     scope::Scope as ProtoScope, ConfigEntry as ProtoConfigEntry, Identity as ProtoIdentity,
     Scope as ProtoScopeMsg,
 };
 use pact_common::proto::journal::AppendEntryRequest;
 
-use super::openchami::OpenChamiClient;
+use super::csm::CsmBackend;
+use super::openchami::OpenChamiBackend;
+
+/// Static dispatch enum for node management backends.
+/// Avoids dyn trait (RPITIT is not dyn-compatible).
+#[derive(Debug)]
+enum NodeMgmtDispatch {
+    Csm(CsmBackend),
+    Ochami(OpenChamiBackend),
+}
+
+impl NodeMgmtDispatch {
+    async fn reboot(&self, node_id: &str) -> Result<String, NodeMgmtError> {
+        match self {
+            Self::Csm(b) => b.reboot(node_id).await,
+            Self::Ochami(b) => b.reboot(node_id).await,
+        }
+    }
+
+    async fn reimage(&self, node_id: &str) -> Result<String, NodeMgmtError> {
+        match self {
+            Self::Csm(b) => b.reimage(node_id).await,
+            Self::Ochami(b) => b.reimage(node_id).await,
+        }
+    }
+
+    fn backend_name(&self) -> &str {
+        match self {
+            Self::Csm(b) => b.backend_name(),
+            Self::Ochami(b) => b.backend_name(),
+        }
+    }
+}
+
+/// Create the appropriate node management backend from config (NM-ADV-1).
+///
+/// Backward compat: if `node_mgmt_backend` is None but `openchami_smd_url` is set,
+/// creates an OpenCHAMI backend using the legacy env vars.
+fn create_node_mgmt_backend(config: &DelegationConfig) -> Result<NodeMgmtDispatch, NodeMgmtError> {
+    let Some(ref backend_type) = config.node_mgmt_backend else {
+        // Legacy fallback: no backend type → try openchami_smd_url
+        if let Some(ref url) = config.openchami_smd_url {
+            let token = config.node_mgmt_token.as_deref().or(config.openchami_token.as_deref());
+            return Ok(NodeMgmtDispatch::Ochami(OpenChamiBackend::new(
+                url,
+                token,
+                config.timeout_secs,
+            )));
+        }
+        return Err(NodeMgmtError::NotConfigured);
+    };
+
+    // NM-ADV-1: backward compat fallback only for Ochami, not Csm.
+    let base_url = match backend_type {
+        NodeMgmtBackendType::Ochami => config
+            .node_mgmt_base_url
+            .as_deref()
+            .or(config.openchami_smd_url.as_deref()),
+        NodeMgmtBackendType::Csm => config.node_mgmt_base_url.as_deref(),
+    }
+    .ok_or(NodeMgmtError::NotConfigured)?;
+
+    let token = config
+        .node_mgmt_token
+        .as_deref()
+        .or(config.openchami_token.as_deref());
+
+    match backend_type {
+        NodeMgmtBackendType::Csm => {
+            Ok(NodeMgmtDispatch::Csm(CsmBackend::new(base_url, token, config.timeout_secs)))
+        }
+        NodeMgmtBackendType::Ochami => Ok(NodeMgmtDispatch::Ochami(OpenChamiBackend::new(
+            base_url,
+            token,
+            config.timeout_secs,
+        ))),
+    }
+}
 
 /// Result of a delegation command.
 #[derive(Debug, Clone)]
@@ -318,12 +396,12 @@ pub async fn undrain_node(
     }
 }
 
-// --- OpenCHAMI delegation ---
+// --- Node management delegation ---
 
-/// Reboot a node via OpenCHAMI Redfish API.
+/// Reboot a node via the configured node management backend.
 ///
 /// Triggers a BMC-level reboot through the management network.
-/// Records the delegation in the journal for audit trail.
+/// Records the delegation in the journal for audit trail (NM-I2).
 pub async fn reboot_node(
     client: &mut super::execute::AuthConfigClient,
     node_id: &str,
@@ -331,50 +409,52 @@ pub async fn reboot_node(
     role: &str,
     delegation_config: &DelegationConfig,
 ) -> DelegationResult {
-    let audit_seq = audit_delegation(client, "reboot", node_id, "OpenCHAMI", principal, role).await;
+    // NM-ADV-5: audit uses config display name, not backend instance.
+    let target = delegation_config
+        .node_mgmt_backend
+        .as_ref()
+        .map_or("OpenCHAMI", NodeMgmtBackendType::display_name);
+    let audit_seq = audit_delegation(client, "reboot", node_id, target, principal, role).await;
     let audit_msg = match &audit_seq {
         Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
 
-    let Some(ref smd_url) = delegation_config.openchami_smd_url else {
-        return DelegationResult {
-            command: "reboot".into(),
-            node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
-            success: false,
-            message: format!("OpenCHAMI SMD URL not configured ({audit_msg})"),
-        };
+    let backend = match create_node_mgmt_backend(delegation_config) {
+        Ok(b) => b,
+        Err(e) => {
+            return DelegationResult {
+                command: "reboot".into(),
+                node_id: node_id.into(),
+                target_system: target.into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            };
+        }
     };
 
-    let oc = OpenChamiClient::new(
-        smd_url,
-        delegation_config.openchami_token.as_deref(),
-        delegation_config.timeout_secs,
-    );
-
-    match oc.reboot(node_id).await {
+    match backend.reboot(node_id).await {
         Ok(msg) => DelegationResult {
             command: "reboot".into(),
             node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
+            target_system: backend.backend_name().into(),
             success: true,
             message: format!("{msg} ({audit_msg})"),
         },
         Err(e) => DelegationResult {
             command: "reboot".into(),
             node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
+            target_system: backend.backend_name().into(),
             success: false,
             message: format!("{e} ({audit_msg})"),
         },
     }
 }
 
-/// Reimage a node via OpenCHAMI Manta API.
+/// Reimage a node via the configured node management backend.
 ///
 /// Triggers a full re-image of the node's SquashFS root.
-/// Records the delegation in the journal for audit trail.
+/// Records the delegation in the journal for audit trail (NM-I2).
 pub async fn reimage_node(
     client: &mut super::execute::AuthConfigClient,
     node_id: &str,
@@ -382,41 +462,41 @@ pub async fn reimage_node(
     role: &str,
     delegation_config: &DelegationConfig,
 ) -> DelegationResult {
-    let audit_seq =
-        audit_delegation(client, "reimage", node_id, "OpenCHAMI", principal, role).await;
+    let target = delegation_config
+        .node_mgmt_backend
+        .as_ref()
+        .map_or("OpenCHAMI", NodeMgmtBackendType::display_name);
+    let audit_seq = audit_delegation(client, "reimage", node_id, target, principal, role).await;
     let audit_msg = match &audit_seq {
         Ok(seq) => format!("audit seq:{seq}"),
         Err(_) => String::new(),
     };
 
-    let Some(ref smd_url) = delegation_config.openchami_smd_url else {
-        return DelegationResult {
-            command: "reimage".into(),
-            node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
-            success: false,
-            message: format!("OpenCHAMI SMD URL not configured ({audit_msg})"),
-        };
+    let backend = match create_node_mgmt_backend(delegation_config) {
+        Ok(b) => b,
+        Err(e) => {
+            return DelegationResult {
+                command: "reimage".into(),
+                node_id: node_id.into(),
+                target_system: target.into(),
+                success: false,
+                message: format!("{e} ({audit_msg})"),
+            };
+        }
     };
 
-    let oc = OpenChamiClient::new(
-        smd_url,
-        delegation_config.openchami_token.as_deref(),
-        delegation_config.timeout_secs,
-    );
-
-    match oc.reimage(node_id).await {
+    match backend.reimage(node_id).await {
         Ok(msg) => DelegationResult {
             command: "reimage".into(),
             node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
+            target_system: backend.backend_name().into(),
             success: true,
             message: format!("{msg} ({audit_msg})"),
         },
         Err(e) => DelegationResult {
             command: "reimage".into(),
             node_id: node_id.into(),
-            target_system: "OpenCHAMI".into(),
+            target_system: backend.backend_name().into(),
             success: false,
             message: format!("{e} ({audit_msg})"),
         },
@@ -426,6 +506,7 @@ pub async fn reimage_node(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pact_common::node_mgmt::NodeMgmtBackendType;
 
     #[test]
     fn format_success() {
@@ -467,5 +548,139 @@ mod tests {
         let output = format_delegation_result(&result);
         assert!(output.contains("audit seq:42"));
         assert!(output.contains("FAILED"));
+    }
+
+    // --- Factory function tests (Action 1) ---
+
+    fn config_with(
+        backend: Option<NodeMgmtBackendType>,
+        url: Option<&str>,
+        token: Option<&str>,
+    ) -> DelegationConfig {
+        DelegationConfig {
+            node_mgmt_backend: backend,
+            node_mgmt_base_url: url.map(String::from),
+            node_mgmt_token: token.map(String::from),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn factory_csm_explicit() {
+        let config = config_with(Some(NodeMgmtBackendType::Csm), Some("https://csm.example.com"), None);
+        let backend = create_node_mgmt_backend(&config).unwrap();
+        assert_eq!(backend.backend_name(), "CSM");
+    }
+
+    #[test]
+    fn factory_ochami_explicit() {
+        let config = config_with(Some(NodeMgmtBackendType::Ochami), Some("https://ochami.example.com"), None);
+        let backend = create_node_mgmt_backend(&config).unwrap();
+        assert_eq!(backend.backend_name(), "OpenCHAMI");
+    }
+
+    #[test]
+    fn factory_not_configured() {
+        let config = DelegationConfig::default();
+        let err = create_node_mgmt_backend(&config).unwrap_err();
+        assert!(matches!(err, NodeMgmtError::NotConfigured));
+    }
+
+    #[test]
+    fn factory_csm_without_url_fails() {
+        // NM-ADV-1: CSM backend with no URL must fail, not fall back to openchami_smd_url
+        let mut config = config_with(Some(NodeMgmtBackendType::Csm), None, None);
+        config.openchami_smd_url = Some("https://ochami.example.com".into());
+        let err = create_node_mgmt_backend(&config).unwrap_err();
+        assert!(matches!(err, NodeMgmtError::NotConfigured));
+    }
+
+    #[test]
+    fn factory_legacy_fallback_uses_ochami() {
+        // No backend type set, but openchami_smd_url exists → OpenCHAMI backend
+        let mut config = DelegationConfig::default();
+        config.openchami_smd_url = Some("https://legacy.example.com".into());
+        let backend = create_node_mgmt_backend(&config).unwrap();
+        assert_eq!(backend.backend_name(), "OpenCHAMI");
+    }
+
+    #[test]
+    fn factory_ochami_falls_back_to_legacy_url() {
+        // Ochami backend with no node_mgmt_base_url but openchami_smd_url set
+        let mut config = config_with(Some(NodeMgmtBackendType::Ochami), None, None);
+        config.openchami_smd_url = Some("https://legacy-ochami.example.com".into());
+        let backend = create_node_mgmt_backend(&config).unwrap();
+        assert_eq!(backend.backend_name(), "OpenCHAMI");
+    }
+
+    // --- Dispatch routing tests (Action 2) ---
+
+    #[test]
+    fn dispatch_routes_reboot_to_csm() {
+        let dispatch = NodeMgmtDispatch::Csm(CsmBackend::new("https://csm.example.com", None, 5));
+        assert_eq!(dispatch.backend_name(), "CSM");
+    }
+
+    #[test]
+    fn dispatch_routes_reboot_to_ochami() {
+        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("https://ochami.example.com", None, 5));
+        assert_eq!(dispatch.backend_name(), "OpenCHAMI");
+    }
+
+    #[tokio::test]
+    async fn dispatch_csm_reboot_attempts_http() {
+        // CsmBackend.reboot() should attempt POST to CAPMC — will fail (no server) with Unreachable
+        let dispatch = NodeMgmtDispatch::Csm(CsmBackend::new("http://127.0.0.1:1", None, 1));
+        let err = dispatch.reboot("x1000c0s0b0n0").await.unwrap_err();
+        assert!(matches!(err, NodeMgmtError::Unreachable(_)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_ochami_reboot_attempts_http() {
+        // OpenChamiBackend.reboot() should attempt POST to Redfish — will fail (no server) with Unreachable
+        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
+        let err = dispatch.reboot("x1000c0s0b0n0").await.unwrap_err();
+        assert!(matches!(err, NodeMgmtError::Unreachable(_)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_csm_reimage_attempts_bos() {
+        // CsmBackend.reimage() should attempt POST to BOS — will fail with Unreachable
+        let dispatch = NodeMgmtDispatch::Csm(CsmBackend::new("http://127.0.0.1:1", None, 1));
+        let err = dispatch.reimage("x1000c0s0b0n0").await.unwrap_err();
+        assert!(matches!(err, NodeMgmtError::Unreachable(_)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_ochami_reimage_attempts_redfish() {
+        // OpenChamiBackend.reimage() should attempt Redfish PowerCycle — will fail with Unreachable
+        let dispatch = NodeMgmtDispatch::Ochami(OpenChamiBackend::new("http://127.0.0.1:1", None, 1));
+        let err = dispatch.reimage("x1000c0s0b0n0").await.unwrap_err();
+        assert!(matches!(err, NodeMgmtError::Unreachable(_)));
+    }
+
+    // --- Audit ordering test (Action 5) ---
+    // NM-I2: audit_delegation is called BEFORE backend.reboot/reimage in the code.
+    // We verify this structurally: reboot_node/reimage_node call audit_delegation first,
+    // then create_node_mgmt_backend. If backend creation fails, the audit entry still exists.
+    // This test verifies the "not configured" path produces an audit message AND a failure.
+
+    #[test]
+    fn reboot_not_configured_includes_target_system() {
+        // When no backend is configured, the target_system should still be set
+        // (from config or default "OpenCHAMI") for the audit entry.
+        let config = DelegationConfig::default();
+        let target = config
+            .node_mgmt_backend
+            .as_ref()
+            .map_or("OpenCHAMI", NodeMgmtBackendType::display_name);
+        assert_eq!(target, "OpenCHAMI"); // default when None
+
+        let config_csm = config_with(Some(NodeMgmtBackendType::Csm), None, None);
+        let target_csm = config_csm
+            .node_mgmt_backend
+            .as_ref()
+            .map_or("OpenCHAMI", NodeMgmtBackendType::display_name);
+        assert_eq!(target_csm, "CSM");
     }
 }

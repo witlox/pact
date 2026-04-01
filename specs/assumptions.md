@@ -135,8 +135,8 @@ When PolicyService is unreachable, agents use cached VClusterPolicy for basic au
 ### A-Int1: Lattice Rust client exists [Validated]
 Drain/cordon commands delegate to lattice via its Rust client library. This dependency is available.
 
-### A-Int2: OpenCHAMI client status unknown [Unknown]
-Reboot/re-image commands delegate to OpenCHAMI/Manta APIs. A Rust client for these APIs may not exist yet. Delegation commands are stubbed initially.
+### A-Int2: Node management backend is CSM or OpenCHAMI [Accepted — updated 2026-04-01]
+Reboot/re-image commands delegate to a pluggable node management backend. Two implementations: CSM (CAPMC + BOS) for current Cray infrastructure, OpenCHAMI (SMD Redfish) for future open-source deployments. One backend per deployment (NM-I1). HSM API is shared (same origin, different path prefix). Auth is opaque Bearer token pass-through. Manta crate dependencies (rdkafka, reqwest 0.12) are incompatible — pact implements its own thin REST clients (~150 lines each).
 
 ### A-Int3: Sovra is optional [Accepted]
 Federation via Sovra is feature-gated. The system is fully functional without it.
@@ -330,7 +330,7 @@ Syslog is at /var/log/syslog (Debian/Ubuntu) or /var/log/messages (RHEL/SLES). A
 
 | ID | Question | Impact if wrong | Next step |
 |----|---------|----------------|-----------|
-| A-Int2 | OpenCHAMI Rust client exists? | Delegation commands remain stubbed | Check OpenCHAMI API, assess effort |
+| A-Int2 | Node mgmt backend is CSM or OpenCHAMI | Resolved — thin REST clients for both | N/A |
 | A-WI3 | Mount hold timer optimal value? | Performance only | Benchmark uenv mount latency |
 | NEW | dbus-daemon actually needed for DCGM? | If not needed, one fewer service | Test nv-hostengine standalone mode |
 | NEW | rpcbind needed for NFSv4? | If NFSv4 only, rpcbind can be dropped | Check VAST NFS version in use |

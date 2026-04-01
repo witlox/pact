@@ -32,7 +32,7 @@ diagnostics. Service lifecycle management.
 
 ## What pact delegates
 
-- **To OpenCHAMI/Manta**: reboot, re-image, firmware updates, hardware discovery, DHCP
+- **To CSM or OpenCHAMI** (pluggable node management backend): reboot, re-image, hardware discovery, DHCP
 - **To lattice**: drain/undrain/cordon/uncordon nodes, DAG workflows, budget tracking, backup/restore, node queries, job management, vCluster creation, scheduling policy
 - **To Sovra**: cross-site trust establishment, federated policy attestation
 

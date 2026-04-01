@@ -358,8 +358,8 @@ const fn default_sync_interval() -> u32 {
 /// External system delegation endpoints.
 ///
 /// Used by the CLI to connect to lattice (drain/cordon/uncordon) and
-/// OpenCHAMI (reboot/reimage) APIs. All fields are optional — delegation
-/// commands return "not configured" when the relevant endpoint is absent.
+/// node management backend (reboot/reimage) APIs. All fields are optional —
+/// delegation commands return "not configured" when the relevant endpoint is absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DelegationConfig {
@@ -367,9 +367,17 @@ pub struct DelegationConfig {
     pub lattice_endpoint: Option<String>,
     /// Lattice auth token.
     pub lattice_token: Option<String>,
-    /// OpenCHAMI SMD base URL (e.g., "https://smd.example.com").
+    /// Node management backend type (NM-I1). None = use legacy fallback.
+    pub node_mgmt_backend: Option<crate::node_mgmt::NodeMgmtBackendType>,
+    /// Node management base URL (e.g., "https://api.example.com").
+    pub node_mgmt_base_url: Option<String>,
+    /// Node management auth token (opaque Bearer, NM-I4).
+    pub node_mgmt_token: Option<String>,
+    /// Deprecated: OpenCHAMI SMD base URL. Mapped to node_mgmt_base_url for backward compat.
+    #[serde(default)]
     pub openchami_smd_url: Option<String>,
-    /// OpenCHAMI auth token.
+    /// Deprecated: OpenCHAMI auth token. Mapped to node_mgmt_token for backward compat.
+    #[serde(default)]
     pub openchami_token: Option<String>,
     /// Timeout in seconds for delegation calls.
     pub timeout_secs: u64,
@@ -380,6 +388,9 @@ impl Default for DelegationConfig {
         Self {
             lattice_endpoint: None,
             lattice_token: None,
+            node_mgmt_backend: None,
+            node_mgmt_base_url: None,
+            node_mgmt_token: None,
             openchami_smd_url: None,
             openchami_token: None,
             timeout_secs: 30,

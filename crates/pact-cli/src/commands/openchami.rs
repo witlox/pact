@@ -1,18 +1,17 @@
-//! Local OpenCHAMI REST client for BMC operations.
+//! OpenCHAMI node management backend.
 //!
-//! Implements reboot (PowerCycle) and reimage (SetBootParams + PowerCycle)
-//! via OpenCHAMI's SMD and BSS REST APIs.
+//! Implements `NodeManagementBackend` for OpenCHAMI deployments.
+//! Reboot/reimage via SMD Redfish PowerCycle. HSM path: `/hsm/v2`.
 //!
-//! This is pact's own client — NOT imported from lattice, because pact's
-//! management scope (BMC operations for config management) differs from
-//! lattice's (workload scheduling).
+//! See specs/architecture/interfaces/node-management.md
 
-use serde::{Deserialize, Serialize};
+use pact_common::node_mgmt::{NodeManagementBackend, NodeMgmtError};
+use serde::Serialize;
 
-/// REST client for OpenCHAMI State Manager Daemon (SMD) and Boot Script Service (BSS).
+/// OpenCHAMI backend — SMD Redfish for power, BSS for boot (implicit on reboot).
 #[derive(Debug, Clone)]
-pub struct OpenChamiClient {
-    smd_base_url: String,
+pub struct OpenChamiBackend {
+    base_url: String,
     token: Option<String>,
     client: reqwest::Client,
 }
@@ -23,62 +22,84 @@ struct PowerAction {
     reset_type: String,
 }
 
-/// Component state returned by SMD.
-#[derive(Debug, Deserialize)]
-pub struct ComponentState {
-    /// HSM component ID (xname).
-    #[serde(rename = "ID")]
-    pub id: String,
-    /// Current component state (e.g., "Ready", "Off").
-    pub state: String,
-}
-
-impl OpenChamiClient {
-    /// Create a new client for the given SMD base URL.
-    pub fn new(smd_base_url: &str, token: Option<&str>, timeout_secs: u64) -> Self {
+impl OpenChamiBackend {
+    pub fn new(base_url: &str, token: Option<&str>, timeout_secs: u64) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .unwrap_or_default();
         Self {
-            smd_base_url: smd_base_url.trim_end_matches('/').to_string(),
+            base_url: base_url.trim_end_matches('/').to_string(),
             token: token.map(str::to_string),
             client,
         }
     }
 
-    fn auth_header(&self) -> Option<String> {
-        self.token.as_ref().map(|t| format!("Bearer {t}"))
+    fn build_request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
+        let mut req = self.client.request(method, url);
+        if let Some(ref token) = self.token {
+            req = req.bearer_auth(token);
+        }
+        req
     }
 
-    /// Power cycle (reboot) a node via Redfish.
-    pub async fn reboot(&self, node_id: &str) -> Result<String, String> {
-        let url =
-            format!("{}/hsm/v2/State/Components/{}/Actions/PowerCycle", self.smd_base_url, node_id);
+    /// Power cycle via Redfish.
+    async fn power_cycle(&self, node_id: &str) -> Result<String, NodeMgmtError> {
+        let url = format!(
+            "{}/hsm/v2/State/Components/{}/Actions/PowerCycle",
+            self.base_url, node_id
+        );
         let body = PowerAction { reset_type: "ForceRestart".to_string() };
 
-        let mut req = self.client.post(&url).json(&body);
-        if let Some(ref auth) = self.auth_header() {
-            req = req.header("Authorization", auth);
-        }
+        let resp = self
+            .build_request(reqwest::Method::POST, &url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| NodeMgmtError::Unreachable(e.to_string()))?;
 
-        let resp = req.send().await.map_err(|e| format!("reboot request failed: {e}"))?;
         if resp.status().is_success() {
-            Ok(format!("reboot initiated for {node_id}"))
+            Ok(format!("power cycle initiated for {node_id}"))
         } else {
-            Err(format!("reboot failed: HTTP {}", resp.status()))
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            if status == 401 || status == 403 {
+                Err(NodeMgmtError::AuthError(body))
+            } else {
+                Err(NodeMgmtError::BackendError { status, body })
+            }
+        }
+    }
+}
+
+impl NodeManagementBackend for OpenChamiBackend {
+    fn reboot(
+        &self,
+        node_id: &str,
+    ) -> impl std::future::Future<Output = Result<String, NodeMgmtError>> + Send {
+        let node_id = node_id.to_string();
+        async move { self.power_cycle(&node_id).await }
+    }
+
+    fn reimage(
+        &self,
+        node_id: &str,
+    ) -> impl std::future::Future<Output = Result<String, NodeMgmtError>> + Send {
+        // OpenCHAMI: reimage = reboot. BSS serves the new image on next boot (NM-I5).
+        let node_id = node_id.to_string();
+        async move {
+            self.power_cycle(&node_id)
+                .await
+                .map(|_| format!("reimage initiated for {node_id} (power cycle + BSS re-provision)"))
         }
     }
 
-    /// Re-image a node via BSS boot parameters + power cycle.
-    ///
-    /// The boot image selection is handled by OpenCHAMI BSS configuration,
-    /// not by pact. Pact just triggers the reboot — BSS serves the new image
-    /// on next boot.
-    pub async fn reimage(&self, node_id: &str) -> Result<String, String> {
-        self.reboot(node_id)
-            .await
-            .map(|_| format!("reimage initiated for {node_id} (power cycle + BSS re-provision)"))
+    fn hsm_path_prefix(&self) -> &'static str {
+        "/hsm/v2"
+    }
+
+    fn backend_name(&self) -> &'static str {
+        "OpenCHAMI"
     }
 }
 
@@ -87,20 +108,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_client_trims_trailing_slash() {
-        let client = OpenChamiClient::new("https://smd.example.com/", None, 30);
-        assert_eq!(client.smd_base_url, "https://smd.example.com");
+    fn new_trims_trailing_slash() {
+        let backend = OpenChamiBackend::new("https://smd.example.com/", None, 30);
+        assert_eq!(backend.base_url, "https://smd.example.com");
     }
 
     #[test]
-    fn auth_header_with_token() {
-        let client = OpenChamiClient::new("https://smd.example.com", Some("tok123"), 30);
-        assert_eq!(client.auth_header(), Some("Bearer tok123".to_string()));
+    fn hsm_path_prefix() {
+        let backend = OpenChamiBackend::new("https://smd.example.com", None, 30);
+        assert_eq!(backend.hsm_path_prefix(), "/hsm/v2");
     }
 
     #[test]
-    fn auth_header_without_token() {
-        let client = OpenChamiClient::new("https://smd.example.com", None, 30);
-        assert!(client.auth_header().is_none());
+    fn backend_name() {
+        let backend = OpenChamiBackend::new("https://smd.example.com", None, 30);
+        assert_eq!(backend.backend_name(), "OpenCHAMI");
     }
 }

@@ -133,11 +133,13 @@ Module boundaries, responsibilities, and ownership. Each module maps to a Rust c
 - OIDC token acquisition
 - Output formatting (table, JSON)
 - Exit code semantics
-- Delegation commands (lattice drain/cordon/uncordon/undrain, OpenCHAMI reboot/reimage)
+- Delegation commands (lattice drain/cordon/uncordon/undrain, node management reboot/reimage via CSM or OpenCHAMI)
 
 **Submodules:**
 - `commands/` — one module per command group (status, diff, commit, exec, shell, diag, jobs, queue, cluster, audit, accounting, health, dag, budget, backup, nodes, etc.)
-  - `delegate.rs` — write operations delegated to lattice (drain, cordon, uncordon, undrain) and OpenCHAMI (reboot, reimage). All audit-logged.
+  - `delegate.rs` — write operations delegated to lattice (drain, cordon, uncordon, undrain) and node management backend (reboot, reimage). All audit-logged.
+  - `csm.rs` — CsmBackend: CAPMC power control + BOS reimage. Implements NodeManagementBackend trait.
+  - `openchami.rs` — OpenChamiBackend: SMD Redfish power control. Implements NodeManagementBackend trait.
   - `lattice.rs` — read operations + admin ops delegated to lattice (jobs, queue, cluster, audit, accounting, health, dag, budget, backup, nodes).
   - `diag.rs` — CLI handler for `pact diag`. Single-node mode: connects to one agent, calls CollectDiag, displays chunks. Fleet mode (`--vcluster`): queries EnrollmentService for node list, fans out CollectDiag to all agents concurrently (max 50 parallel, 5s timeout per agent), prefixes output with `[node_id]`. Handles F42 (unreachable agents → partial results + warning) and F43 (missing sources → empty chunk).
 - `client/` — gRPC client wrappers (journal + lattice)

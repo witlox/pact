@@ -97,6 +97,18 @@ Maps every invariant to its enforcement point in the codebase — where validati
 
 ---
 
+## Node Management Invariants
+
+| ID | Invariant | Enforcement Point | Mechanism | Violation Response |
+|----|-----------|-------------------|-----------|-------------------|
+| NM-I1 | One backend per deployment | `DelegationConfig.node_mgmt_backend` | Single enum field (`Csm` or `Ochami`), not per-node | Structural — enum has one value |
+| NM-I2 | Audit before delegation | `delegate.rs:reboot_node/reimage_node` | `audit_delegation()` called before `backend.reboot/reimage()` | Audit entry exists even on backend failure |
+| NM-I3 | Graceful failure | `NodeMgmtError` enum | All backend errors mapped to typed variants, no panics | Error message returned to CLI user |
+| NM-I4 | Single credential scope | `DelegationConfig` | One `node_mgmt_base_url` + `node_mgmt_token` used for HSM and power APIs | Structural — single config source |
+| NM-I5 | Uniform CLI semantics | `NodeManagementBackend` trait | `reimage()` has identical signature regardless of backend. No CSM-specific params leak. | Compile-time — trait enforces contract |
+
+---
+
 ## Raft Invariants
 
 | ID | Invariant | Enforcement Point | Mechanism | Violation Response |

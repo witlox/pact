@@ -142,9 +142,9 @@ Feature: CLI Commands
     When the user runs "pact undrain node-001"
     Then the command should delegate to the lattice scheduler API
 
-  Scenario: pact reboot delegates to OpenCHAMI
+  Scenario: pact reboot delegates to node management backend
     When the user runs "pact reboot node-001"
-    Then the command should delegate to the OpenCHAMI Manta API
+    Then the command should delegate to the node management backend
 
   # --- DAG workflow commands ---
 

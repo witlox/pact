@@ -279,15 +279,18 @@ new fields, using only the fields they understand.
 **Invariant:** A-Int1 (lattice Rust client exists)
 **RBAC:** Node ops (drain/undrain/cordon) require pact-ops-{vcluster}. DAG/budget/nodes read requires pact-viewer-{vcluster}. DAG cancel requires pact-ops-{vcluster}. Backup requires pact-platform-admin. Restore additionally requires --confirm flag.
 
-### E4: pact CLI → OpenCHAMI API (Delegation)
+### E4: pact CLI → Node Management Backend (Delegation)
 
-**Direction:** CLI delegates reboot/reimage to OpenCHAMI.
-**Protocol:** REST (Redfish/Manta API)
+**Direction:** CLI delegates reboot/reimage to configured node management backend.
+**Protocol:** REST (CAPMC/BOS for CSM, Redfish for OpenCHAMI)
+**Backend selection:** One backend per deployment — `csm` or `ochami` (NM-I1).
 **Data flow:**
-- `pact reboot <node>` → OpenCHAMI Redfish API
-- `pact reimage <node>` → OpenCHAMI Manta API
-**Failure mode:** OpenCHAMI unreachable — delegation fails
-**Invariant:** A-Int2 (client status unknown — stubbed initially)
+- `pact reboot <node>` → CSM CAPMC `/capmc/capmc/v1/xname_reinit` OR OpenCHAMI Redfish `/hsm/v2/.../PowerCycle`
+- `pact reimage <node>` → CSM BOS `/bos/v2/sessions` (operation: reboot) OR OpenCHAMI Redfish PowerCycle
+- `pact node import` → HSM `/hsm/v2/State/Components` (same API, different path prefix per backend)
+**Auth:** Opaque Bearer token passed through to backend (NM-I4).
+**Failure mode:** Backend unreachable — delegation fails with clean error (NM-I3).
+**Invariant:** NM-I2 (audit before delegation), NM-I5 (uniform CLI semantics)
 
 ### E5: Sovra → pact-policy (Federation Sync)
 

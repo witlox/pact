@@ -6,4 +6,5 @@ pub mod proto;
 
 pub mod config;
 pub mod error;
+pub mod node_mgmt;
 pub mod types;

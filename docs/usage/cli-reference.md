@@ -635,7 +635,7 @@ pact uncordon node-042
 
 ### `pact reboot`
 
-Reboot a node via BMC/Redfish. Delegates to OpenCHAMI for the actual reboot.
+Reboot a node via BMC. Delegates to the configured node management backend (CSM CAPMC or OpenCHAMI Redfish).
 
 ```bash
 pact reboot node-042
@@ -647,8 +647,8 @@ pact reboot node-042
 
 ### `pact reimage`
 
-Re-image a node via OpenCHAMI. The node will be re-provisioned with the base
-SquashFS image and re-enrolled with pact.
+Re-image a node via the configured node management backend. CSM creates a BOS
+reboot session; OpenCHAMI triggers a Redfish power cycle (BSS serves the new image).
 
 ```bash
 pact reimage node-042

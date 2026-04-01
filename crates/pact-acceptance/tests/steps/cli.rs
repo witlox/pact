@@ -603,7 +603,7 @@ async fn when_pact_delegation(world: &mut PactWorld, cmd: String, _node: String)
 
 #[when(regex = r#"^the user runs "pact reboot ([\w-]+)"$"#)]
 async fn when_pact_reboot(world: &mut PactWorld, _node: String) {
-    world.cli_output = Some("reboot delegated to OpenCHAMI Manta API".into());
+    world.cli_output = Some("reboot delegated to node management backend".into());
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
 
@@ -866,12 +866,12 @@ async fn then_delegate_lattice(world: &mut PactWorld) {
     );
 }
 
-#[then("the command should delegate to the OpenCHAMI Manta API")]
-async fn then_delegate_openchami(world: &mut PactWorld) {
+#[then("the command should delegate to the node management backend")]
+async fn then_delegate_node_mgmt(world: &mut PactWorld) {
     let output = world.cli_output.as_ref().expect("no output");
     assert!(
-        output.contains("OpenCHAMI") || output.contains("Manta"),
-        "should delegate to OpenCHAMI"
+        output.contains("node management backend") || output.contains("OpenCHAMI") || output.contains("CSM"),
+        "should delegate to node management backend"
     );
 }
 
