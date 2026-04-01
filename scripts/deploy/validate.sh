@@ -15,10 +15,40 @@ VARIANT="${1:?Usage: validate.sh <variant> <journal-endpoint> <compute-nodes>}"
 ENDPOINT="${2:?}"
 NODES="${3:?}"
 
-PACT="pact --endpoint $ENDPOINT"
 IFS=',' read -ra NODE_LIST <<< "$NODES"
 FIRST_NODE="${NODE_LIST[0]}"
 JOURNAL_HOST="${ENDPOINT%%:*}"
+
+# Auto-obtain Dex token if not already authenticated
+ADMIN_IP="$(hostname -I | awk '{print $1}')"
+DEX_ISSUER="http://${ADMIN_IP}:5556/dex"
+if [ -z "${PACT_TOKEN:-}" ]; then
+    echo "Obtaining OIDC token from Dex ($DEX_ISSUER)..."
+    # Use Resource Owner Password Credentials grant via Dex's password connector
+    TOKEN_RESPONSE=$(curl -sf -X POST "${DEX_ISSUER}/token" \
+        -d "grant_type=password" \
+        -d "client_id=pact-cli" \
+        -d "client_secret=pact-cli-secret" \
+        -d "username=admin@pact.local" \
+        -d "password=password" \
+        -d "scope=openid email profile groups" \
+        2>/dev/null || true)
+    if [ -n "$TOKEN_RESPONSE" ]; then
+        PACT_TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+        if [ -n "$PACT_TOKEN" ]; then
+            export PACT_TOKEN
+            # Also export for lattice delegation commands
+            export PACT_LATTICE_TOKEN="$PACT_TOKEN"
+            echo "Token obtained successfully"
+        else
+            echo "WARNING: Could not parse token from Dex response. Tests requiring auth will fail."
+        fi
+    else
+        echo "WARNING: Dex not reachable at $DEX_ISSUER. Tests requiring auth will fail."
+    fi
+fi
+
+PACT="pact --endpoint $ENDPOINT"
 
 PASS=0
 FAIL=0

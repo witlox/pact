@@ -38,6 +38,6 @@ output "journal_endpoint" {
 }
 
 output "compute_nodes" {
-  description = "Comma-separated compute node IDs for validate.sh"
-  value       = join(",", [for i in range(var.compute_count) : "compute-${i + 1}"])
+  description = "Comma-separated compute hostnames for validate.sh"
+  value       = join(",", [for inst in google_compute_instance.compute : inst.name])
 }

@@ -12,6 +12,24 @@ JOURNAL_HOSTS="${1:?Usage: install-monitoring.sh <journal-hosts>}"
 
 echo "=== Installing monitoring stack ==="
 
+# Install Docker (needed for Loki and Dex)
+if ! command -v docker &>/dev/null; then
+    echo "Installing Docker..."
+    apt-get update -qq
+    apt-get install -y -qq ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+        https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        > /etc/apt/sources.list.d/docker.list
+    apt-get update -qq
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+    systemctl enable docker
+    systemctl start docker
+    echo "Docker installed"
+fi
+
 # Install Prometheus
 if ! command -v prometheus &>/dev/null; then
     echo "Installing Prometheus..."
@@ -88,7 +106,18 @@ else
     echo "Docker not available — skipping Loki (install manually)"
 fi
 
+# Install Dex OIDC IdP (for pact CLI auth)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/install-dex.sh" ]; then
+    "$SCRIPT_DIR/install-dex.sh"
+elif [ -f /opt/pact/deploy/install-dex.sh ]; then
+    /opt/pact/deploy/install-dex.sh
+else
+    echo "WARNING: install-dex.sh not found — skipping Dex OIDC setup"
+fi
+
 echo "=== Monitoring stack ready ==="
 echo "  Prometheus: http://localhost:9090"
 echo "  Grafana:    http://localhost:3000 (admin/admin)"
 echo "  Loki:       http://localhost:3100"
+echo "  Dex OIDC:   http://$(hostname -I | awk '{print $1}'):5556/dex"

@@ -53,6 +53,7 @@ resource "google_compute_firewall" "internal" {
       "9444",  // pact Raft
       "9445",  // pact shell
       "9091",  // pact metrics
+      "5556",  // Dex OIDC
       "50051", // lattice gRPC
       "9000",  // lattice Raft
       "8080",  // lattice REST
@@ -117,6 +118,7 @@ resource "google_compute_instance" "management" {
     node_id      = count.index + 1
     peer_list    = join(",", [for i in range(var.management_count) : "${i + 1}=${local.name_prefix}-mgmt-${i + 1}:9443"])
     with_lattice = local.with_lattice
+    admin_ip     = google_compute_instance.admin.network_interface[0].network_ip
   })
 }
 
@@ -145,6 +147,7 @@ resource "google_compute_instance" "compute" {
     pact-node-id              = "compute-${count.index + 1}"
     pact-variant              = var.variant
     pact-journal-endpoints    = join(",", [for i in range(var.management_count) : "\"${local.name_prefix}-mgmt-${i + 1}:9443\""])
+    pact-admin-ip             = google_compute_instance.admin.network_interface[0].network_ip
   }
 }
 

@@ -62,6 +62,9 @@ else
 fi
 
 # Write journal env file (journal reads these as CLI args via systemd)
+# Discover admin/Dex IP from peers or env
+ADMIN_IP="${PACT_ADMIN_IP:-}"
+
 cat > "$CONF_DIR/journal.env" <<EOF
 PACT_JOURNAL_NODE_ID=$NODE_ID
 PACT_JOURNAL_LISTEN=0.0.0.0:9443
@@ -69,6 +72,15 @@ PACT_JOURNAL_DATA_DIR=$DATA_DIR
 PACT_JOURNAL_PEERS=$RAFT_PEERS
 RUST_LOG=info
 EOF
+
+# Add OIDC config if admin IP is known (Dex runs on admin node)
+if [ -n "$ADMIN_IP" ]; then
+    cat >> "$CONF_DIR/journal.env" <<EOF
+PACT_OIDC_ISSUER=http://${ADMIN_IP}:5556/dex
+PACT_OIDC_AUDIENCE=pact-cli
+PACT_OIDC_JWKS_URL=http://${ADMIN_IP}:5556/dex/keys
+EOF
+fi
 
 # Install systemd unit
 if [ -f /opt/pact/systemd/pact-journal.service ]; then

@@ -64,7 +64,9 @@ if command -v curl >/dev/null 2>&1; then
         "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pact-node-id" 2>/dev/null || true)
     JOURNAL_ENDPOINTS=$(curl -sf -m 5 -H "Metadata-Flavor: Google" \
         "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pact-journal-endpoints" 2>/dev/null || true)
-    echo "pact-init: node_id=$NODE_ID journal=$JOURNAL_ENDPOINTS" > /dev/console 2>/dev/null
+    ADMIN_IP=$(curl -sf -m 5 -H "Metadata-Flavor: Google" \
+        "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pact-admin-ip" 2>/dev/null || true)
+    echo "pact-init: node_id=$NODE_ID journal=$JOURNAL_ENDPOINTS admin=$ADMIN_IP" > /dev/console 2>/dev/null
 fi
 
 # Fall back to kernel command line params if metadata fetch didn't work
@@ -100,6 +102,19 @@ elif [ -n "$JOURNAL" ] && [ -f "$CONFIG" ]; then
     # Kernel param: comma-separated, convert to TOML array
     TOML_ENDPOINTS=$(echo "$JOURNAL" | sed 's/,/", "/g')
     sed -i "s|endpoints = \[\"journal-1:9443\"\]|endpoints = [\"$TOML_ENDPOINTS\"]|" "$CONFIG"
+fi
+
+# Append shell auth config if admin IP available (Dex OIDC)
+if [ -n "${ADMIN_IP:-}" ] && [ -f "$CONFIG" ]; then
+    if ! grep -q 'agent.shell.auth' "$CONFIG"; then
+        cat >> "$CONFIG" <<AUTHEOF
+
+[agent.shell.auth]
+jwks_url = "http://${ADMIN_IP}:5556/dex/keys"
+issuer = "http://${ADMIN_IP}:5556/dex"
+audience = "pact-cli"
+AUTHEOF
+    fi
 fi
 
 # Exec pact-agent as PID 1 (replaces this script)
