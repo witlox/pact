@@ -40,7 +40,7 @@ source "googlecompute" "compute_pid1" {
   machine_type = "e2-standard-2"
 
   source_image_family = "debian-12"
-  source_image_project_ids = ["debian-cloud"]
+  source_image_project_id = ["debian-cloud"]
 
   image_name        = "pact-compute-pid1-${replace(var.pact_version, ".", "-")}"
   image_description = "Pact compute node (agent as PID 1, no systemd)"
@@ -54,10 +54,11 @@ build {
   sources = ["source.googlecompute.compute_pid1"]
 
   // Install minimal packages (no unnecessary services)
+  // curl needed for GCP metadata API (journal endpoint discovery)
   provisioner "shell" {
     inline = [
       "sudo apt-get update -qq",
-      "sudo apt-get install -y -qq ca-certificates openssl iproute2",
+      "sudo apt-get install -y -qq ca-certificates curl openssl iproute2 isc-dhcp-client",
     ]
   }
 
@@ -95,12 +96,25 @@ build {
     ]
   }
 
-  // Configure GRUB to use pact-agent as init
-  // The agent handles mounting /proc, /sys, /dev (devtmpfs) via PlatformInit.
+  // Upload init wrapper script (patches config from GCP metadata, then exec's pact-agent)
+  provisioner "file" {
+    source      = "scripts/pact-init-wrapper.sh"
+    destination = "/tmp/pact-init-wrapper.sh"
+  }
+
   provisioner "shell" {
     inline = [
-      // Set kernel init parameter
-      "sudo sed -i 's|GRUB_CMDLINE_LINUX_DEFAULT=\".*\"|GRUB_CMDLINE_LINUX_DEFAULT=\"quiet init=/usr/local/bin/pact-agent -- --config /etc/pact/agent.toml\"|' /etc/default/grub",
+      "sudo mv /tmp/pact-init-wrapper.sh /opt/pact/bin/pact-init-wrapper.sh",
+      "sudo chmod +x /opt/pact/bin/pact-init-wrapper.sh",
+      "sudo ln -sf /opt/pact/bin/pact-init-wrapper.sh /usr/local/bin/pact-init",
+    ]
+  }
+
+  // Configure GRUB to use init wrapper as PID 1
+  // The wrapper mounts /proc /sys /dev, patches config from metadata, then exec's pact-agent.
+  provisioner "shell" {
+    inline = [
+      "sudo sed -i 's|GRUB_CMDLINE_LINUX_DEFAULT=\".*\"|GRUB_CMDLINE_LINUX_DEFAULT=\"quiet init=/usr/local/bin/pact-init\"|' /etc/default/grub",
       "sudo update-grub",
     ]
   }
@@ -111,6 +125,9 @@ build {
     inline = [
       "sudo apt-get remove -y openssh-server || true",
       "sudo apt-get autoremove -y",
+      // Fix resolv.conf for PID 1 mode (Debian symlinks to systemd-resolved)
+      "sudo rm -f /etc/resolv.conf",
+      "echo 'nameserver 169.254.169.254' | sudo tee /etc/resolv.conf",
     ]
   }
 

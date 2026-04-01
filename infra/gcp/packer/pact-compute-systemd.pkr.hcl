@@ -38,7 +38,7 @@ source "googlecompute" "compute_systemd" {
   machine_type = "e2-standard-2"
 
   source_image_family = "debian-12"
-  source_image_project_ids = ["debian-cloud"]
+  source_image_project_id = ["debian-cloud"]
 
   image_name        = "pact-compute-systemd-${replace(var.pact_version, ".", "-")}"
   image_description = "Pact compute node (agent under systemd)"

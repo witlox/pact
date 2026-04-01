@@ -9,6 +9,8 @@ enforcement_mode = "observe"
 backend = "Pact"
 
 [agent.journal]
+# Placeholder — replaced at deploy by install-compute.sh or init wrapper.
+# For GCP PID 1 nodes, the init wrapper patches this from instance metadata.
 endpoints = ["journal-1:9443"]
 tls_enabled = false
 

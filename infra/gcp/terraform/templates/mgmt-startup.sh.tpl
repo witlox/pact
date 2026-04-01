@@ -7,4 +7,5 @@ set -euo pipefail
     "${node_id}" \
     "$(hostname -I | awk '{print $1}')" \
     "${peer_list}" \
+    %{ if node_id == 1 }--bootstrap%{ endif } \
     %{ if with_lattice }--with-lattice%{ endif }

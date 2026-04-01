@@ -115,7 +115,7 @@ resource "google_compute_instance" "management" {
   // startup script runs install-management.sh
   metadata_startup_script = templatefile("${path.module}/templates/mgmt-startup.sh.tpl", {
     node_id      = count.index + 1
-    peer_list    = join(",", [for i in range(var.management_count) : "${local.name_prefix}-mgmt-${i + 1}:9444"])
+    peer_list    = join(",", [for i in range(var.management_count) : "${i + 1}=${local.name_prefix}-mgmt-${i + 1}:9443"])
     with_lattice = local.with_lattice
   })
 }
@@ -142,8 +142,9 @@ resource "google_compute_instance" "compute" {
   }
 
   metadata = {
-    pact-node-id = "compute-${count.index + 1}"
-    pact-variant = var.variant
+    pact-node-id              = "compute-${count.index + 1}"
+    pact-variant              = var.variant
+    pact-journal-endpoints    = join(",", [for i in range(var.management_count) : "\"${local.name_prefix}-mgmt-${i + 1}:9443\""])
   }
 }
 

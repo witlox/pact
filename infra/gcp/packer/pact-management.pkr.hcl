@@ -43,7 +43,7 @@ source "googlecompute" "management" {
   machine_type = "e2-standard-4"
 
   source_image_family = "debian-12"
-  source_image_project_ids = ["debian-cloud"]
+  source_image_project_id = ["debian-cloud"]
 
   image_name        = "pact-management-${replace(var.pact_version, ".", "-")}"
   image_description = "Pact management node (journal + CLI + monitoring)"
@@ -67,7 +67,7 @@ build {
   // Create directory structure
   provisioner "shell" {
     inline = [
-      "sudo mkdir -p /opt/pact/{bin,systemd,alerting,grafana}",
+      "sudo mkdir -p /opt/pact/bin /opt/pact/systemd /opt/pact/alerting /opt/pact/grafana",
       "sudo mkdir -p /etc/pact /var/lib/pact/journal",
     ]
   }
@@ -120,15 +120,19 @@ build {
   }
 
   // Upload deploy scripts (from repo root scripts/deploy/)
+  provisioner "shell" {
+    inline = ["mkdir -p /tmp/pact-deploy"]
+  }
+
   provisioner "file" {
     source      = "../../../scripts/deploy/"
-    destination = "/tmp/deploy"
+    destination = "/tmp/pact-deploy"
   }
 
   provisioner "shell" {
     inline = [
       "sudo mkdir -p /opt/pact/deploy",
-      "sudo cp /tmp/deploy/*.sh /opt/pact/deploy/",
+      "sudo cp /tmp/pact-deploy/*.sh /opt/pact/deploy/ || sudo cp /tmp/pact-deploy/deploy/*.sh /opt/pact/deploy/",
       "sudo chmod +x /opt/pact/deploy/*.sh",
     ]
   }
@@ -144,7 +148,7 @@ build {
   // Install OPA (for policy evaluation)
   provisioner "shell" {
     inline = [
-      "curl -fsSL -o /tmp/opa https://openpolicyagent.org/downloads/v0.73.0/opa_linux_amd64_static",
+      "curl -fsSL -o /tmp/opa -L https://github.com/open-policy-agent/opa/releases/download/v1.15.1/opa_linux_amd64_static",
       "sudo mv /tmp/opa /usr/local/bin/opa",
       "sudo chmod +x /usr/local/bin/opa",
     ]
