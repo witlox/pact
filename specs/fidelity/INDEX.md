@@ -1,7 +1,7 @@
 # Fidelity Index
 
-Last scan: 2026-03-27 (incremental: PID 1 / WatchdogHandle / PlatformInit)
-Scanned by: auditor sweep (9 chunks, SWEEP.md: COMPLETE) + incremental 2026-03-27
+Last scan: 2026-04-01 (full re-sweep, 9 chunks)
+Scanned by: auditor sweep
 
 ## How to read this file
 
@@ -26,155 +26,171 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 | Metric | Count |
 |--------|-------|
-| Feature files scanned | **31 of 31** |
-| Total BDD scenarios | **567** (555 pass, 12 skipped) |
-| THOROUGH scenarios | ~167 (30%) |
-| MODERATE scenarios | ~205 (37%) |
-| SHALLOW or worse | ~166 (30%) |
-| Unit tests | **756** pass (1 ignored) |
-| E2E integration tests | **42** pass (auth, Raft, OPA, Loki, Prometheus, Dex, SPIRE, CLI) |
-| Mock traits assessed | 14 |
-| FAITHFUL/WIRED mocks | 7 (ServiceManager, TokenValidator, WatchdogHandle, PlatformInit + 3 capability backends) |
-| PARTIAL mocks | 3 (NetworkManager, PolicyEngine, OpaClient) |
+| Feature files scanned | **32 of 32** |
+| Total BDD scenarios | **583** (555 pass, 12 skipped, 16 dead) |
+| THOROUGH scenarios | ~155 (27%) |
+| MODERATE scenarios | ~215 (37%) |
+| SHALLOW or worse | ~180 (31%) |
+| NONE / STUB | ~33 (6%) |
+| Unit tests | **777** pass |
+| E2E integration tests | **50** (auth, Raft, OPA, Loki, Prometheus, SPIRE, CLI, supervisor, partition) |
+| Mock traits assessed | 15 |
+| WIRED mocks | 7 (ServiceManager, TokenValidator, WatchdogHandle, PlatformInit, CgroupManager + 2 capability) |
+| FAITHFUL/CONVERGENT mocks | 6 (5 capability backends + MockOpaClient) |
+| PARTIAL mocks | 2 (NetworkManager, MockPolicyEngine) |
+| BYPASSED | 1 (Observer in BDD — wired in unit tests) |
+| DIVERGENT | 1 (FederationSync — no real impl) |
+| N/A | 1 (NodeManagementBackend — no mock, BDD all skipped) |
 | ADRs total | 17 |
-| ADRs ENFORCED | 9 (+ 1 partial, 6 documented, 1 unenforced) |
-| GCP deployment validated | V2 (21/23), V4 (26/29) |
+| ADRs ENFORCED | 9 (7 full + 2 partial) |
+| ADRs DOCUMENTED | 7 |
+| ADRs UNENFORCED | 1 (ADR-017) |
 
 ## Feature Fidelity
 
-### Tier 1: HIGH confidence (8 features) — was 7
+### Tier 1: HIGH confidence (9 features)
 
-| Feature | Scenarios | Thorough | Moderate | Shallow | Stub | Confidence | Delta |
-|---------|-----------|----------|----------|---------|------|------------|-------|
-| [journal_operations](features/remaining-25-summary.md) | 15 | 15 | 0 | 0 | 0 | **HIGH** | — |
-| [hardware_detection](features/remaining-25-summary.md) | 25 | 22 | 3 | 0 | 0 | **HIGH** | — |
-| [drift-detection](features/drift-detection.md) | 19 | 16 | 3 | 0 | 0 | **HIGH** | — |
-| [node-enrollment](features/node-enrollment.md) | 47 | 27 | 13 | 5 | 0 | **HIGH** | — |
-| [process_supervisor](features/remaining-25-summary.md) | 23 | 17 | 6 | 0 | 0 | **HIGH** | — |
-| [policy_evaluation](features/remaining-25-summary.md) | 16 | 9 | 3 | 4 | 0 | **HIGH** | — |
-| [workload_integration](features/remaining-25-summary.md) | 17 | 0 | 13 | 4 | 0 | **HIGH** | — |
-| [boot-config-streaming](features/boot-config-streaming.md) | 11 | 7 | 4 | 0 | 0 | **HIGH** | ↑ was MODERATE |
+| Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
+|---------|-----------|----------|----------|---------|-----------|------------|-------|
+| journal_operations | 15 | 15 | 0 | 0 | 0 | **HIGH** | — |
+| drift_detection | 20 | 13 | 4 | 0 | 0 | **HIGH** | ↑ was MODERATE-HIGH |
+| identity_mapping | 16 | 14 | 16 | 1 | 1 | **HIGH** | ↑ was MODERATE |
+| rbac_authorization | 11 | 7 | 2 | 0 | 0 | **HIGH** | ↑ was MODERATE |
+| policy_evaluation | 19 | 9 | 5 | 1 | 3 | **HIGH** | — |
+| hardware_detection | 30 | 0 | 2 | 25 | 4 | **HIGH** (unit) | BDD is LOW but 83 unit tests cover parsing THOROUGHLY |
+| process_supervisor | 25 | 13 | 4 | 7 | 0 | **HIGH** | — (real PactSupervisor + 12 unit tests) |
+| commit_window | 20 | 10 | 4 | 4 | 0 | **HIGH** | ↑ was MODERATE |
+| node_enrollment | 42 | 8 | 18 | 14 | 0 | **HIGH** | ↑ (state machine wired, 183 step defs) |
 
-### Integration: cross-context (1 feature)
+### Tier 2: MODERATE confidence (14 features)
 
-| Feature | Scenarios | Thorough | Moderate | Shallow | Skipped | Confidence | Notes |
-|---------|-----------|----------|----------|---------|---------|------------|-------|
-| [cross-context](features/cross-context.md) | 24 | 3 | 12 | 0 | 9 | **MODERATE** | 9 skipped = step wording mismatches |
+| Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
+|---------|-----------|----------|----------|---------|-----------|------------|-------|
+| boot_config_streaming | 11 | 5 | 5 | 3 | 0 | **MODERATE** | — |
+| boot_sequence | 12 | 3 | 5 | 3 | 4 | **MODERATE** | — |
+| emergency_mode | 14 | 7 | 4 | 1 | 1 | **MODERATE** | — |
+| shell_session | 18 | 5 | 7 | 5 | 1 | **MODERATE** | — |
+| exec_endpoint | 14 | 5 | 5 | 3 | 1 | **MODERATE** | — |
+| workload_integration | 17 | 16 | 12 | 0 | 12 | **MODERATE** | — (MountRefManager wired but 12 NONE stubs) |
+| resource_isolation | 13 | 0 | 18 | 3 | 1 | **MODERATE** | — |
+| auth_login | 20 | 1 | 14 | 3 | 3 | **MODERATE** | — |
+| auth_token_refresh | 11 | 1 | 7 | 3 | 0 | **MODERATE** | — |
+| agentic_api | 12 | 4 | 4 | 4 | 0 | **MODERATE** | ↑ was LOW |
+| network_management | 8 | 10 | 4 | 1 | 0 | **MODERATE** | — |
+| platform_bootstrap | 17 | 5 | 7 | 12 | 0 | **MODERATE** | — (8 self-fulfilling clusters) |
+| capability_reporting | 16 | 0 | 7 | 9 | 0 | **MODERATE** | — (unit tests compensate) |
+| overlay_management | 16 | 6 | 7 | 7 | 0 | **MODERATE** | — |
 
-### Tier 2: MODERATE confidence (15 features) — was 14
+### Tier 3: LOW confidence (7 features)
 
-| Feature | Scenarios | Thorough | Moderate | Shallow | Stub | Confidence | Delta |
-|---------|-----------|----------|----------|---------|------|------------|-------|
-| [commit-window](features/commit-window.md) | 20 | 12 | 5 | 3 | 0 | **MODERATE** | ↑ improved |
-| [rbac_authorization](features/remaining-25-summary.md) | 10 | 5 | 3 | 2 | 0 | **MODERATE** | — |
-| [emergency_mode](features/remaining-25-summary.md) | 13 | 0 | 10 | 1 | 2 | **MODERATE** | ↑ improved |
-| [shell_session](features/remaining-25-summary.md) | 23 | 1 | 11 | 8 | 3 | **MODERATE** | — |
-| [resource_isolation](features/remaining-25-summary.md) | 13 | 0 | 9 | 4 | 0 | **MODERATE** | — |
-| [identity_mapping](features/remaining-25-summary.md) | 17 | 0 | 11 | 6 | 0 | **MODERATE** | — |
-| [capability_reporting](features/remaining-25-summary.md) | 14 | 4 | 6 | 4 | 0 | **MODERATE** | — |
-| [exec_endpoint](features/remaining-25-summary.md) | 13 | 0 | 6 | 7 | 0 | **MODERATE** | — |
-| [network_management](features/remaining-25-summary.md) | 8 | 2 | 5 | 1 | 0 | **MODERATE** | — |
-| [auth_login](features/remaining-25-summary.md) | 20 | 0 | 8 | 12 | 0 | **MODERATE** | — |
-| [cli_commands](features/remaining-25-summary.md) | 30 | 0 | 15 | 15 | 0 | **MODERATE** | — |
-| [boot-sequence](features/boot-sequence.md) | 12 | 2 | 5 | 2 | 3 | **MODERATE** | ↑ was LOW |
-| [overlay_management](features/remaining-25-summary.md) | 15 | 7 | 6 | 2 | 0 | **MODERATE** | ↑ was LOW |
-| [partition_resilience](features/remaining-25-summary.md) | 15 | 6 | 7 | 2 | 0 | **MODERATE** | ↑ was LOW |
-| [platform_bootstrap](features/remaining-25-summary.md) | 19 | 9 | 7 | 3 | 0 | **MODERATE** | ↑ was LOW. WatchdogHandle + PlatformInit unit tests raise THOROUGH count. Supervision loop coupling verified via real code (PS2). BDD watchdog scenarios remain SHALLOW (hardware-dependent). |
+| Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
+|---------|-----------|----------|----------|---------|-----------|------------|-------|
+| partition_resilience | 16 | 7 | 7 | 14 | 0 | **LOW** | ↓ was MODERATE (self-fulfilling leader failover, cached boot) |
+| cli_commands | 38 | 6 | 13 | 7 | 2+11skip | **LOW** | — (11 scenarios SKIPPED, delegation self-fulfilling) |
+| cli_authentication | 27 | 3 | 18 | 3 | 2 | **LOW** | — |
+| diag_retrieval | 22 | 5 | 5 | 12 | 0 | **LOW** | — (fleet-wide exit-code-only) |
+| observability | 15 | 4 | 14 | 1 | 0 | **LOW** | — (metrics hardcoded in When steps) |
+| auth_logout | 3 | 0 | 2 | 3 | 0 | **LOW** | — |
+| federation | 10 | 0 | 3 | 7 | 7 | **LOW** | — (no real impl, site-local unverified) |
 
-### Tier 3: LOW confidence (7 features) — was 8
+### Tier 4: NONE / DEAD (2 features)
 
-| Feature | Scenarios | Thorough | Moderate | Shallow | Stub | Confidence | Delta |
-|---------|-----------|----------|----------|---------|------|------------|-------|
-| [cli_authentication](features/remaining-25-summary.md) | 26 | 0 | 8 | 18 | 0 | **LOW** | — |
-| [agentic_api](features/remaining-25-summary.md) | 18 | 0 | 6 | 12 | 0 | **LOW** | — |
-| [diag_retrieval](features/remaining-25-summary.md) | 24 | 7 | 9 | 8 | 0 | **LOW** | ↑ improved |
-| [observability](features/remaining-25-summary.md) | 15 | 3 | 6 | 5 | 1 | **LOW** | ↑ improved |
-| [auth_token_refresh](features/remaining-25-summary.md) | 11 | 0 | 3 | 8 | 0 | **LOW** | — |
-| [auth_logout](features/remaining-25-summary.md) | 3 | 0 | 0 | 3 | 0 | **LOW** | — |
-| [federation](features/remaining-25-summary.md) | 9 | 0 | 2 | 4 | 3 | **LOW** | — |
-
-Detail files: `specs/fidelity/features/`
+| Feature | Scenarios | Status | Notes |
+|---------|-----------|--------|-------|
+| cross_context | 22 | **LOW** | 22 NONE-depth Then steps (stubs deferring to other features) |
+| node-management-delegation | 16 | **NONE (BDD)** | All scenarios SKIPPED — no step definitions exist. 13 unit tests in delegate.rs cover factory + dispatch. |
 
 ## Mock Fidelity
 
 | Trait | Real Impls | Mock Rating | Impact |
 |-------|------------|-------------|--------|
-| ServiceManager | PactSupervisor, SystemdBackend | **WIRED** | ~~HIGH~~ resolved |
-| TokenValidator | JwksTokenValidator (HMAC+JWKS) | **WIRED** (e2e: Dex+interceptor) | ~~HIGH~~ resolved |
-| Observer | Inotify, Netlink, eBPF | **BYPASSED** | MEDIUM — events constructed directly |
-| NetworkManager | LinuxNetworkManager | PARTIAL | MEDIUM — stub never errors |
-| PolicyEngine | DefaultPolicyEngine | PARTIAL | LOW — BDD uses real engine |
-| OpaClient | HttpOpaClient | PARTIAL | MEDIUM — mock ignores input |
-| GpuBackend | nvidia, amd | FAITHFUL | LOW |
-| CpuBackend | LinuxCpuBackend | FAITHFUL | LOW |
-| MemoryBackend | LinuxMemoryBackend | FAITHFUL | LOW |
-| NetworkBackend | LinuxNetworkBackend | FAITHFUL | LOW |
-| StorageBackend | LinuxStorageBackend | FAITHFUL | LOW |
-| FederationSync | (none yet) | FAITHFUL | LOW |
-| WatchdogHandle | Linux ioctl impl | FAITHFUL (non-Linux stub returns None) | LOW |
-| PlatformInit | Linux mount/reaper impl | FAITHFUL (non-Linux stubs are no-op) | LOW |
-
-Detail file: `specs/fidelity/mocks/mock-fidelity.md`
-
-**Changes:** ServiceManager now WIRED (was BYPASSED). BDD steps call real PactSupervisor::start/stop/restart/start_all/stop_all.
+| ServiceManager | PactSupervisor, SystemdBackend | **WIRED** | resolved |
+| TokenValidator | JwksTokenValidator (HMAC+JWKS) | **WIRED** (e2e: Dex+interceptor) | resolved |
+| Observer | Inotify, Netlink, eBPF | **BYPASSED** (BDD) / WIRED (unit) | MEDIUM |
+| NetworkManager | LinuxNetworkManager | **PARTIAL** (stub never errors) | MEDIUM |
+| PolicyEngine | DefaultPolicyEngine | **PARTIAL** (MockPolicyEngine doesn't impl trait) | LOW — BDD uses real engine |
+| OpaClient | HttpOpaClient | **FAITHFUL** (MockOpaClient wired into real engine) | LOW |
+| GpuBackend | nvidia, amd | **CONVERGENT** | LOW |
+| CpuBackend | LinuxCpuBackend | **CONVERGENT** | LOW |
+| MemoryBackend | LinuxMemoryBackend | **CONVERGENT** | LOW |
+| NetworkBackend | LinuxNetworkBackend | **CONVERGENT** | LOW |
+| StorageBackend | LinuxStorageBackend | **CONVERGENT** | LOW |
+| FederationSync | (none — mock only) | **DIVERGENT** | LOW — no real impl exists |
+| WatchdogHandle | Linux ioctl impl | **FAITHFUL** (non-Linux stub returns None) | LOW |
+| PlatformInit | Linux mount/reaper impl | **FAITHFUL** (non-Linux stubs are no-op) | LOW |
+| NodeManagementBackend | CsmBackend, OpenChamiBackend | **N/A** (no mock, BDD skipped) | MEDIUM — unit tests cover factory only |
 
 ## ADR Enforcement
 
-| ADR | Decision (short) | Status | Delta |
-|-----|------------------|--------|-------|
-| 002 | Blacklist-first drift detection | **ENFORCED** | — |
-| 003 | OPA/Rego on journal nodes | **ENFORCED** | — |
-| 004 | Emergency mode audit trail | **ENFORCED** | — |
-| 006 | Pact-agent as init | **ENFORCED** | — |
-| 008 | Node enrollment + cert lifecycle | **ENFORCED** | — |
-| 009 | Overlay staleness + on-demand rebuild | **ENFORCED** | — |
-| 010 | Node delta TTL bounds | **ENFORCED** | — |
-| 012 | Merge conflict grace period | **ENFORCED** | ↑ was UNENFORCED |
-| 013 | Two-person approval state machine | **ENFORCED** | — |
-| 014 | Optimistic concurrency / commit windows | **ENFORCED** | — |
-| 011 | Degraded-mode policy | PARTIAL | — |
-| 001 | Raft quorum deployment modes | DOCUMENTED | — |
-| 005 | No agent Prometheus | DOCUMENTED | — |
-| 007 | No SSH | DOCUMENTED | — |
-| 015 | hpc-core shared contracts | DOCUMENTED | — |
-| 016 | Identity mapping OIDC→POSIX | DOCUMENTED | — |
-| 017 | Management network for pact | DOCUMENTED | — |
+| ADR | Decision (short) | Status |
+|-----|------------------|--------|
+| 001 | Raft quorum deployment modes | DOCUMENTED |
+| 002 | Blacklist-first drift detection | DOCUMENTED |
+| 003 | OPA/Rego on journal nodes | **ENFORCED** |
+| 004 | Emergency mode audit trail | **ENFORCED** (partial) |
+| 005 | No agent Prometheus | DOCUMENTED |
+| 006 | Pact-agent as init | **ENFORCED** |
+| 007 | No SSH — pact shell | **ENFORCED** (partial) |
+| 008 | Node enrollment + cert lifecycle | **ENFORCED** |
+| 009 | Overlay staleness + on-demand rebuild | DOCUMENTED |
+| 010 | Node delta TTL bounds | **ENFORCED** |
+| 011 | Degraded-mode policy | DOCUMENTED |
+| 012 | Merge conflict grace period | **ENFORCED** |
+| 013 | Two-person approval state machine | **ENFORCED** |
+| 014 | Optimistic concurrency / commit windows | **ENFORCED** |
+| 015 | hpc-core shared contracts | DOCUMENTED |
+| 016 | Identity mapping OIDC→POSIX | DOCUMENTED |
+| 017 | Management network for pact | UNENFORCED |
 
-Detail file: `specs/fidelity/adrs/enforcement.md`
+## Cross-Cutting Findings
 
-**Changes:** ADR-012 now ENFORCED (was UNENFORCED). ConflictManager wired with register_conflicts, resolve, check_grace_periods.
+### Dead specs
+- `node-management-delegation.feature` — 16 scenarios, zero step definitions. All SKIPPED.
 
-## Priority Actions (Post-Hardening)
+### Feature flag gaps
+- **`systemd`**: declared but 0 `cfg(feature)` gates in code. `SystemdBackend` compiles unconditionally. Dead flag.
+- **`federation`**: declared but 0 `cfg(feature)` gates. Federation code compiles unconditionally.
+- **`jwks`**: no test exercises the JWKS-enabled code path specifically.
 
-### Resolved since last scan
-- ~~Self-fulfilling THEN steps~~ — 8 fixed across drift, commit_window, enrollment, emergency
-- ~~ServiceManager bypassed~~ — now wired through real PactSupervisor
-- ~~ADR-012 unenforced~~ — ConflictManager wired into partition BDD steps
-- ~~Active consumer flag-based~~ — now uses real rollback_with_check()
-- ~~Capability report flag-based~~ — now generates real CapabilityReport
+### Pervasive self-fulfilling pattern
+Multiple features share a pattern where WHEN steps set world-state flags and THEN steps read them back:
+- **partition_resilience**: leader failover, cached boot, subscription reconnect
+- **platform_bootstrap**: watchdog, SPIRE, adaptive supervision, coldplug
+- **cli_commands**: all delegation commands
+- **observability**: Prometheus metrics hardcoded in WHEN
+- **cross_context**: auto-rollback WRITES state in THEN step
 
-### Remaining
+### Silent skip risk
+Cucumber-rs silently skips unmatched scenarios. The 12+16 skipped scenarios are not flagged as errors. No mechanism detects new skips from step regex drift.
 
-**Resolved via e2e containers:**
-1. ~~**Auth flow (TokenValidator, login/logout/refresh)**~~ → RESOLVED: Dex container in pact-e2e (auth_oidc.rs), 6 auth interceptor tests (auth_interceptor.rs), JwksTokenValidator validated against real RS256 tokens. Raft cluster wires auth_interceptor matching production.
-2. ~~**Observability Loki/metrics**~~ → PARTIALLY RESOLVED: `loki_events.rs` (2 tests) and `prometheus_metrics.rs` (1 test) pass locally with Docker. CI needs Docker-in-Docker or a runner with Docker access.
-3. **Federation** → needs Sovra container (not yet available). Defer until Sovra exists.
+## Priority Actions
 
-**Other remaining:**
-4. **Overlay compression** — zstd in deps but not used in code yet
-5. **Platform bootstrap resource budgets** — WatchdogHandle + PlatformInit implemented; boot petter (F33) and zombie reaper tested. Remaining: coldplug, boot time measurement under real load
-6. **Agentic API response validation** — tool response content not inspected
+### Critical
+1. **Wire node-management-delegation BDD** — 16 scenarios with zero step defs. Need step module or mock HTTP server (wiremock).
+2. **Fix partition_resilience self-fulfilling tests** — leader failover, cached boot, subscription reconnect all read back what WHEN set. Use real Raft cluster (e2e exists) or real agent boot logic.
+
+### High
+3. **Fix `systemd` feature flag** — either gate `SystemdBackend` behind `cfg(feature = "systemd")` or remove the dead flag.
+4. **Fix `federation` feature flag** — same: gate behind feature or remove.
+5. **Add skip detection** — CI step that asserts exact skip count (currently 12+16=28). Any new skips = CI failure.
+
+### Medium
+6. **Wire diag fleet-wide assertions** — 12 Then steps only check exit_code==0. Verify fan-out, prefixes, truncation.
+7. **Wire cli_commands delegation** — 11 scenarios SKIPPED (undrain, dag, budget, backup, nodes). Need When step defs.
+8. **Add NodeManagementBackend mock** — wiremock or similar to verify URL paths, request bodies, auth headers.
+9. **Fix cross_context stubs** — 22 NONE-depth Then steps (empty bodies) for workload/namespace/cgroup operations.
+10. **Wire observability metrics** — replace hardcoded metric strings with real Prometheus scrape.
+
+### Low
+11. **ADR-002 enforcement** — add test that blacklist-first mode prevents drift enforcement
+12. **ADR-011 enforcement** — add test that OPA failure falls back to cached RBAC
+13. **ADR-017 enforcement** — add test that pact traffic stays on management network
 
 ## Changelog
 
 | Date | Action | Delta |
 |------|--------|-------|
-| 2026-03-20 | Pass 1: 5 critical-path features | First scan |
-| 2026-03-20 | Pass 2: 12 mocks + 17 ADRs | 3 traits bypassed, 8/17 ADRs enforced |
-| 2026-03-20 | Pass 4: remaining 25 features | 7 HIGH, 12 MODERATE, 11 LOW |
-| 2026-03-20 | Pass 3: implementer hardening | 14 files, ~50 edits, 3 traits wired |
-| 2026-03-20 | Rescan post-hardening | **8 HIGH (+1), 14 MODERATE (+2), 8 LOW (-3)**. ADR-012 enforced. ServiceManager wired. |
-| 2026-03-20 | Sweep checkpoint | 31 features, 555 scenarios, 12 traits, 17 ADRs, gaps.md populated. SWEEP.md: COMPLETE. |
-| 2026-03-27 | PID 1 feature audit | platform_bootstrap LOW→MODERATE. WatchdogHandle + PlatformInit implemented. 756 unit tests, 567 BDD (555 pass). PB0-PB2, PS2 enforced via real code. |
-| 2026-03-28 | Auth end-to-end fix + GCP deployment | TokenValidator BYPASSED→WIRED. JwksTokenValidator (HMAC+JWKS), CLI AuthInterceptor on all RPCs, Dex e2e test, 6 auth interceptor tests. Raft cluster matches production wiring. Auth flow #1 RESOLVED. |
-| 2026-03-28 | GCP V2+V4 validated | V2: 21/23 pass. V4: 26/29 pass. Full pact+lattice stack: quorum, auth, enrollment, exec, drain, workloads. lattice-client bumped to 2026.1.130. |
+| 2026-03-20 | Initial sweep (9 chunks) | First checkpoint |
+| 2026-03-27 | PID 1 feature audit | platform_bootstrap LOW→MODERATE |
+| 2026-03-28 | Auth e2e + GCP deployment | TokenValidator WIRED, V2+V4 validated |
+| 2026-04-01 | **Full re-sweep** (9 chunks, 32 features, 15 mocks, 17 ADRs) | 9 HIGH (+1), 14 MODERATE, 7 LOW (-1), 2 DEAD/NONE. node-management-delegation.feature added but unwired. identity_mapping↑HIGH, drift↑HIGH, rbac↑HIGH, commit_window↑HIGH. partition_resilience↓LOW. Feature flag gaps found (systemd, federation). 777 unit tests (+21), 50 e2e (+8). |
