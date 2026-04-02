@@ -93,12 +93,12 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | auth_logout | 3 | 0 | 2 | 3 | 0 | **LOW** | — |
 | federation | 10 | 0 | 3 | 7 | 7 | **LOW** | — (no real impl, site-local unverified) |
 
-### Tier 4: NONE / DEAD (2 features)
+### Tier 4: Previously NONE/DEAD — now resolved
 
 | Feature | Scenarios | Status | Notes |
 |---------|-----------|--------|-------|
-| cross_context | 22 | **LOW** | 38 NONE-depth Then steps (stubs deferring to other features) — was undercounted as 22 |
-| node-management-delegation | 16 | **NONE (BDD)** | All 16 scenarios FAIL on Background step (`Given a running journal quorum` undefined). No scenario-level step defs exist. 13 unit tests in delegate.rs cover factory + dispatch. |
+| cross_context | 22 | **LOW→MODERATE** | 38 empty Then stubs replaced with conditional assertions. ~8 remain as kernel/e2e-only (documented). |
+| node-management-delegation | 16 | **NONE→HIGH** | 16 scenarios pass via axum mock HTTP server. Real CsmBackend + OpenChamiBackend calls. |
 
 ## Mock Fidelity
 
