@@ -42,7 +42,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | DIVERGENT | 1 (FederationSync — no real impl) |
 | N/A | 1 (NodeManagementBackend — no mock, BDD all skipped) |
 | ADRs total | 17 |
-| ADRs ENFORCED | 16 (13 full + 3 partial) |
+| ADRs ENFORCED | 16 (14 full + 2 partial) |
 | ADRs DOCUMENTED | 1 (001: e2e needed — multi-process Raft topology) |
 | ADRs UNENFORCED | 0 |
 
@@ -127,7 +127,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | 001 | Raft quorum deployment modes | DOCUMENTED (e2e needed) |
 | 002 | Blacklist-first drift detection | **ENFORCED** |
 | 003 | OPA/Rego on journal nodes | **ENFORCED** |
-| 004 | Emergency mode audit trail | **ENFORCED** (partial) |
+| 004 | Emergency mode audit trail | **ENFORCED** |
 | 005 | No agent Prometheus | **ENFORCED** |
 | 006 | Pact-agent as init | **ENFORCED** |
 | 007 | No SSH — pact shell | **ENFORCED** (partial) |

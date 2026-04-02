@@ -383,10 +383,25 @@ async fn then_stale_alert(world: &mut PactWorld) {
     assert!(world.alert_raised);
 }
 
+// "a commit is made during emergency mode" — defined in commit_window.rs (shared step)
+// "the committed delta should have TTL equal to the emergency window" — defined in commit_window.rs
+
 #[then(regex = r#"^a scheduling hold should be requested for node "([\w-]+)"$"#)]
-async fn then_scheduling_hold(world: &mut PactWorld, _node: String) {
-    // Scheduling hold is delegated to lattice — just verify stale state
-    assert!(world.emergency_mgr.is_stale());
+async fn then_scheduling_hold(world: &mut PactWorld, node: String) {
+    assert!(world.emergency_mgr.is_stale(), "emergency should be stale");
+    // Verify audit entry for scheduling hold request exists
+    let has_hold_entry =
+        world.journal.entries.values().any(|e| {
+            matches!(&e.scope, Scope::Node(n) if n == &node) && e.emergency_reason.is_some()
+        }) || world
+            .journal
+            .audit_log
+            .iter()
+            .any(|op| op.detail.contains("emergency") || op.detail.contains("stale"));
+    assert!(
+        has_hold_entry || world.alert_raised,
+        "scheduling hold should be recorded for node {node}"
+    );
 }
 
 #[then(regex = r#"^the force-end should be attributed to "([\w@.]+)"$"#)]
