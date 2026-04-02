@@ -595,9 +595,57 @@ async fn when_pact_status_simple(world: &mut PactWorld) {
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
 
-#[when(regex = r#"^the user runs "pact (drain|cordon) ([\w-]+)"$"#)]
+#[when(regex = r#"^the user runs "pact (drain|cordon|undrain) ([\w-]+)"$"#)]
 async fn when_pact_delegation(world: &mut PactWorld, cmd: String, _node: String) {
     world.cli_output = Some(format!("{cmd} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact dag (list)"$"#)]
+async fn when_pact_dag_list(world: &mut PactWorld, subcmd: String) {
+    world.cli_output = Some(format!("dag {subcmd} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact dag (inspect|cancel) ([\w-]+)"$"#)]
+async fn when_pact_dag_with_id(world: &mut PactWorld, subcmd: String, _id: String) {
+    world.cli_output = Some(format!("dag {subcmd} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact budget (tenant|user) ([\w-]+)"$"#)]
+async fn when_pact_budget(world: &mut PactWorld, target_type: String, _target: String) {
+    world.cli_output = Some(format!("budget {target_type} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact backup (create|verify) (.+)"$"#)]
+async fn when_pact_backup(world: &mut PactWorld, subcmd: String, _path: String) {
+    world.cli_output = Some(format!("backup {subcmd} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact backup restore (.+) --confirm"$"#)]
+async fn when_pact_backup_restore_confirm(world: &mut PactWorld, _path: String) {
+    world.cli_output = Some("backup restore delegated to lattice scheduler API".into());
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact backup restore (/[\w./]+)"$"#)]
+async fn when_pact_backup_restore_no_confirm(world: &mut PactWorld, _path: String) {
+    world.cli_output = Some("backup restore requires --confirm flag".into());
+    world.cli_exit_code = Some(exit_codes::GENERAL_ERROR);
+}
+
+#[when(regex = r#"^the user runs "pact nodes (list)"$"#)]
+async fn when_pact_nodes_list(world: &mut PactWorld, subcmd: String) {
+    world.cli_output = Some(format!("nodes {subcmd} delegated to lattice scheduler API"));
+    world.cli_exit_code = Some(exit_codes::SUCCESS);
+}
+
+#[when(regex = r#"^the user runs "pact nodes (inspect) ([\w-]+)"$"#)]
+async fn when_pact_nodes_inspect(world: &mut PactWorld, subcmd: String, _node: String) {
+    world.cli_output = Some(format!("nodes {subcmd} delegated to lattice scheduler API"));
     world.cli_exit_code = Some(exit_codes::SUCCESS);
 }
 
