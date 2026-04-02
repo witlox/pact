@@ -1,7 +1,7 @@
 # Fidelity Index
 
-Last scan: 2026-04-01 (full re-sweep, 9 chunks)
-Scanned by: auditor sweep
+Last scan: 2026-04-02 (verification pass — corrected false positives + undercounts)
+Scanned by: auditor verification
 
 ## How to read this file
 
@@ -86,7 +86,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
 |---------|-----------|----------|----------|---------|-----------|------------|-------|
 | partition_resilience | 16 | 7 | 7 | 14 | 0 | **LOW** | ↓ was MODERATE (self-fulfilling leader failover, cached boot) |
-| cli_commands | 38 | 6 | 13 | 7 | 2+11skip | **LOW** | — (11 scenarios SKIPPED, delegation self-fulfilling) |
+| cli_commands | 38 | 6 | 13 | 7 | 2+12skip | **LOW** | — (12 scenarios SKIPPED, delegation self-fulfilling) |
 | cli_authentication | 27 | 3 | 18 | 3 | 2 | **LOW** | — |
 | diag_retrieval | 22 | 5 | 5 | 12 | 0 | **LOW** | — (fleet-wide exit-code-only) |
 | observability | 15 | 4 | 14 | 1 | 0 | **LOW** | — (metrics hardcoded in When steps) |
@@ -97,8 +97,8 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 | Feature | Scenarios | Status | Notes |
 |---------|-----------|--------|-------|
-| cross_context | 22 | **LOW** | 22 NONE-depth Then steps (stubs deferring to other features) |
-| node-management-delegation | 16 | **NONE (BDD)** | All scenarios SKIPPED — no step definitions exist. 13 unit tests in delegate.rs cover factory + dispatch. |
+| cross_context | 22 | **LOW** | 38 NONE-depth Then steps (stubs deferring to other features) — was undercounted as 22 |
+| node-management-delegation | 16 | **NONE (BDD)** | All 16 scenarios FAIL on Background step (`Given a running journal quorum` undefined). No scenario-level step defs exist. 13 unit tests in delegate.rs cover factory + dispatch. |
 
 ## Mock Fidelity
 
@@ -145,11 +145,11 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 ## Cross-Cutting Findings
 
 ### Dead specs
-- `node-management-delegation.feature` — 16 scenarios, zero step definitions. All SKIPPED.
+- `node-management-delegation.feature` — 16 scenarios, zero step definitions. All FAIL on Background step (not silently skipped — visible in CI).
 
-### Feature flag gaps
-- **`systemd`**: declared but 0 `cfg(feature)` gates in code. `SystemdBackend` compiles unconditionally. Dead flag.
-- **`federation`**: declared but 0 `cfg(feature)` gates. Federation code compiles unconditionally.
+### Feature flag findings (CORRECTED 2026-04-02)
+- ~~**`systemd`**: dead flag~~ **FALSE POSITIVE.** `systemd` flag exists but `SystemdBackend` is intentionally selected at runtime via `SupervisorBackend::Systemd` config enum (`boot/mod.rs:206-218`). Both backends compile unconditionally for deployment flexibility. Not a dead flag.
+- ~~**`federation`**: dead flag~~ **FALSE POSITIVE.** `federation = ["dep:reqwest"]` gates the optional HTTP dependency for Sovra sync. Module always compiles but network calls are feature-gated. Working as designed.
 - **`jwks`**: no test exercises the JWKS-enabled code path specifically.
 
 ### Pervasive self-fulfilling pattern
@@ -161,25 +161,25 @@ Multiple features share a pattern where WHEN steps set world-state flags and THE
 - **cross_context**: auto-rollback WRITES state in THEN step
 
 ### Silent skip risk
-Cucumber-rs silently skips unmatched scenarios. The 12+16 skipped scenarios are not flagged as errors. No mechanism detects new skips from step regex drift.
+Cucumber-rs silently skips unmatched scenarios. The 12 skipped CLI scenarios are not flagged as errors. The 16 node-management-delegation scenarios FAIL on Background (visible), but other unmatched scenarios could still silently skip. No mechanism detects new skips from step regex drift.
 
 ## Priority Actions
 
 ### Critical
-1. **Wire node-management-delegation BDD** — 16 scenarios with zero step defs. Need step module or mock HTTP server (wiremock).
-2. **Fix partition_resilience self-fulfilling tests** — leader failover, cached boot, subscription reconnect all read back what WHEN set. Use real Raft cluster (e2e exists) or real agent boot logic.
+1. **Wire node-management-delegation BDD** — 16 scenarios fail on undefined Background step + zero scenario-level step defs. Need Background fixture + step module with wiremock for CSM/OpenCHAMI HTTP mocking.
+2. **Fix partition_resilience self-fulfilling tests** — 7 of 18 scenarios read back flags set by WHEN. Worst: leader failover THEN step *assigns* new leader instead of verifying election. Merge conflict scenarios (10-13) are fine. Use real Raft cluster (e2e exists) or real agent boot logic.
 
 ### High
-3. **Fix `systemd` feature flag** — either gate `SystemdBackend` behind `cfg(feature = "systemd")` or remove the dead flag.
-4. **Fix `federation` feature flag** — same: gate behind feature or remove.
-5. **Add skip detection** — CI step that asserts exact skip count (currently 12+16=28). Any new skips = CI failure.
+3. ~~**Fix `systemd` feature flag**~~ REMOVED — false positive (runtime config dispatch, not dead).
+4. ~~**Fix `federation` feature flag**~~ REMOVED — false positive (gates `dep:reqwest`, working as designed).
+5. **Add skip detection** — CI step that asserts exact skip count (currently 12 CLI skips). Node-mgmt scenarios fail visibly. Any new skips = CI failure.
+6. **Fix cross_context stubs** — **38** NONE-depth Then steps (was undercounted as 22). All have comment-only bodies with zero assertions.
 
 ### Medium
-6. **Wire diag fleet-wide assertions** — 12 Then steps only check exit_code==0. Verify fan-out, prefixes, truncation.
-7. **Wire cli_commands delegation** — 11 scenarios SKIPPED (undrain, dag, budget, backup, nodes). Need When step defs.
-8. **Add NodeManagementBackend mock** — wiremock or similar to verify URL paths, request bodies, auth headers.
-9. **Fix cross_context stubs** — 22 NONE-depth Then steps (empty bodies) for workload/namespace/cgroup operations.
-10. **Wire observability metrics** — replace hardcoded metric strings with real Prometheus scrape.
+7. **Wire diag fleet-wide assertions** — 12 Then steps only check exit_code==0. Verify fan-out, prefixes, truncation.
+8. **Wire cli_commands delegation** — **12** scenarios SKIPPED (undrain, dag×3, budget×2, backup×4, nodes×2). Need When step defs.
+9. **Add NodeManagementBackend mock** — wiremock or similar to verify URL paths, request bodies, auth headers. No async method testing exists.
+10. **Wire observability metrics** — fully self-fulfilling: WHEN seeds hardcoded strings, THEN reads them back. No real Prometheus scrape.
 
 ### Low
 11. **ADR-002 enforcement** — add test that blacklist-first mode prevents drift enforcement
@@ -194,3 +194,4 @@ Cucumber-rs silently skips unmatched scenarios. The 12+16 skipped scenarios are 
 | 2026-03-27 | PID 1 feature audit | platform_bootstrap LOW→MODERATE |
 | 2026-03-28 | Auth e2e + GCP deployment | TokenValidator WIRED, V2+V4 validated |
 | 2026-04-01 | **Full re-sweep** (9 chunks, 32 features, 15 mocks, 17 ADRs) | 9 HIGH (+1), 14 MODERATE, 7 LOW (-1), 2 DEAD/NONE. node-management-delegation.feature added but unwired. identity_mapping↑HIGH, drift↑HIGH, rbac↑HIGH, commit_window↑HIGH. partition_resilience↓LOW. Feature flag gaps found (systemd, federation). 777 unit tests (+21), 50 e2e (+8). |
+| 2026-04-02 | **Verification pass** — corrected false positives + undercounts | `systemd` and `federation` feature flags: NOT dead (false positives removed). cross_context stubs: 38 not 22 (undercount corrected). cli_commands skips: 12 not 11. node-mgmt-delegation: scenarios FAIL on Background, not silently skip. |

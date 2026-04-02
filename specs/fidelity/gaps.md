@@ -1,12 +1,12 @@
 # Cross-Cutting Gaps
 
-Last scan: 2026-03-20 (sweep chunk 9)
+Last scan: 2026-04-02 (verification pass)
 
 ## Dead Specs
 
 _Feature files with no step definitions._
 
-None. All 31 features have matching step definitions. 546/555 scenarios pass.
+- `node-management-delegation.feature` — 16 scenarios, all FAIL on undefined Background step (`Given a running journal quorum`). Zero scenario-level step defs.
 
 ## Orphan Tests
 
@@ -64,8 +64,9 @@ _Code behind feature flags with no gated test scenarios._
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Dead specs | 0 | Clean |
+| Dead specs | 1 | node-management-delegation (16 scenarios, Background undefined) |
 | Orphan tests | 0 | Clean |
 | Stale specs | 9 steps | Minor wording fixes |
 | Uncovered modules | 5 | gRPC services + NSS |
-| Feature flag gaps | 7 flags | Expected — need integration infra |
+| Feature flag gaps | 5 flags | ebpf, spire, nvidia, amd, opa — need integration infra |
+| Cross-context stubs | 38 | NONE-depth Then steps with comment-only bodies |

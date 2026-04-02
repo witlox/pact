@@ -2839,6 +2839,7 @@ version = "2026.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "chrono",
  "cucumber",
  "futures",
@@ -2852,6 +2853,7 @@ dependencies = [
  "pact-mcp",
  "pact-policy",
  "pact-test-harness",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "tempfile",

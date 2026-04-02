@@ -334,6 +334,32 @@ pub struct PactWorld {
     pub diag_fleet_nodes: Vec<String>,
     pub diag_unreachable_nodes: Vec<String>,
 
+    // --- Node management delegation ---
+    /// Mock server URL (axum on ephemeral port).
+    pub node_mgmt_mock_url: Option<String>,
+    /// Mock server shared state (request recording + response config).
+    pub node_mgmt_mock_state: Option<steps::node_mgmt::MockState>,
+    /// Mock server handle (unused but keeps type visible).
+    pub node_mgmt_mock_server: Option<()>,
+    /// Backend type selected for this scenario.
+    pub node_mgmt_backend_type: Option<pact_common::node_mgmt::NodeMgmtBackendType>,
+    /// Auth token for node management backend.
+    pub node_mgmt_token: Option<String>,
+    /// Whether the backend should be unreachable (use dead port).
+    pub node_mgmt_unreachable: bool,
+    /// HTTP status override for backend error scenarios (e.g., 500).
+    pub node_mgmt_error_status: Option<u16>,
+    /// Whether node has no BOS boot record (triggers 404 + "template" body).
+    pub node_mgmt_no_bos_template: bool,
+    /// Last delegation result message.
+    pub node_mgmt_result_message: Option<String>,
+    /// Whether the last delegation succeeded.
+    pub node_mgmt_result_success: Option<bool>,
+    /// Captured requests for assertion.
+    pub node_mgmt_received_requests: Vec<steps::node_mgmt::CapturedRequest>,
+    /// Number of HSM nodes to simulate.
+    pub node_mgmt_hsm_node_count: usize,
+
     // --- Auth (hpc-auth) ---
     /// Auth server URL for test scenarios.
     pub auth_server_url: Option<String>,
@@ -702,6 +728,20 @@ impl PactWorld {
             // Diag fleet
             diag_fleet_nodes: Vec::new(),
             diag_unreachable_nodes: Vec::new(),
+
+            // Node management delegation
+            node_mgmt_mock_url: None,
+            node_mgmt_mock_state: None,
+            node_mgmt_mock_server: None,
+            node_mgmt_backend_type: None,
+            node_mgmt_token: None,
+            node_mgmt_unreachable: false,
+            node_mgmt_error_status: None,
+            node_mgmt_no_bos_template: false,
+            node_mgmt_result_message: None,
+            node_mgmt_result_success: None,
+            node_mgmt_received_requests: Vec::new(),
+            node_mgmt_hsm_node_count: 0,
 
             // Auth (hpc-auth)
             auth_server_url: None,

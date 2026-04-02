@@ -28,6 +28,8 @@ futures = "0.3"
 tempfile = { workspace = true }
 anyhow = { workspace = true }
 jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+axum = { workspace = true }
 
 [features]
 default = []
