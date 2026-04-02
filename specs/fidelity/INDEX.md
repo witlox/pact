@@ -42,8 +42,8 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | DIVERGENT | 1 (FederationSync — no real impl) |
 | N/A | 1 (NodeManagementBackend — no mock, BDD all skipped) |
 | ADRs total | 17 |
-| ADRs ENFORCED | 12 (9 full + 3 partial) |
-| ADRs DOCUMENTED | 5 |
+| ADRs ENFORCED | 16 (13 full + 3 partial) |
+| ADRs DOCUMENTED | 1 (001: e2e needed — multi-process Raft topology) |
 | ADRs UNENFORCED | 0 |
 
 ## Feature Fidelity
@@ -124,22 +124,22 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 | ADR | Decision (short) | Status |
 |-----|------------------|--------|
-| 001 | Raft quorum deployment modes | DOCUMENTED |
+| 001 | Raft quorum deployment modes | DOCUMENTED (e2e needed) |
 | 002 | Blacklist-first drift detection | **ENFORCED** |
 | 003 | OPA/Rego on journal nodes | **ENFORCED** |
 | 004 | Emergency mode audit trail | **ENFORCED** (partial) |
-| 005 | No agent Prometheus | DOCUMENTED |
+| 005 | No agent Prometheus | **ENFORCED** |
 | 006 | Pact-agent as init | **ENFORCED** |
 | 007 | No SSH — pact shell | **ENFORCED** (partial) |
 | 008 | Node enrollment + cert lifecycle | **ENFORCED** |
-| 009 | Overlay staleness + on-demand rebuild | DOCUMENTED |
+| 009 | Overlay staleness + on-demand rebuild | **ENFORCED** |
 | 010 | Node delta TTL bounds | **ENFORCED** |
 | 011 | Degraded-mode policy | **ENFORCED** |
 | 012 | Merge conflict grace period | **ENFORCED** |
 | 013 | Two-person approval state machine | **ENFORCED** |
 | 014 | Optimistic concurrency / commit windows | **ENFORCED** |
-| 015 | hpc-core shared contracts | DOCUMENTED |
-| 016 | Identity mapping OIDC→POSIX | DOCUMENTED |
+| 015 | hpc-core shared contracts | **ENFORCED** (compile-time + unit tests) |
+| 016 | Identity mapping OIDC→POSIX | **ENFORCED** |
 | 017 | Management network for pact | **ENFORCED** (boot ordering) |
 
 ## Cross-Cutting Findings
