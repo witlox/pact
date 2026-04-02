@@ -547,8 +547,16 @@ async fn then_path_restricted(world: &mut PactWorld) {
     );
     let env = session.env_vars();
     let env_map: std::collections::HashMap<_, _> = env.into_iter().collect();
+    // PATH must be session-only directory
     assert!(env_map["PATH"].starts_with("/run/pact/shell/"));
-    assert!(!env_map["PATH"].contains("/usr/bin"));
+    // PATH must NOT contain system directories
+    assert!(!env_map["PATH"].contains("/usr/bin"), "PATH must not contain /usr/bin");
+    assert!(!env_map["PATH"].contains("/bin:"), "PATH must not contain /bin");
+    assert!(!env_map["PATH"].contains("/usr/sbin"), "PATH must not contain /usr/sbin");
+    assert!(!env_map["PATH"].contains("/sbin"), "PATH must not contain /sbin");
+    // BASH_ENV and ENV must be empty (prevents startup file injection)
+    assert_eq!(env_map.get("BASH_ENV").map(String::as_str), Some(""), "BASH_ENV must be empty");
+    assert_eq!(env_map.get("ENV").map(String::as_str), Some(""), "ENV must be empty");
 }
 
 #[then(regex = r#"^the command "([\w-]+)" should be available$"#)]
@@ -572,12 +580,32 @@ async fn then_command_fails(world: &mut PactWorld, expected: String) {
 
 #[then("the command should be blocked by rbash restrictions")]
 async fn then_rbash_blocked(world: &mut PactWorld) {
-    assert!(world.last_error.is_some(), "should have an error from rbash");
+    let err = world.last_error.as_ref().expect("should have an error from rbash");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("restricted")
+            || msg.contains("not found")
+            || msg.contains("permission")
+            || msg.contains("rbash")
+            || msg.contains("blocked")
+            || msg.contains("not allowed"),
+        "error should indicate rbash restriction, got: {msg}"
+    );
 }
 
 #[then("the modification should be blocked by rbash restrictions")]
 async fn then_path_mod_blocked(world: &mut PactWorld) {
-    assert!(world.last_error.is_some(), "PATH modification should be blocked");
+    let err = world.last_error.as_ref().expect("PATH modification should be blocked by rbash");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("restricted")
+            || msg.contains("readonly")
+            || msg.contains("permission")
+            || msg.contains("rbash")
+            || msg.contains("blocked")
+            || msg.contains("not allowed"),
+        "error should indicate PATH modification blocked by rbash, got: {msg}"
+    );
 }
 
 #[then("the LESSSECURE environment variable should be set to \"1\"")]

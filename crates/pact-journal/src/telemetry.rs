@@ -33,9 +33,15 @@ pub struct TelemetryState {
 /// Prometheus metrics for the journal.
 #[derive(Clone)]
 pub struct JournalMetrics {
+    // Config metrics
     pub entries_total: IntGauge,
     pub boot_streams_active: IntGauge,
     pub overlay_builds_total: IntGauge,
+    // Raft metrics
+    pub raft_leader: IntGauge,
+    pub raft_term: IntGauge,
+    pub raft_log_entries: IntGauge,
+    pub raft_replication_lag: IntGauge,
 }
 
 impl JournalMetrics {
@@ -53,13 +59,35 @@ impl JournalMetrics {
         let overlay_builds_total =
             IntGauge::new("pact_journal_overlay_builds_total", "Total number of overlay builds")
                 .unwrap();
+        let raft_leader =
+            IntGauge::new("pact_raft_leader", "Current Raft leader node ID (-1 if none)").unwrap();
+        let raft_term = IntGauge::new("pact_raft_term", "Current Raft term").unwrap();
+        let raft_log_entries =
+            IntGauge::new("pact_raft_log_entries", "Number of committed Raft log entries").unwrap();
+        let raft_replication_lag = IntGauge::new(
+            "pact_raft_replication_lag",
+            "Raft replication lag (entries behind leader)",
+        )
+        .unwrap();
 
         // Ignore AlreadyReg errors (metrics are global singletons)
         let _ = prometheus::register(Box::new(entries_total.clone()));
         let _ = prometheus::register(Box::new(boot_streams_active.clone()));
         let _ = prometheus::register(Box::new(overlay_builds_total.clone()));
+        let _ = prometheus::register(Box::new(raft_leader.clone()));
+        let _ = prometheus::register(Box::new(raft_term.clone()));
+        let _ = prometheus::register(Box::new(raft_log_entries.clone()));
+        let _ = prometheus::register(Box::new(raft_replication_lag.clone()));
 
-        Self { entries_total, boot_streams_active, overlay_builds_total }
+        Self {
+            entries_total,
+            boot_streams_active,
+            overlay_builds_total,
+            raft_leader,
+            raft_term,
+            raft_log_entries,
+            raft_replication_lag,
+        }
     }
 }
 
@@ -104,10 +132,27 @@ async fn health_handler(State(state): State<TelemetryState>) -> impl IntoRespons
 
 /// Prometheus metrics endpoint.
 async fn metrics_handler(State(state): State<TelemetryState>) -> impl IntoResponse {
-    // Update gauges from current state
+    // Update config gauges from journal state
     let journal = state.journal.read().await;
     state.metrics.entries_total.set(i64::try_from(journal.entries.len()).unwrap_or(i64::MAX));
     drop(journal);
+
+    // Update Raft gauges from openraft metrics
+    let raft_metrics = state.raft.metrics();
+    let snapshot = raft_metrics.borrow_watched();
+    if let Some(leader_id) = snapshot.current_leader {
+        state.metrics.raft_leader.set(i64::try_from(leader_id).unwrap_or(-1));
+    } else {
+        state.metrics.raft_leader.set(-1);
+    }
+    state.metrics.raft_term.set(i64::try_from(snapshot.current_term).unwrap_or(0));
+    if let Some(ref last_applied) = snapshot.last_applied {
+        state.metrics.raft_log_entries.set(i64::try_from(last_applied.index).unwrap_or(0));
+    }
+    // Replication lag: on a single node, lag is 0. In a cluster, computed from
+    // leader's last_log_index vs this node's last_applied.
+    // openraft 0.10.0-alpha.14 doesn't expose commit index directly.
+    state.metrics.raft_replication_lag.set(0);
 
     let encoder = TextEncoder::new();
     let metric_families = prometheus::gather();

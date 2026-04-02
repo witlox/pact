@@ -691,12 +691,16 @@ async fn when_user_initiates_logout(world: &mut PactWorld) {
 
     if let Some(ref s) = server {
         if !world.auth_server_tokens.contains_key(s) {
-            // Not logged in.
             world.auth_error = Some("not logged in".to_string());
             return;
         }
+        // Attempt token revocation at IdP
         world.auth_revocation_attempted = true;
-        // Remove token regardless of revocation outcome.
+        if !world.auth_idp_reachable {
+            // IdP unreachable — revocation failed but we continue with cache cleanup
+            world.auth_error = Some("IdP unreachable, token revocation failed".to_string());
+        }
+        // Remove token regardless of revocation outcome (ADR: fail-open on logout)
         world.auth_server_tokens.remove(s);
         world.auth_cache_modified = true;
     } else if world.auth_server_tokens.is_empty() {

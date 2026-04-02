@@ -95,35 +95,23 @@ async fn given_emergency_sessions(world: &mut PactWorld) {
 #[when("the metrics endpoint is queried")]
 async fn when_metrics_queried(world: &mut PactWorld) {
     world.metrics_available = true;
-    // Create real JournalMetrics — registers real Prometheus gauges
+    // Create real JournalMetrics — registers all Prometheus gauges including Raft metrics
     let metrics = pact_journal::telemetry::JournalMetrics::new();
-    // Set values from actual journal state
+    // Set config values from actual journal state
     metrics.entries_total.set(i64::try_from(world.journal.entries.len()).unwrap_or(0));
     metrics.boot_streams_active.set(i64::try_from(world.journal.overlays.len()).unwrap_or(0));
     metrics.overlay_builds_total.set(0);
-    // Register Raft metrics (would come from openraft in production).
-    // These are planned but not yet wired in the telemetry module.
-    let raft_leader =
-        prometheus::IntGauge::new("pact_raft_leader", "Current Raft leader node ID").unwrap();
-    let raft_term = prometheus::IntGauge::new("pact_raft_term", "Current Raft term").unwrap();
-    let raft_entries =
-        prometheus::IntGauge::new("pact_raft_log_entries", "Raft log entry count").unwrap();
-    let raft_repl_lag =
-        prometheus::IntGauge::new("pact_raft_replication_lag", "Raft replication lag").unwrap();
+    // Set Raft values (simulated — no real Raft instance in BDD)
+    metrics.raft_leader.set(1);
+    metrics.raft_term.set(42);
+    metrics.raft_log_entries.set(i64::try_from(world.journal.entries.len()).unwrap_or(0));
+    metrics.raft_replication_lag.set(0);
+    // Boot stream duration histogram (not in JournalMetrics yet — register separately)
     let boot_duration = prometheus::Histogram::with_opts(prometheus::HistogramOpts::new(
         "pact_journal_boot_stream_duration_seconds",
         "Boot stream duration",
     ))
     .unwrap();
-    raft_leader.set(1);
-    raft_term.set(42);
-    raft_entries.set(i64::try_from(world.journal.entries.len()).unwrap_or(0));
-    raft_repl_lag.set(0);
-    // Ignore AlreadyReg errors (metrics are global singletons across tests)
-    let _ = prometheus::register(Box::new(raft_leader));
-    let _ = prometheus::register(Box::new(raft_term));
-    let _ = prometheus::register(Box::new(raft_entries));
-    let _ = prometheus::register(Box::new(raft_repl_lag));
     let _ = prometheus::register(Box::new(boot_duration));
     // Gather real Prometheus output
     let encoder = prometheus::TextEncoder::new();

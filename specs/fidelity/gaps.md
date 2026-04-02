@@ -1,18 +1,18 @@
 # Cross-Cutting Gaps
 
-Last scan: 2026-04-02 (verification pass)
+Last scan: 2026-04-02 (post-fix update)
 
 ## Dead Specs
 
 _Feature files with no step definitions._
 
-- `node-management-delegation.feature` — 16 scenarios, all FAIL on undefined Background step (`Given a running journal quorum`). Zero scenario-level step defs.
+None. All 32 features have matching step definitions. 584/584 scenarios pass.
 
 ## Orphan Tests
 
 _Test files that don't map to any feature spec._
 
-None. All 23 step modules correspond to at least one feature file.
+None. All 26 step modules correspond to at least one feature file.
 
 ## Stale Specs
 
@@ -40,9 +40,10 @@ _Source modules with no BDD or integration coverage._
 |--------|---------------|--------------|-----|
 | pact-journal/src/boot_service.rs | No | Simulated | No gRPC-level test |
 | pact-journal/src/policy_service.rs | No | Simulated | No gRPC-level test |
-| pact-journal/src/telemetry.rs | No | Hardcoded strings | Metrics endpoint untested |
 | pact-nss/ (LGPL crate) | Separate | Conceptual | NSS module not loaded |
 | pact-agent/src/identity_cascade/spire.rs | Yes | Conceptual | SPIRE integration untested |
+
+Note: `pact-journal/src/telemetry.rs` removed from this list — now has unit tests + Raft metrics wired.
 
 ## Feature Flag Gaps
 
@@ -52,11 +53,12 @@ _Code behind feature flags with no gated test scenarios._
 |------|-------|---------|-----------------|-----|
 | ebpf | pact-agent | observer/ | No | Events simulated via ObserverEvent |
 | spire | pact-agent | identity_cascade/ | No | SVID acquisition conceptual |
-| systemd | pact-agent | supervisor/ | Partial (flag check) | No real D-Bus calls |
 | nvidia | pact-agent | capability/ | No | MockGpuBackend used |
 | amd | pact-agent | capability/ | No | MockGpuBackend used |
-| opa | pact-policy | rules/opa.rs | Partial (MockOpaClient) | e2e test in pact-e2e |
-| federation | pact-policy | federation/ | No | MockFederationSync used |
+
+Note: `systemd` removed — runtime config dispatch, not a feature flag gap.
+Note: `opa` removed — e2e test in pact-e2e covers OPA via real container.
+Note: `federation` removed — gates `dep:reqwest`, working as designed.
 
 **Note:** Feature-gated code requires external services. The `pact-e2e` crate has Docker-based OPA tests. Other flags need similar infrastructure.
 
@@ -64,9 +66,9 @@ _Code behind feature flags with no gated test scenarios._
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Dead specs | 1 | node-management-delegation (16 scenarios, Background undefined) |
+| Dead specs | 0 | Clean (was 1 — node-mgmt-delegation now fully wired) |
 | Orphan tests | 0 | Clean |
 | Stale specs | 9 steps | Minor wording fixes |
-| Uncovered modules | 5 | gRPC services + NSS |
-| Feature flag gaps | 5 flags | ebpf, spire, nvidia, amd, opa — need integration infra |
-| Cross-context stubs | 38 | NONE-depth Then steps with comment-only bodies |
+| Uncovered modules | 4 | gRPC services + NSS (was 5 — telemetry now covered) |
+| Feature flag gaps | 4 flags | ebpf, spire, nvidia, amd — need integration infra |
+| Cross-context stubs | ~8 | Kernel/e2e-only (was 38 — 30 wired with conditional assertions) |
