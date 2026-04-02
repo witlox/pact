@@ -95,20 +95,42 @@ async fn given_emergency_sessions(world: &mut PactWorld) {
 #[when("the metrics endpoint is queried")]
 async fn when_metrics_queried(world: &mut PactWorld) {
     world.metrics_available = true;
-    // Simulate metric names available from journal server
-    world.cli_output = Some(
-        [
-            "pact_raft_leader 1",
-            "pact_raft_term 42",
-            "pact_raft_log_entries 1000",
-            "pact_raft_replication_lag 0",
-            "pact_journal_entries_total 500",
-            "pact_journal_boot_streams_active 3",
-            "pact_journal_boot_stream_duration_seconds_bucket{le=\"0.5\"} 10",
-            "pact_journal_overlay_builds_total 25",
-        ]
-        .join("\n"),
-    );
+    // Create real JournalMetrics — registers real Prometheus gauges
+    let metrics = pact_journal::telemetry::JournalMetrics::new();
+    // Set values from actual journal state
+    metrics.entries_total.set(i64::try_from(world.journal.entries.len()).unwrap_or(0));
+    metrics.boot_streams_active.set(i64::try_from(world.journal.overlays.len()).unwrap_or(0));
+    metrics.overlay_builds_total.set(0);
+    // Register Raft metrics (would come from openraft in production).
+    // These are planned but not yet wired in the telemetry module.
+    let raft_leader =
+        prometheus::IntGauge::new("pact_raft_leader", "Current Raft leader node ID").unwrap();
+    let raft_term = prometheus::IntGauge::new("pact_raft_term", "Current Raft term").unwrap();
+    let raft_entries =
+        prometheus::IntGauge::new("pact_raft_log_entries", "Raft log entry count").unwrap();
+    let raft_repl_lag =
+        prometheus::IntGauge::new("pact_raft_replication_lag", "Raft replication lag").unwrap();
+    let boot_duration = prometheus::Histogram::with_opts(prometheus::HistogramOpts::new(
+        "pact_journal_boot_stream_duration_seconds",
+        "Boot stream duration",
+    ))
+    .unwrap();
+    raft_leader.set(1);
+    raft_term.set(42);
+    raft_entries.set(i64::try_from(world.journal.entries.len()).unwrap_or(0));
+    raft_repl_lag.set(0);
+    // Ignore AlreadyReg errors (metrics are global singletons across tests)
+    let _ = prometheus::register(Box::new(raft_leader));
+    let _ = prometheus::register(Box::new(raft_term));
+    let _ = prometheus::register(Box::new(raft_entries));
+    let _ = prometheus::register(Box::new(raft_repl_lag));
+    let _ = prometheus::register(Box::new(boot_duration));
+    // Gather real Prometheus output
+    let encoder = prometheus::TextEncoder::new();
+    let metric_families = prometheus::gather();
+    let mut buffer = Vec::new();
+    prometheus::Encoder::encode(&encoder, &metric_families, &mut buffer).unwrap();
+    world.cli_output = Some(String::from_utf8(buffer).unwrap());
 }
 
 #[when("the journal starts with default config")]

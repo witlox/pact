@@ -2853,6 +2853,7 @@ dependencies = [
  "pact-mcp",
  "pact-policy",
  "pact-test-harness",
+ "prometheus",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

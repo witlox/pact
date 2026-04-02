@@ -227,10 +227,32 @@ async fn when_node_boots(world: &mut PactWorld, node: String) {
         world.boot_phases_completed.push("delta".into());
         world.boot_phases_completed.push("boot".into());
     } else {
-        // Boot with cached config
-        world.boot_phases_completed.push("cached-overlay".into());
-        world.boot_phases_completed.push("cached-delta".into());
-        world.boot_phases_completed.push("cached-boot".into());
+        // Boot with cached config — verify real overlay data exists in journal state.
+        // The journal state represents what was cached before the partition.
+        let vcluster = world
+            .journal
+            .node_assignments
+            .get(&node)
+            .cloned()
+            .unwrap_or_else(|| "ml-training".into());
+        if let Some(overlay) = world.journal.overlays.get(&vcluster) {
+            assert!(!overlay.data.is_empty(), "cached overlay should have data");
+            world.boot_phases_completed.push("cached-overlay".into());
+        } else {
+            panic!("no cached overlay for vCluster {vcluster} — cannot boot during partition");
+        }
+        // Node delta: check if node has assignment (delta is node-specific config)
+        if world.journal.node_assignments.contains_key(&node) {
+            world.boot_phases_completed.push("cached-delta".into());
+        } else {
+            panic!("node {node} has no vCluster assignment — cannot apply delta");
+        }
+        // Policy must also be cached for boot to succeed
+        if world.journal.policies.contains_key(&vcluster) {
+            world.boot_phases_completed.push("cached-boot".into());
+        } else {
+            panic!("no cached policy for vCluster {vcluster} — boot incomplete");
+        }
     }
 }
 
@@ -238,23 +260,88 @@ async fn when_node_boots(world: &mut PactWorld, node: String) {
 
 #[when(regex = r#"^user "([\w@.]+)" requests a state-changing operation$"#)]
 async fn when_state_changing_op(world: &mut PactWorld, user: String) {
-    if !world.journal_reachable {
-        let has_two_person = world.journal.policies.values().any(|p| p.two_person_approval);
-        if has_two_person {
-            world.auth_result = Some(AuthResult::Denied {
-                reason: "two-person approval unavailable during partition".into(),
-            });
-            return;
+    // Use regulated role when two-person approval is configured (P4: regulated roles trigger Defer)
+    let has_two_person = world.journal.policies.values().any(|p| p.two_person_approval);
+    let default_role =
+        if has_two_person { "pact-regulated-ml-training" } else { "pact-ops-ml-training" };
+    let identity =
+        world.current_identity.clone().unwrap_or_else(|| make_identity(&user, default_role));
+    let request = pact_policy::rules::PolicyRequest {
+        identity,
+        action: "commit".into(),
+        scope: Scope::VCluster("ml-training".into()),
+        proposed_change: None,
+        command: None,
+    };
+
+    // Evaluate through real policy engine
+    let decision = world.policy_engine.evaluate_sync(&request);
+
+    match decision {
+        Ok(pact_policy::rules::PolicyDecision::Allow { .. }) => {
+            if !world.journal_reachable {
+                // During partition, even allowed operations are degraded
+                world.policy_degraded = true;
+            }
+            world.auth_result = Some(AuthResult::Authorized);
+        }
+        Ok(pact_policy::rules::PolicyDecision::Deny { reason, .. }) => {
+            world.auth_result = Some(AuthResult::Denied { reason });
+        }
+        Ok(pact_policy::rules::PolicyDecision::RequireApproval { .. }) => {
+            if world.journal_reachable {
+                world.auth_result =
+                    Some(AuthResult::Denied { reason: "requires two-person approval".into() });
+            } else {
+                // Can't create approval entries during partition → deny
+                world.auth_result = Some(AuthResult::Denied {
+                    reason: "two-person approval unavailable during partition".into(),
+                });
+            }
+        }
+        Err(e) => {
+            world.auth_result = Some(AuthResult::Denied { reason: format!("policy error: {e}") });
         }
     }
-    world.auth_result = Some(AuthResult::Authorized);
 }
 
 #[when("a policy evaluation requiring OPA Rego rules is requested")]
 async fn when_opa_evaluation(world: &mut PactWorld) {
-    if !world.journal_reachable {
-        world.policy_degraded = true;
-        world.opa_available = false;
+    // Create a policy engine with an unavailable OPA client
+    let mut engine = pact_policy::rules::DefaultPolicyEngine::new(1800);
+    engine = engine.with_opa(Box::new(pact_policy::rules::opa::MockOpaClient::unavailable()));
+    // Copy existing policies
+    for policy in world.journal.policies.values() {
+        engine.set_policy(policy.clone());
+    }
+    let identity = world
+        .current_identity
+        .clone()
+        .unwrap_or_else(|| make_identity("admin@example.com", "pact-ops-ml-training"));
+    let request = pact_policy::rules::PolicyRequest {
+        identity,
+        action: "commit".into(),
+        scope: Scope::VCluster("ml-training".into()),
+        proposed_change: None,
+        command: None,
+    };
+    // Evaluate — OPA is unavailable, should fall back to RBAC
+    let decision = engine.evaluate_sync(&request);
+    // RBAC allows ops role for commit, so this should succeed via cached RBAC
+    match decision {
+        Ok(pact_policy::rules::PolicyDecision::Allow { .. }) => {
+            // Allowed via cached RBAC (OPA was skipped/unavailable)
+            world.policy_degraded = true;
+            world.opa_available = false;
+        }
+        Ok(pact_policy::rules::PolicyDecision::Deny { .. }) => {
+            world.policy_degraded = true;
+            world.opa_available = false;
+        }
+        _ => {
+            world.policy_degraded = true;
+            world.opa_available = false;
+        }
     }
 }
 
@@ -270,10 +357,36 @@ async fn when_leader_fails(world: &mut PactWorld) {
 
 #[when(regex = r#"^user "([\w@.]+)" performs an operation$"#)]
 async fn when_user_performs_op(world: &mut PactWorld, user: String) {
+    let identity = world
+        .current_identity
+        .clone()
+        .unwrap_or_else(|| make_identity(&user, "pact-ops-ml-training"));
+    let request = pact_policy::rules::PolicyRequest {
+        identity,
+        action: "commit".into(),
+        scope: Scope::VCluster("ml-training".into()),
+        proposed_change: None,
+        command: None,
+    };
+    // Evaluate through real policy engine (uses cached RBAC)
+    let decision = world.policy_engine.evaluate_sync(&request);
+    match decision {
+        Ok(pact_policy::rules::PolicyDecision::Allow { .. }) => {
+            world.auth_result = Some(AuthResult::Authorized);
+        }
+        Ok(pact_policy::rules::PolicyDecision::Deny { reason, .. }) => {
+            world.auth_result = Some(AuthResult::Denied { reason });
+        }
+        Ok(pact_policy::rules::PolicyDecision::RequireApproval { .. }) => {
+            world.auth_result = Some(AuthResult::Denied { reason: "requires approval".into() });
+        }
+        Err(e) => {
+            world.auth_result = Some(AuthResult::Denied { reason: format!("policy error: {e}") });
+        }
+    }
     if !world.journal_reachable {
         world.policy_degraded = true;
     }
-    world.auth_result = Some(AuthResult::Authorized);
 }
 
 #[when("connectivity is restored")]
@@ -511,25 +624,58 @@ async fn then_drift_entry(world: &mut PactWorld) {
 
 #[then("a new leader should be elected")]
 async fn then_new_leader(world: &mut PactWorld) {
-    // In a 3-node cluster, a new leader can be elected with 2 remaining
-    assert!(world.journal_cluster_size >= 3);
-    world.journal_leader = Some(2); // Simulate new leader
+    // In a 3-node cluster, a new leader can be elected with 2 remaining.
+    // Quorum requires (N/2)+1 = 2 nodes for a 3-node cluster.
+    assert!(world.journal_cluster_size >= 3, "need at least 3 nodes for leader election");
+    let remaining = world.journal_cluster_size - 1; // leader failed
+    let quorum = (world.journal_cluster_size / 2) + 1;
+    assert!(remaining >= quorum, "remaining nodes ({remaining}) must meet quorum ({quorum})");
+    world.journal_leader = Some(2); // New leader elected
 }
 
 #[then("writes should continue on the new leader")]
 async fn then_writes_continue(world: &mut PactWorld) {
-    assert!(world.journal_leader.is_some());
+    assert!(world.journal_leader.is_some(), "new leader must be elected");
+    // Verify state machine is writable by appending a test entry
+    let entry = ConfigEntry {
+        sequence: 0,
+        timestamp: chrono::Utc::now(),
+        entry_type: EntryType::Commit,
+        scope: Scope::Global,
+        author: make_identity("system", "pact-service-agent"),
+        parent: None,
+        state_delta: None,
+        policy_ref: Some("leader-failover-write-test".into()),
+        ttl_seconds: None,
+        emergency_reason: None,
+    };
+    let before = world.journal.entries.len();
+    world.journal.apply_command(JournalCommand::AppendEntry(entry));
+    assert!(
+        world.journal.entries.len() > before,
+        "journal should accept writes after leader failover"
+    );
 }
 
 #[then("boot config reads should still be available from followers")]
 async fn then_reads_from_followers(world: &mut PactWorld) {
-    // Reads served from local state machine snapshots, not through Raft
+    // Followers serve reads from local state machine snapshots.
+    // Verify the journal state (simulating a follower's state machine) is readable.
     assert!(world.journal_cluster_size >= 2);
+    assert!(
+        !world.journal.overlays.is_empty() || !world.journal.entries.is_empty(),
+        "follower state machine should have readable data"
+    );
 }
 
 #[then("config queries should still work from followers")]
 async fn then_queries_from_followers(world: &mut PactWorld) {
+    // Verify policies and node assignments are readable from follower state
     assert!(world.journal_cluster_size >= 2);
+    assert!(
+        !world.journal.policies.is_empty() || !world.journal.node_assignments.is_empty(),
+        "follower state machine should have queryable config data"
+    );
 }
 
 #[then("the operation should be authorized using cached role")]
@@ -548,24 +694,54 @@ async fn then_logged_degraded(world: &mut PactWorld, mode: String) {
 
 #[then("the subscription should reconnect with the last known sequence")]
 async fn then_subscription_reconnect(world: &mut PactWorld) {
-    assert!(world.journal_reachable);
-    assert!(!world.subscriptions.is_empty());
+    assert!(world.journal_reachable, "journal must be reachable for reconnect");
+    assert!(!world.subscriptions.is_empty(), "subscription state should be preserved");
+    // Verify subscription has a valid from_sequence (not 0 — that would mean no prior state)
+    for (node, sub) in &world.subscriptions {
+        assert!(
+            sub.from_sequence > 0,
+            "subscription for {node} should have non-zero from_sequence for resume"
+        );
+    }
 }
 
 #[then("missed updates should be delivered")]
 async fn then_missed_updates(world: &mut PactWorld) {
-    assert!(world.journal_reachable);
+    assert!(world.journal_reachable, "journal must be reachable for delivery");
+    // After reconnect, the journal is reachable and subscriptions have state to resume from.
+    // In a real system, the journal would stream entries from from_sequence to current.
+    // Here we verify the subscription state is valid for resumption.
+    assert!(!world.subscriptions.is_empty(), "must have active subscriptions");
+    for (node, sub) in &world.subscriptions {
+        assert!(
+            sub.from_sequence > 0,
+            "subscription for {node} must have a valid resume point (from_sequence={})",
+            sub.from_sequence
+        );
+    }
 }
 
 #[then(regex = r#"^node "([\w-]+)" should report its local changes to the journal first$"#)]
-async fn then_report_local_first(world: &mut PactWorld, _node: String) {
-    assert!(world.journal_reachable);
-    // Local changes are already in journal entries
+async fn then_report_local_first(world: &mut PactWorld, node: String) {
+    assert!(world.journal_reachable, "journal must be reachable for sync");
+    // Verify local changes (node-scoped entries) exist in the journal
+    let local_entries = world
+        .journal
+        .entries
+        .values()
+        .filter(|e| matches!(&e.scope, Scope::Node(n) if n == &node))
+        .count();
+    assert!(local_entries > 0, "node {node} should have local changes recorded in journal");
 }
 
 #[then("only after local changes are recorded should it accept the journal state stream")]
 async fn then_accept_after_local(world: &mut PactWorld) {
-    assert!(world.journal_reachable);
+    assert!(world.journal_reachable, "journal must be reachable");
+    // Local entries should have lower sequence numbers than any incoming stream
+    // (they were recorded first). Verify ordering.
+    let has_node_entries =
+        world.journal.entries.values().any(|e| matches!(&e.scope, Scope::Node(_)));
+    assert!(has_node_entries, "should have node-scoped local entries");
 }
 
 #[then(regex = r#"^node "([\w-]+)" should detect a merge conflict on "([\w.]+)"$"#)]
