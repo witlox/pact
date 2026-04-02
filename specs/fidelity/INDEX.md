@@ -145,7 +145,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 ## Cross-Cutting Findings
 
 ### Dead specs
-- `node-management-delegation.feature` — 16 scenarios, zero step definitions. All FAIL on Background step (not silently skipped — visible in CI).
+None. All 32 features have matching step definitions. 584/584 pass.
 
 ### Feature flag findings (CORRECTED 2026-04-02)
 - ~~**`systemd`**: dead flag~~ **FALSE POSITIVE.** `systemd` flag exists but `SystemdBackend` is intentionally selected at runtime via `SupervisorBackend::Systemd` config enum (`boot/mod.rs:206-218`). Both backends compile unconditionally for deployment flexibility. Not a dead flag.
@@ -161,30 +161,27 @@ Multiple features share a pattern where WHEN steps set world-state flags and THE
 - **cross_context**: auto-rollback WRITES state in THEN step
 
 ### Silent skip risk
-Cucumber-rs silently skips unmatched scenarios. The 12 skipped CLI scenarios are not flagged as errors. The 16 node-management-delegation scenarios FAIL on Background (visible), but other unmatched scenarios could still silently skip. No mechanism detects new skips from step regex drift.
+~~Cucumber-rs silently skips unmatched scenarios.~~ MITIGATED (2026-04-02): CI skip guard added to both CI and release workflows. Any skipped or failed scenarios cause CI failure. Current baseline: 584/584 pass, 0 skip.
 
 ## Priority Actions
 
-### Critical
-1. **Wire node-management-delegation BDD** — 16 scenarios fail on undefined Background step + zero scenario-level step defs. Need Background fixture + step module with wiremock for CSM/OpenCHAMI HTTP mocking.
-2. **Fix partition_resilience self-fulfilling tests** — 7 of 18 scenarios read back flags set by WHEN. Worst: leader failover THEN step *assigns* new leader instead of verifying election. Merge conflict scenarios (10-13) are fine. Use real Raft cluster (e2e exists) or real agent boot logic.
+All priority actions from the 2026-04-01 sweep are **COMPLETE** as of 2026-04-02:
 
-### High
-3. ~~**Fix `systemd` feature flag**~~ REMOVED — false positive (runtime config dispatch, not dead).
-4. ~~**Fix `federation` feature flag**~~ REMOVED — false positive (gates `dep:reqwest`, working as designed).
-5. **Add skip detection** — CI step that asserts exact skip count (currently 12 CLI skips). Node-mgmt scenarios fail visibly. Any new skips = CI failure.
-6. **Fix cross_context stubs** — **38** NONE-depth Then steps (was undercounted as 22). All have comment-only bodies with zero assertions.
+1. ~~Wire node-management-delegation BDD~~ DONE — 16 scenarios via axum mock HTTP
+2. ~~Fix partition_resilience self-fulfilling tests~~ DONE — real policy engine + JournalState
+3. ~~Fix `systemd`/`federation` feature flags~~ REMOVED — false positives
+4. ~~Add skip detection~~ DONE — CI guard in CI + release workflows
+5. ~~Fix cross_context stubs~~ DONE — 38 stubs → conditional assertions
+6. ~~Wire diag fleet-wide assertions~~ DONE — real output verification
+7. ~~Wire cli_commands delegation~~ DONE — 12 scenarios wired
+8. ~~Wire observability metrics~~ DONE — real Prometheus gather()
+9. ~~ADR-002/011/017 enforcement~~ DONE
 
-### Medium
-7. **Wire diag fleet-wide assertions** — 12 Then steps only check exit_code==0. Verify fan-out, prefixes, truncation.
-8. **Wire cli_commands delegation** — **12** scenarios SKIPPED (undrain, dag×3, budget×2, backup×4, nodes×2). Need When step defs.
-9. **Add NodeManagementBackend mock** — wiremock or similar to verify URL paths, request bodies, auth headers. No async method testing exists.
-10. **Wire observability metrics** — fully self-fulfilling: WHEN seeds hardcoded strings, THEN reads them back. No real Prometheus scrape.
-
-### Low
-11. ~~**ADR-002 enforcement**~~ DONE — drift_detection.feature blacklist filtering already tests this
-12. ~~**ADR-011 enforcement**~~ DONE — partition_resilience wired to real policy engine (Group 2)
-13. ~~**ADR-017 enforcement**~~ DONE — boot ordering scenario verifies PullOverlay before StartServices
+### Remaining (low priority)
+- **auth_logout** (LOW) — 3 scenarios, flag-based but functional
+- **federation** (LOW) — 10 scenarios, blocked on Sovra implementation
+- **ADR-001** (DOCUMENTED) — Raft quorum topology needs multi-process e2e
+- **Raft metrics replication_lag** — set to 0; openraft 0.10-alpha.14 doesn't expose commit index
 
 ## Changelog
 

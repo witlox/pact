@@ -249,7 +249,7 @@ pact --token "eyJhbGciOiJS..." status
 
 ```bash
 just test            # Unit + integration tests (fast, no Docker needed)
-just test-accept     # BDD acceptance tests (531 scenarios)
+just test-accept     # BDD acceptance tests (584 scenarios)
 just test-e2e        # End-to-end tests (requires Docker)
 just ci              # Full CI suite (fmt + clippy + tests + deny)
 ```

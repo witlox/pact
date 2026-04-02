@@ -36,11 +36,11 @@ async fn config_entry_roundtrip() {
 
 ### Level 3: BDD Acceptance Tests (`pact-acceptance`)
 
-555 scenarios across 31 feature files using the `cucumber` crate. Covers all
+584 scenarios across 32 feature files using the `cucumber` crate. Covers all
 bounded contexts: boot config streaming, drift detection → commit/rollback,
 shell session lifecycle, emergency mode, enrollment, RBAC, policy evaluation,
 overlay management, partition resilience, identity mapping, workload integration,
-and 24 cross-context integration scenarios.
+node management delegation, and 22 cross-context integration scenarios.
 
 **Runs on all platforms** — uses real domain logic (JournalState, DriftEvaluator,
 CommitWindowManager, PactSupervisor) but stubs OS-level interactions.
