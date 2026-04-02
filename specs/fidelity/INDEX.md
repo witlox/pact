@@ -85,11 +85,11 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 | Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
 |---------|-----------|----------|----------|---------|-----------|------------|-------|
-| partition_resilience | 16 | 7 | 7 | 14 | 0 | **LOW** | ↓ was MODERATE (self-fulfilling leader failover, cached boot) |
+| partition_resilience | 16 | 13 | 7 | 8 | 0 | **MODERATE** | ↑ was LOW — 9 self-fulfilling scenarios wired to real policy engine, JournalState, quorum math |
 | cli_commands | 38 | 6 | 13 | 7 | 2+12skip | **LOW** | — (12 scenarios SKIPPED, delegation self-fulfilling) |
 | cli_authentication | 27 | 3 | 18 | 3 | 2 | **LOW** | — |
 | diag_retrieval | 22 | 5 | 5 | 12 | 0 | **LOW** | — (fleet-wide exit-code-only) |
-| observability | 15 | 4 | 14 | 1 | 0 | **LOW** | — (metrics hardcoded in When steps) |
+| observability | 15 | 4 | 14 | 1 | 0 | **MODERATE** | ↑ was LOW — real Prometheus gather() replaces hardcoded strings. Raft metrics registered as planned-but-unwired. |
 | auth_logout | 3 | 0 | 2 | 3 | 0 | **LOW** | — |
 | federation | 10 | 0 | 3 | 7 | 7 | **LOW** | — (no real impl, site-local unverified) |
 
@@ -154,10 +154,10 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 
 ### Pervasive self-fulfilling pattern
 Multiple features share a pattern where WHEN steps set world-state flags and THEN steps read them back:
-- **partition_resilience**: leader failover, cached boot, subscription reconnect
+- ~~**partition_resilience**~~: FIXED (2026-04-02) — 9 scenarios now wire to real policy engine, JournalState, quorum math
 - **platform_bootstrap**: watchdog, SPIRE, adaptive supervision, coldplug
 - **cli_commands**: all delegation commands
-- **observability**: Prometheus metrics hardcoded in WHEN
+- ~~**observability**~~: FIXED (2026-04-02) — real Prometheus gather() replaces hardcoded strings
 - **cross_context**: auto-rollback WRITES state in THEN step
 
 ### Silent skip risk
@@ -195,3 +195,4 @@ Cucumber-rs silently skips unmatched scenarios. The 12 skipped CLI scenarios are
 | 2026-03-28 | Auth e2e + GCP deployment | TokenValidator WIRED, V2+V4 validated |
 | 2026-04-01 | **Full re-sweep** (9 chunks, 32 features, 15 mocks, 17 ADRs) | 9 HIGH (+1), 14 MODERATE, 7 LOW (-1), 2 DEAD/NONE. node-management-delegation.feature added but unwired. identity_mapping↑HIGH, drift↑HIGH, rbac↑HIGH, commit_window↑HIGH. partition_resilience↓LOW. Feature flag gaps found (systemd, federation). 777 unit tests (+21), 50 e2e (+8). |
 | 2026-04-02 | **Verification pass** — corrected false positives + undercounts | `systemd` and `federation` feature flags: NOT dead (false positives removed). cross_context stubs: 38 not 22 (undercount corrected). cli_commands skips: 12 not 11. node-mgmt-delegation: scenarios FAIL on Background, not silently skip. |
+| 2026-04-02 | **Group 1+2 fixes** — node-mgmt wired, self-fulfilling tests replaced | node-mgmt-delegation: NONE→HIGH (16 scenarios, axum mock, real HTTP). partition_resilience: LOW→MODERATE (9 scenarios wired to real policy engine + JournalState). observability: LOW→MODERATE (real Prometheus gather). Raft metrics gap exposed (planned but unwired). Two-person approval finding: only regulated roles trigger Defer (P4). |
