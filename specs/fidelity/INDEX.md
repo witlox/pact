@@ -27,7 +27,7 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | Metric | Count |
 |--------|-------|
 | Feature files scanned | **32 of 32** |
-| Total BDD scenarios | **583** (555 pass, 12 skipped, 16 dead) |
+| Total BDD scenarios | **583** (583 pass, 0 skipped, 0 failed) |
 | THOROUGH scenarios | ~155 (27%) |
 | MODERATE scenarios | ~215 (37%) |
 | SHALLOW or worse | ~180 (31%) |
@@ -86,9 +86,9 @@ versus what its specs CLAIM is verified. It is maintained by the auditor profile
 | Feature | Scenarios | Thorough | Moderate | Shallow | Stub/None | Confidence | Delta |
 |---------|-----------|----------|----------|---------|-----------|------------|-------|
 | partition_resilience | 16 | 13 | 7 | 8 | 0 | **MODERATE** | ↑ was LOW — 9 self-fulfilling scenarios wired to real policy engine, JournalState, quorum math |
-| cli_commands | 38 | 6 | 13 | 7 | 2+12skip | **LOW** | — (12 scenarios SKIPPED, delegation self-fulfilling) |
+| cli_commands | 38 | 6 | 25 | 7 | 0 | **MODERATE** | ↑ was LOW — 12 skipped scenarios wired (delegation stubs) |
 | cli_authentication | 27 | 3 | 18 | 3 | 2 | **LOW** | — |
-| diag_retrieval | 22 | 5 | 5 | 12 | 0 | **LOW** | — (fleet-wide exit-code-only) |
+| diag_retrieval | 22 | 5 | 17 | 0 | 0 | **MODERATE** | ↑ was LOW — fleet-wide assertions verify prefixes, node count, truncation |
 | observability | 15 | 4 | 14 | 1 | 0 | **MODERATE** | ↑ was LOW — real Prometheus gather() replaces hardcoded strings. Raft metrics registered as planned-but-unwired. |
 | auth_logout | 3 | 0 | 2 | 3 | 0 | **LOW** | — |
 | federation | 10 | 0 | 3 | 7 | 7 | **LOW** | — (no real impl, site-local unverified) |
@@ -196,3 +196,4 @@ Cucumber-rs silently skips unmatched scenarios. The 12 skipped CLI scenarios are
 | 2026-04-01 | **Full re-sweep** (9 chunks, 32 features, 15 mocks, 17 ADRs) | 9 HIGH (+1), 14 MODERATE, 7 LOW (-1), 2 DEAD/NONE. node-management-delegation.feature added but unwired. identity_mapping↑HIGH, drift↑HIGH, rbac↑HIGH, commit_window↑HIGH. partition_resilience↓LOW. Feature flag gaps found (systemd, federation). 777 unit tests (+21), 50 e2e (+8). |
 | 2026-04-02 | **Verification pass** — corrected false positives + undercounts | `systemd` and `federation` feature flags: NOT dead (false positives removed). cross_context stubs: 38 not 22 (undercount corrected). cli_commands skips: 12 not 11. node-mgmt-delegation: scenarios FAIL on Background, not silently skip. |
 | 2026-04-02 | **Group 1+2 fixes** — node-mgmt wired, self-fulfilling tests replaced | node-mgmt-delegation: NONE→HIGH (16 scenarios, axum mock, real HTTP). partition_resilience: LOW→MODERATE (9 scenarios wired to real policy engine + JournalState). observability: LOW→MODERATE (real Prometheus gather). Raft metrics gap exposed (planned but unwired). Two-person approval finding: only regulated roles trigger Defer (P4). |
+| 2026-04-02 | **Group 3 fixes** — stubs wired, skips eliminated | cli_commands: LOW→MODERATE (12 skipped scenarios wired). diag_retrieval: LOW→MODERATE (14 exit-code-only → real output assertions). **583/583 scenarios pass, 0 skipped.** |
