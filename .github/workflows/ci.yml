@@ -124,7 +124,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p pact-acceptance
+      - name: Run BDD acceptance tests
+        run: |
+          output=$(cargo test -p pact-acceptance 2>&1)
+          echo "$output" | tail -10
+          if echo "$output" | grep -qE "\d+ skipped|\d+ failed"; then
+            echo "::error::BDD scenarios skipped or failed"
+            echo "$output" | grep -E "skipped|failed"
+            exit 1
+          fi
 
   e2e:
     name: E2E Integration

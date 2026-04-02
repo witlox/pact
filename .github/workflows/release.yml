@@ -35,7 +35,14 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --workspace --exclude pact-acceptance --exclude pact-e2e --run-ignored all
-      - run: cargo test -p pact-acceptance
+      - name: Run BDD acceptance tests (no skips allowed)
+        run: |
+          output=$(cargo test -p pact-acceptance 2>&1)
+          echo "$output" | tail -10
+          if echo "$output" | grep -qE "\d+ skipped|\d+ failed"; then
+            echo "::error::BDD scenarios skipped or failed"
+            exit 1
+          fi
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   # ---------------------------------------------------------------------------

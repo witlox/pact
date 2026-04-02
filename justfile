@@ -35,6 +35,18 @@ test:
 test-accept:
     cargo test -p pact-acceptance
 
+# Run BDD tests and assert no skips or failures (CI guard)
+test-accept-guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output=$(cargo test -p pact-acceptance 2>&1)
+    echo "$output" | tail -5
+    if echo "$output" | grep -q "skipped\|failed"; then
+        echo "FAIL: BDD scenarios skipped or failed — see output above"
+        echo "$output" | grep -E "(skipped|failed)"
+        exit 1
+    fi
+
 # Run BDD acceptance tests with integration features (needs running services)
 test-accept-full:
     cargo test -p pact-acceptance --features integration
