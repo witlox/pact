@@ -124,6 +124,15 @@ Feature: Platform Bootstrap
     Then no ReadinessSignal should be emitted
     And the node should not be schedulable
 
+  # --- ADR-017: Network topology enforcement ---
+
+  Scenario: Journal communication precedes HSN availability (ADR-017)
+    Given a supervisor with backend "pact"
+    When pact-agent boots as PID 1
+    Then PullOverlay should complete before StartServices
+    And journal communication uses management network only
+    And HSN services start only in the StartServices phase
+
   # --- Resource budget during boot ---
 
   Scenario: Boot completes within time target

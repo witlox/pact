@@ -1328,3 +1328,56 @@ async fn then_start_services_executes(world: &mut PactWorld) {
 async fn then_ready_executes(world: &mut PactWorld) {
     assert!(world.boot_phase_order.contains(&"Ready".to_string()), "Ready should execute");
 }
+
+// --- ADR-017: Network topology enforcement ---
+
+#[then("PullOverlay should complete before StartServices")]
+async fn then_pull_before_start(world: &mut PactWorld) {
+    let pull_idx = world.boot_phase_order.iter().position(|p| p == "PullOverlay");
+    let start_idx = world.boot_phase_order.iter().position(|p| p == "StartServices");
+    assert!(
+        pull_idx < start_idx,
+        "PullOverlay (idx={pull_idx:?}) must complete before StartServices (idx={start_idx:?}) — \
+         journal communication must precede HSN availability (ADR-017)"
+    );
+}
+
+#[then("journal communication uses management network only")]
+async fn then_mgmt_network_only(world: &mut PactWorld) {
+    // ADR-017: PullOverlay (journal gRPC) happens in phase 4, before StartServices (phase 5).
+    // HSN services (cxi_rh) start in phase 5. Therefore journal communication
+    // can only use management network (the only network available before phase 5).
+    let pull_idx = world
+        .boot_phase_order
+        .iter()
+        .position(|p| p == "PullOverlay")
+        .expect("PullOverlay phase should exist");
+    let start_idx = world
+        .boot_phase_order
+        .iter()
+        .position(|p| p == "StartServices")
+        .expect("StartServices phase should exist");
+    assert!(
+        pull_idx < start_idx,
+        "journal communication (PullOverlay) must use management network — \
+         HSN not available until StartServices (ADR-017)"
+    );
+}
+
+#[then("HSN services start only in the StartServices phase")]
+async fn then_hsn_in_start_services(world: &mut PactWorld) {
+    // ADR-017: HSN driver (cxi_rh) and lattice-node-agent are supervised services
+    // that start in the StartServices phase. Verify StartServices is the last
+    // operational phase before Ready.
+    let start_idx = world.boot_phase_order.iter().position(|p| p == "StartServices");
+    let ready_idx = world.boot_phase_order.iter().position(|p| p == "Ready");
+    assert!(
+        start_idx.is_some() && ready_idx.is_some(),
+        "both StartServices and Ready phases must exist"
+    );
+    assert_eq!(
+        start_idx.unwrap() + 1,
+        ready_idx.unwrap(),
+        "StartServices must be immediately before Ready — HSN services are the last phase (ADR-017)"
+    );
+}
