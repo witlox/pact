@@ -38,7 +38,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -48,7 +48,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -60,7 +60,7 @@ jobs:
     name: Cargo Deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: EmbarkStudios/cargo-deny-action@v2
 
@@ -91,7 +91,7 @@ jobs:
           - name: journal-all
             cmd: cargo check -p pact-journal --all-features
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [feature-check]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [feature-check]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
@@ -139,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [feature-check]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
@@ -150,7 +150,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [feature-check]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, acceptance, e2e, linux-privileged]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
       - uses: Swatinem/rust-cache@v2
